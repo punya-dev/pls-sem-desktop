@@ -82,11 +82,13 @@ Decide now — this underlies everything:
 - Alternative (simpler but less robust): a folder or zip containing `data.csv` + `model.json` + `results.json`.
 - Build `project_io.py`: `create_project()`, `save_project()`, `load_project()`, `list_recent()`
 
+done till here now -> backend implementation done now will move to basic frontend
+
 ### 1.4 Frontend: project shell UI
 - New Project / Open Project / Recent Projects screen
 - Basic app shell: sidebar (Data / Model / Results) + main canvas area
 
----
+# COMPLETE TILL HERE
 
 ## PHASE 2 — Model Builder (Canvas)
 
