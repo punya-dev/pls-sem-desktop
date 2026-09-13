@@ -69,6 +69,8 @@ Phase 0 complete everyting works able to download the app and run it on local ma
 - Return: column names, dtypes, row count, preview (first ~20 rows) as JSON
 - Frontend: file picker (Tauri's native dialog API `@tauri-apps/api/dialog`), preview table
 
+done this abel to import data and then show csv values on screen.
+
 ### 1.2 Data diagnostics
 - Descriptive stats endpoint: mean, std, min/max, skewness, kurtosis per column (pandas/scipy)
 - Missing value report + treatment options: listwise deletion, mean imputation, EM (can defer EM to later)
