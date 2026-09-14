@@ -5,16 +5,15 @@ import WorkspaceModal from '../components/WorkspaceModal';
 import StudyModal from '../components/StudyModal';
 import InputDialog from '../components/InputDialog';
 import { DataManagerModal } from '../components/DataManagerModal';
-import { parseDatasetFile, processData } from '../utils/dataset-parser';
+import { parseDatasetFile } from '../utils/dataset-parser';
 import type { ParsedDataset } from '../utils/dataset-parser';
-import { api } from '../utils/api';
 
 const Dashboard = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { 
-    workspaces, addWorkspace, removeWorkspace, archivedWorkspaces, activeWorkspaceId, setActiveWorkspace,
-    studies, addStudy, syncWorkspaceStudies, setActiveStudy, models, setActiveModel, addModel,
+    workspaces, archivedWorkspaces, activeWorkspaceId, setActiveWorkspace,
+    studies, setActiveStudy, models, setActiveModel, addModel,
     datasetsByStudy, setStudyDataset, touchStudy, archiveWorkspace, restoreWorkspace, renameWorkspace, trash,
     trashWorkspace, trashStudy, trashModel, trashDataset, restoreTrashItem, permanentlyDeleteTrashItem,
     renameStudy, duplicateStudy, renameModel, duplicateModel
@@ -25,102 +24,6 @@ const Dashboard = () => {
       setActiveWorkspace(workspaces[0].id);
     }
   }, [activeWorkspaceId, workspaces, setActiveWorkspace]);
-
-  const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId);
-
-  useEffect(() => {
-    if (!activeWorkspace?.path) return;
-    let isCancelled = false;
-
-    api.openWorkspace(activeWorkspace.path).then(async (res) => {
-      if (isCancelled) return;
-      if (res.workspace && Array.isArray(res.workspace.projects)) {
-        const sep = activeWorkspace.path.includes('\\') ? '\\' : '/';
-        const diskProjects = res.workspace.projects.map(p => ({
-          path: p.path,
-          name: p.name,
-          fullPath: `${activeWorkspace.path.replace(/[/\\]+$/, '')}${sep}${p.path}`
-        }));
-
-        syncWorkspaceStudies(activeWorkspace.id, diskProjects);
-
-        // Autodetect saved datasets from disk for each project
-        for (const p of diskProjects) {
-          const studyId = p.fullPath;
-          const currentStore = useStore.getState();
-          if (!currentStore.datasetsByStudy[studyId]) {
-            try {
-              const dataRes = await api.loadProjectData(p.fullPath);
-              if (isCancelled) return;
-              if (dataRes && Array.isArray(dataRes.columns) && Array.isArray(dataRes.rows) && dataRes.rows.length > 0) {
-                const datasetName = dataRes.dataset_name || `${p.name} Data`;
-                const parsed = processData(datasetName, dataRes.columns, dataRes.rows);
-                useStore.getState().setStudyDataset(studyId, parsed);
-              }
-            } catch (err) {
-              console.warn('Could not autodetect dataset for project:', p.name, err);
-            }
-          }
-        }
-      }
-    }).catch(err => {
-      console.warn('Failed to sync workspace projects:', err);
-    });
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [activeWorkspace?.id, activeWorkspace?.path, syncWorkspaceStudies]);
-
-  const handleOpenWorkspace = async () => {
-    try {
-      const { open } = await import('@tauri-apps/plugin-dialog');
-      const selected = await open({
-        directory: true,
-        multiple: false,
-        title: 'Open Workspace Folder'
-      });
-      if (selected && typeof selected === 'string') {
-        const res = await api.openWorkspace(selected);
-        if (res.error) {
-          alert(res.error);
-          return;
-        }
-        const wsName = res.workspace?.name || selected.replace(/[/\\]+$/, '').split(/[/\\]/).filter(Boolean).pop() || 'Workspace';
-        const existing = workspaces.find(w => w.path === selected);
-        const wsId = existing ? existing.id : selected;
-        if (!existing) {
-          addWorkspace({
-            id: wsId,
-            name: wsName,
-            path: selected
-          });
-        }
-        setActiveWorkspace(wsId);
-      }
-    } catch (err) {
-      console.warn('Tauri open dialog error:', err);
-      const fallback = window.prompt('Enter workspace directory path:');
-      if (fallback) {
-        const res = await api.openWorkspace(fallback);
-        if (res.error) {
-          alert(res.error);
-          return;
-        }
-        const wsName = res.workspace?.name || fallback.replace(/[/\\]+$/, '').split(/[/\\]/).filter(Boolean).pop() || 'Workspace';
-        const existing = workspaces.find(w => w.path === fallback);
-        const wsId = existing ? existing.id : fallback;
-        if (!existing) {
-          addWorkspace({
-            id: wsId,
-            name: wsName,
-            path: fallback
-          });
-        }
-        setActiveWorkspace(wsId);
-      }
-    }
-  };
 
   const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = useState(false);
   const [isWorkspaceDropdownOpen, setIsWorkspaceDropdownOpen] = useState(false);
@@ -143,19 +46,19 @@ const Dashboard = () => {
   const [modelModalStudyId, setModelModalStudyId] = useState<string>('');
   const [modelName, setModelName] = useState('');
   const [modelType, setModelType] = useState('PLS-SEM');
+
+  const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId);
   const activeStudies = studies.filter(s => s.workspaceId === activeWorkspaceId);
   const filteredWorkspaces = workspaces.filter(workspace => workspace.name.toLocaleLowerCase().includes(workspaceQuery.toLocaleLowerCase()));
   const filteredStudies = activeStudies.filter(study => study.name.toLocaleLowerCase().includes(studyQuery.toLocaleLowerCase()));
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const rawFileRef = useRef<File | null>(null);
   const [datasetToImport, setDatasetToImport] = useState<ParsedDataset | null>(null);
   const [importingStudyId, setImportingStudyId] = useState<string | null>(null);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    rawFileRef.current = file;
     try {
       const parsed = await parseDatasetFile(file);
       setDatasetToImport(parsed);
@@ -166,30 +69,12 @@ const Dashboard = () => {
     }
   };
 
-  const handleImportComplete = async (dataset: ParsedDataset) => {
+  const handleImportComplete = (dataset: ParsedDataset) => {
     if (!importingStudyId) return;
-    const studyId = importingStudyId;
-    setStudyDataset(studyId, dataset);
-    touchStudy(studyId);
+    setStudyDataset(importingStudyId, dataset);
+    touchStudy(importingStudyId);
     setDatasetToImport(null);
     setImportingStudyId(null);
-
-    // Persist to backend database for this study
-    const targetStudy = useStore.getState().studies.find(s => s.id === studyId || s.path === studyId);
-    const studyPath = targetStudy?.path || studyId;
-    if (studyPath) {
-      try {
-        if (rawFileRef.current) {
-          await api.saveProjectData(studyPath, rawFileRef.current);
-        } else {
-          const headers = dataset.variables.map(v => v.name);
-          await api.saveProjectDataJson(studyPath, dataset.filename, headers, dataset.rows);
-        }
-      } catch (err) {
-        console.warn('Failed to save dataset to project backend:', err);
-      }
-    }
-    rawFileRef.current = null;
   };
 
 
@@ -298,9 +183,6 @@ const Dashboard = () => {
                   <button className={`icon-btn icon-btn--sm ${isWorkspaceSearchOpen ? 'active' : ''}`} title="Filter workspaces" type="button" onClick={() => { setIsWorkspaceSearchOpen(open => !open); if (isWorkspaceSearchOpen) setWorkspaceQuery(''); }}>
                     <span className="material-symbols-outlined">search</span>
                   </button>
-                  <button className="icon-btn icon-btn--sm" title="Open Workspace Folder" type="button" onClick={handleOpenWorkspace}>
-                    <span className="material-symbols-outlined">folder_open</span>
-                  </button>
                   <button className="sidebar-create-folder-btn" title="Create Workspace" type="button" onClick={() => setIsWorkspaceModalOpen(true)}>
                     <svg fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
                       <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path>
@@ -325,14 +207,6 @@ const Dashboard = () => {
                       e.preventDefault();
                       useStore.getState().openContextMenu(e.clientX, e.clientY, [
                         {
-                          id: 'remove-from-sidebar',
-                          label: 'Remove from Sidebar',
-                          icon: 'close',
-                          action: () => {
-                            removeWorkspace(ws.id);
-                          }
-                        },
-                        {
                           id: 'rename', label: 'Rename Workspace', icon: 'edit', action: () => rename('Rename Workspace', ws.name, name => renameWorkspace(ws.id, name))
                         },
                         {
@@ -346,15 +220,9 @@ const Dashboard = () => {
                           label: 'Delete Workspace', 
                           icon: 'delete', 
                           danger: true, 
-                          action: async () => {
-                            if (window.confirm(`Are you sure you want to permanently delete workspace "${ws.name}" and all its files? This cannot be undone.`)) {
-                              if (ws.path) {
-                                const res = await api.deleteWorkspace(ws.path);
-                                if (res.error) {
-                                  alert('Failed to delete workspace files: ' + res.error);
-                                }
-                              }
-                              removeWorkspace(ws.id);
+                          action: () => {
+                            if (window.confirm(`Are you sure you want to remove workspace "${ws.name}"?`)) {
+                              trashWorkspace(ws.id);
                             }
                           } 
                         }
@@ -461,7 +329,7 @@ const Dashboard = () => {
                   return <div className="study-entry archive-entry" key={workspace.id}>
                     <div className="study-row" onClick={() => setExpandedArchivedWorkspaces(previous => { const next = new Set(previous); next.has(workspace.id) ? next.delete(workspace.id) : next.add(workspace.id); return next; })}>
                       <div className="study-row__left"><span className="material-symbols-outlined study-folder">{isExpanded ? 'inventory_2' : 'inventory_2'}</span><span className="study-row__name">{workspace.name}</span><span className="study-row__count">Archived</span></div>
-                      <div className="study-row__meta"><button className="archive-restore-btn" type="button" onClick={event => { event.stopPropagation(); restoreWorkspace(workspace.id); }}>Restore</button><span className="study-row__chevron"><span className="material-symbols-outlined study-chevron" style={{transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)'}}>{isExpanded ? 'expand_more' : 'chevron_right'}</span></span></div>
+                      <div className="study-row__meta"><button className="archive-restore-btn" type="button" onClick={event => { event.stopPropagation(); restoreWorkspace(workspace.id); }}>Restore</button><span className="study-row__chevron" style={{transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)'}}><span className="material-symbols-outlined study-chevron"></span></span></div>
                     </div>
                     {isExpanded && <div className="study-children archive-children">
                       {archivedStudies.length ? archivedStudies.map(study => <div key={study.id}>
@@ -523,17 +391,12 @@ const Dashboard = () => {
                                   label: 'Delete Study', 
                                   icon: 'delete', 
                                   danger: true, 
-                                  action: async () => {
-                                    if (window.confirm(`Are you sure you want to permanently delete study "${study.name}"? This cannot be undone.`)) {
-                                      if (activeWorkspace?.path) {
-                                        const fileName = study.path ? study.path.split(/[/\\]/).pop()! : `${study.name}.pls`;
-                                        await api.deleteProject(activeWorkspace.path, fileName);
-                                      }
+                                  action: () => {
+                                    if (window.confirm(`Are you sure you want to remove study "${study.name}"?`)) {
                                       trashStudy(study.id);
                                     }
                                   } 
                                 }
-
                               ]);
                             }}
                           >
@@ -558,7 +421,7 @@ const Dashboard = () => {
                         <div className="study-row__meta">
                           <span className="study-row__time">{study.lastModified}</span>
                           <span className="study-row__chevron">
-                            <span className="material-symbols-outlined study-chevron" style={{transform: isExpanded || isEmpty ? 'rotate(0deg)' : 'rotate(-90deg)'}}>
+                            <span className="material-symbols-outlined study-chevron" style={{transform: isExpanded || isEmpty ? 'rotate(90deg)' : 'rotate(90deg)'}}>
                               {isExpanded && !isEmpty ? 'expand_more' : 'chevron_right'}
                             </span>
                           </span>
@@ -573,7 +436,7 @@ const Dashboard = () => {
                         ) : (
                           <>
                             {studyDataset && (
-                              <div className="file-row file-row--muted" onClick={() => { setImportingStudyId(study.id); setDatasetToImport(studyDataset); }} onContextMenu={e => { e.preventDefault(); e.stopPropagation(); useStore.getState().openContextMenu(e.clientX, e.clientY, [{ id: 'rename', label: 'Rename Dataset', icon: 'edit', action: () => rename('Rename Dataset', studyDataset.filename, name => { setStudyDataset(study.id, { ...studyDataset, filename: name }); touchStudy(study.id); }) }, { id: 'delete', label: 'Delete Dataset', icon: 'delete', danger: true, action: async () => { if (window.confirm(`Delete dataset "${studyDataset.filename}"?`)) { if (study.path) { await api.deleteProjectData(study.path); } trashDataset(study.id); touchStudy(study.id); } } }]); }}>
+                              <div className="file-row file-row--muted" onClick={() => { setImportingStudyId(study.id); setDatasetToImport(studyDataset); }} onContextMenu={e => { e.preventDefault(); e.stopPropagation(); useStore.getState().openContextMenu(e.clientX, e.clientY, [{ id: 'rename', label: 'Rename Dataset', icon: 'edit', action: () => rename('Rename Dataset', studyDataset.filename, name => { setStudyDataset(study.id, { ...studyDataset, filename: name }); touchStudy(study.id); }) }, { id: 'delete', label: 'Delete Dataset', icon: 'delete', danger: true, action: () => { if (window.confirm(`Delete dataset "${studyDataset.filename}"?`)) { trashDataset(study.id); touchStudy(study.id); } } }]); }}>
                                 <div className="file-row__left"><span className="material-symbols-outlined">dataset</span><span>{studyDataset.filename}</span><span className="file-badge file-badge--default">{studyDataset.rows.length} rows</span><span className="file-badge file-badge--default">Dataset</span></div>
                                 <div className="file-row__meta"><span className="file-row__time">{study.lastModified}</span><span style={{width: '16px'}}></span></div>
                               </div>

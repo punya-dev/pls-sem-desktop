@@ -78,7 +78,14 @@ const GetStarted = () => {
       <div className="titlebar__traffic-light-space" aria-hidden="true"></div>
 
       
-      <div className="brand">
+      <div
+        className="brand"
+        onClick={() => navigate('/')}
+        role="button"
+        tabIndex={0}
+        title="Getting Started"
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') navigate('/'); }}
+      >
         <svg className="brand__logo" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="CSPLS Logo">
           <rect width="48" height="48" rx="10" fill="#6B4EE6"/>
           <circle cx="16" cy="16" r="4" fill="#FFFFFF"/>
