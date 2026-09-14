@@ -5,7 +5,7 @@
   "identifier": "com.punyapratap.pls-sem-desktop",
   "build": {
     "frontendDist": "../frontend/dist",
-    "devUrl": "http://localhost:5173",
+    "devUrl": "http://localhost:5185",
     "beforeDevCommand": "cd frontend && npm run dev",
     "beforeBuildCommand": "cd frontend && npm run build"
   },

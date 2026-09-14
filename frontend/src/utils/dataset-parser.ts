@@ -1,0 +1,140 @@
+import Papa from 'papaparse';
+import * as XLSX from 'xlsx';
+import { SavBufferReader as SavReader } from 'sav-reader';
+import { Buffer } from 'buffer';
+
+export interface ParsedVariable {
+  name: string;
+  missingCount: number;
+  scaleType: 'Metric' | 'Ordinal' | 'Categorical';
+  min: number;
+  max: number;
+  selected: boolean;
+  type: 'numeric' | 'string';
+  category: string;
+}
+
+export interface ParsedDataset {
+  filename: string;
+  variables: ParsedVariable[];
+  rows: any[][]; // array of arrays (rows)
+}
+
+function guessCategory(name: string): string {
+  if (name.includes('_')) {
+    return name.split('_')[0].toUpperCase();
+  }
+  return 'General';
+}
+
+function processData(filename: string, headers: string[], rows: any[][]): ParsedDataset {
+  const variables: ParsedVariable[] = headers.map((header, colIdx) => {
+    let missingCount = 0;
+    let min = Infinity;
+    let max = -Infinity;
+    let isString = false;
+    let uniqueValues = new Set();
+    
+    for (let r = 0; r < rows.length; r++) {
+      const val = rows[r] ? rows[r][colIdx] : null;
+      if (val === null || val === undefined || val === '') {
+        missingCount++;
+        continue;
+      }
+      uniqueValues.add(val);
+      
+      const numVal = Number(val);
+      if (isNaN(numVal)) {
+        isString = true;
+      } else {
+        if (numVal < min) min = numVal;
+        if (numVal > max) max = numVal;
+      }
+    }
+    
+    let scaleType: 'Metric' | 'Ordinal' | 'Categorical' = 'Metric';
+    if (isString) scaleType = 'Categorical';
+    else if (uniqueValues.size <= 7) scaleType = 'Ordinal';
+    
+    return {
+      name: header || `Var_${colIdx+1}`,
+      missingCount,
+      scaleType,
+      min: min === Infinity ? 0 : min,
+      max: max === -Infinity ? 0 : max,
+      selected: true,
+      type: isString ? 'string' : 'numeric',
+      category: guessCategory(header || `Var_${colIdx+1}`)
+    };
+  });
+
+  return {
+    filename,
+    variables,
+    rows
+  };
+}
+
+export async function parseDatasetFile(file: File): Promise<ParsedDataset> {
+  return new Promise((resolve, reject) => {
+    const name = file.name.toLowerCase();
+    
+    if (name.endsWith('.csv') || name.endsWith('.txt')) {
+      Papa.parse(file, {
+        complete: (results) => {
+          if (!results.data || results.data.length === 0) return reject("Empty file");
+          const headers = results.data[0] as string[];
+          const rows = results.data.slice(1) as any[][];
+          resolve(processData(file.name, headers, rows));
+        },
+        error: (err) => reject(err)
+      });
+    } else if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const data = new Uint8Array(e.target?.result as ArrayBuffer);
+          const workbook = XLSX.read(data, { type: 'array' });
+          const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+          const json: any[][] = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+          if (json.length === 0) return reject("Empty Excel file");
+          const headers = json[0].map(h => String(h));
+          const rows = json.slice(1);
+          resolve(processData(file.name, headers, rows));
+        } catch (err) {
+          reject(err);
+        }
+      };
+      reader.onerror = (err) => reject(err);
+      reader.readAsArrayBuffer(file);
+    } else if (name.endsWith('.sav')) {
+      try {
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+          try {
+             const buffer = Buffer.from(e.target?.result as ArrayBuffer);
+             const sav = new SavReader();
+             await sav.open(buffer);
+             const metadata = sav.meta;
+             const headers = metadata.sysvars.map((v: any) => v.name);
+             
+             const rows: any[][] = [];
+             let row;
+             while ((row = await sav.readRecord())) {
+                rows.push(headers.map(h => row[h]));
+             }
+             resolve(processData(file.name, headers, rows));
+          } catch(err) {
+             console.error(err);
+             reject("Could not parse .sav file. Ensure it is a valid SPSS file or convert it to CSV.");
+          }
+        };
+        reader.readAsArrayBuffer(file);
+      } catch (err) {
+        reject(err);
+      }
+    } else {
+      reject("Unsupported file format.");
+    }
+  });
+}
