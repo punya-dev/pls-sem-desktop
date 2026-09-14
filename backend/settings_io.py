@@ -23,5 +23,11 @@ def add_recent(key: str, path: str):
     settings[key] = recents[:10]
     save_settings(settings)
 
+def remove_recent(key: str, path: str):
+    settings = load_settings()
+    if key in settings:
+        settings[key] = [p for p in settings[key] if p != path]
+        save_settings(settings)
+
 def get_recent(key: str):
     return load_settings()[key]

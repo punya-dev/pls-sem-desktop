@@ -109,6 +109,7 @@ interface AppState {
   renameWorkspace: (id: string, name: string) => void;
   setActiveWorkspace: (id: string) => void;
   addStudy: (study: Study) => void;
+  syncWorkspaceStudies: (workspaceId: string, diskProjects: Array<{ path: string; name: string; fullPath: string }>) => void;
   removeStudy: (id: string) => void;
   renameStudy: (id: string, name: string) => void;
   duplicateStudy: (id: string) => void;
@@ -247,10 +248,63 @@ export const useStore = create<AppState>()(
       permanentlyDeleteTrashItem: (id) => set((state) => ({ trash: state.trash.filter(item => item.id !== id) })),
       renameWorkspace: (id, name) => set((state) => ({ workspaces: state.workspaces.map(workspace => workspace.id === id ? { ...workspace, name } : workspace) })),
       setActiveWorkspace: (id) => set({ activeWorkspaceId: id }),
-      addStudy: (study) => set((state) => ({ 
-        studies: [...state.studies, study],
-        activeStudyId: study.id
-      })),
+      addStudy: (study) => set((state) => {
+        const existingIdx = state.studies.findIndex(
+          s => s.id === study.id || (s.workspaceId === study.workspaceId && (s.path === study.path || s.name.toLowerCase() === study.name.toLowerCase()))
+        );
+        if (existingIdx >= 0) {
+          const updated = [...state.studies];
+          updated[existingIdx] = { ...updated[existingIdx], ...study };
+          return {
+            studies: updated,
+            activeStudyId: study.id
+          };
+        }
+        return {
+          studies: [...state.studies, study],
+          activeStudyId: study.id
+        };
+      }),
+      syncWorkspaceStudies: (workspaceId, diskProjects) => set((state) => {
+        const otherStudies = state.studies.filter(s => s.workspaceId !== workspaceId);
+        const currentStudies = state.studies.filter(s => s.workspaceId === workspaceId);
+
+        const merged: Study[] = [];
+        const seenKeys = new Set<string>();
+
+        for (const dp of diskProjects) {
+          const key = (dp.fullPath || dp.path || dp.name).toLowerCase();
+          if (seenKeys.has(key)) continue;
+          seenKeys.add(key);
+
+          const existing = currentStudies.find(
+            s => s.id === dp.fullPath || s.path === dp.fullPath || s.name.toLowerCase() === dp.name.toLowerCase()
+          );
+
+          if (existing) {
+            merged.push({
+              ...existing,
+              id: existing.id || dp.fullPath,
+              name: dp.name,
+              path: dp.fullPath
+            });
+          } else {
+            merged.push({
+              id: dp.fullPath,
+              workspaceId,
+              name: dp.name,
+              type: 'PLS-SEM',
+              description: '',
+              lastModified: 'Saved',
+              path: dp.fullPath
+            });
+          }
+        }
+
+        return {
+          studies: [...otherStudies, ...merged]
+        };
+      }),
       removeStudy: (id) => set((state) => ({
         studies: state.studies.filter(s => s.id !== id),
         activeStudyId: state.activeStudyId === id ? null : state.activeStudyId,

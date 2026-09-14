@@ -3,6 +3,7 @@ import os
 from datetime import datetime
 import settings_io
 def create_workspace(folder_path: str, name: str):
+    folder_path = os.path.expanduser(folder_path)
     if os.path.exists(folder_path):
         raise FileExistsError("A folder already exists at this location")
 
@@ -23,28 +24,42 @@ def create_workspace(folder_path: str, name: str):
 
 
 def load_workspace(folder_path: str):
+    folder_path = os.path.expanduser(folder_path)
     ws_file = os.path.join(folder_path, "workspace.json")
     if not os.path.exists(ws_file):
         return None
     with open(ws_file, "r") as f:
-        return json.load(f)
+        data = json.load(f)
+    if "projects" in data and isinstance(data["projects"], list):
+        seen = set()
+        deduped = []
+        for p in data["projects"]:
+            pth = p.get("path")
+            if pth and pth not in seen:
+                seen.add(pth)
+                deduped.append(p)
+        data["projects"] = deduped
+    return data
 
 
 def add_project_to_workspace(folder_path: str, project_filename: str, project_name: str):
+    folder_path = os.path.expanduser(folder_path)
     ws = load_workspace(folder_path)
     if ws is None:
         raise FileNotFoundError("Not a valid workspace")
 
-    ws["projects"].append({"path": project_filename, "name": project_name})
-    ws["modified_at"] = datetime.utcnow().isoformat()
+    if not any(p.get("path") == project_filename for p in ws["projects"]):
+        ws["projects"].append({"path": project_filename, "name": project_name})
+        ws["modified_at"] = datetime.utcnow().isoformat()
 
-    with open(os.path.join(folder_path, "workspace.json"), "w") as f:
-        json.dump(ws, f, indent=2)
+        with open(os.path.join(folder_path, "workspace.json"), "w") as f:
+            json.dump(ws, f, indent=2)
 
     return ws
 
 
 def remove_project_from_workspace(folder_path: str, project_filename: str):
+    folder_path = os.path.expanduser(folder_path)
     ws = load_workspace(folder_path)
     if ws is None:
         raise FileNotFoundError("Not a valid workspace")
@@ -56,6 +71,17 @@ def remove_project_from_workspace(folder_path: str, project_filename: str):
         json.dump(ws, f, indent=2)
 
     return ws
+
+
+def delete_workspace(folder_path: str):
+    folder_path = os.path.expanduser(folder_path)
+    if not os.path.exists(folder_path):
+        raise FileNotFoundError("Workspace folder not found")
+    import shutil
+    shutil.rmtree(folder_path)
+    settings_io.remove_recent("recent_workspaces", folder_path)
+    return {"status": "deleted", "path": folder_path}
+
 
 
 # --- recent workspaces tracking, same pattern as recent projects ---

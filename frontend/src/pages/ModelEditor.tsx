@@ -4,7 +4,8 @@ import { useStore } from '../store';
 import { initModelCanvas } from '../utils/model-canvas';
 import { DataManagerModal } from '../components/DataManagerModal';
 import type { ParsedDataset } from '../utils/dataset-parser';
-import { parseDatasetFile } from '../utils/dataset-parser';
+import { parseDatasetFile, processData } from '../utils/dataset-parser';
+import { api } from '../utils/api';
 import { Upload } from 'lucide-react';
 import '../model-canvas.css';
 import '../results.css';
@@ -38,8 +39,26 @@ const ModelEditor = () => {
   const [activeText, setActiveText] = useState<string>('#1e293b');
 
   useEffect(() => {
-    setActiveDataset(activeStudyId ? datasetsByStudy[activeStudyId] ?? null : null);
-  }, [activeStudyId, datasetsByStudy]);
+    if (activeStudyId && datasetsByStudy[activeStudyId]) {
+      setActiveDataset(datasetsByStudy[activeStudyId]);
+    } else if (activeStudyId && activeStudy?.path) {
+      // Try to load dataset from project file if not in store
+      api.loadProjectData(activeStudy.path).then((dataRes) => {
+        if (dataRes && Array.isArray(dataRes.columns) && Array.isArray(dataRes.rows) && dataRes.rows.length > 0) {
+          const datasetName = dataRes.dataset_name || `${activeStudy.name} Data`;
+          const parsed = processData(datasetName, dataRes.columns, dataRes.rows);
+          setStudyDataset(activeStudyId, parsed);
+          setActiveDataset(parsed);
+        } else {
+          setActiveDataset(null);
+        }
+      }).catch(() => {
+        setActiveDataset(null);
+      });
+    } else {
+      setActiveDataset(null);
+    }
+  }, [activeStudyId, datasetsByStudy, activeStudy?.path, activeStudy?.name, setStudyDataset]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -56,9 +75,20 @@ const ModelEditor = () => {
     }
   };
 
-  const handleImportComplete = (dataset: ParsedDataset) => {
+  const handleImportComplete = async (dataset: ParsedDataset) => {
     setActiveDataset(dataset);
-    if (activeStudyId) { setStudyDataset(activeStudyId, dataset); touchStudy(activeStudyId); }
+    if (activeStudyId) {
+      setStudyDataset(activeStudyId, dataset);
+      touchStudy(activeStudyId);
+      if (activeStudy?.path) {
+        try {
+          const headers = dataset.variables.map(v => v.name);
+          await api.saveProjectDataJson(activeStudy.path, dataset.filename, headers, dataset.rows);
+        } catch (err) {
+          console.warn('Failed to save dataset to project in ModelEditor:', err);
+        }
+      }
+    }
     setDatasetToImport(null);
   };
 

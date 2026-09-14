@@ -3,15 +3,68 @@ import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
 import WorkspaceModal from '../components/WorkspaceModal';
 import InputDialog from '../components/InputDialog';
+import { api } from '../utils/api';
 
 const GetStarted = () => {
   const navigate = useNavigate();
-  const { workspaces, addWorkspace, setActiveWorkspace, archivedWorkspaces, trash, archiveWorkspace, renameWorkspace, trashWorkspace } = useStore();
+  const { workspaces, addWorkspace, removeWorkspace, setActiveWorkspace, archivedWorkspaces, trash, archiveWorkspace, renameWorkspace, trashWorkspace } = useStore();
   const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [inputDialogConfig, setInputDialogConfig] = useState<{isOpen: boolean; title: string; placeholder: string; submitLabel: string; onSubmit: (val: string) => void}>({
     isOpen: false, title: '', placeholder: '', submitLabel: '', onSubmit: () => {}
   });
+
+  const handleOpenWorkspace = async () => {
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: 'Open Workspace Folder'
+      });
+      if (selected && typeof selected === 'string') {
+        const res = await api.openWorkspace(selected);
+        if (res.error) {
+          alert(res.error);
+          return;
+        }
+        const wsName = res.workspace?.name || selected.replace(/[/\\]+$/, '').split(/[/\\]/).filter(Boolean).pop() || 'Workspace';
+        const existing = workspaces.find(w => w.path === selected);
+        const wsId = existing ? existing.id : selected;
+        if (!existing) {
+          addWorkspace({
+            id: wsId,
+            name: wsName,
+            path: selected
+          });
+        }
+        setActiveWorkspace(wsId);
+        navigate('/workspace');
+      }
+    } catch (err) {
+      console.warn('Tauri open dialog error:', err);
+      const fallback = window.prompt('Enter workspace directory path:');
+      if (fallback) {
+        const res = await api.openWorkspace(fallback);
+        if (res.error) {
+          alert(res.error);
+          return;
+        }
+        const wsName = res.workspace?.name || fallback.replace(/[/\\]+$/, '').split(/[/\\]/).filter(Boolean).pop() || 'Workspace';
+        const existing = workspaces.find(w => w.path === fallback);
+        const wsId = existing ? existing.id : fallback;
+        if (!existing) {
+          addWorkspace({
+            id: wsId,
+            name: wsName,
+            path: fallback
+          });
+        }
+        setActiveWorkspace(wsId);
+        navigate('/workspace');
+      }
+    }
+  };
 
 
 
@@ -81,6 +134,9 @@ const GetStarted = () => {
               <button className="icon-btn icon-btn--sm" title="Search workspaces" type="button" onClick={() => setInputDialogConfig({isOpen: true, title: 'Search Workspaces', placeholder: 'Enter workspace name...', submitLabel: 'Search', onSubmit: () => {}})}>
                 <span className="material-symbols-outlined">search</span>
               </button>
+              <button className="icon-btn icon-btn--sm" title="Open Workspace Folder" type="button" onClick={handleOpenWorkspace}>
+                <span className="material-symbols-outlined">folder_open</span>
+              </button>
               <button className="sidebar-create-folder-btn" title="Create Workspace" type="button" onClick={() => setIsWorkspaceModalOpen(true)}>
                 <svg fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
                   <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path>
@@ -100,18 +156,38 @@ const GetStarted = () => {
                 key={ws.id} 
                 className="sidebar-item" 
                 type="button" 
-                onClick={() => { setActiveWorkspace(ws.id); navigate('/workspace'); }}
+                onClick={async () => {
+                  if (ws.path) {
+                    await api.openWorkspace(ws.path);
+                  }
+                  setActiveWorkspace(ws.id);
+                  navigate('/workspace');
+                }}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   useStore.getState().openContextMenu(e.clientX, e.clientY, [
                     {
-                      id: 'delete',
+                      id: 'remove-from-sidebar',
+                      label: 'Remove from Sidebar',
+                      icon: 'close',
+                      action: () => {
+                        removeWorkspace(ws.id);
+                      }
+                    },
+                    {
+                      id: 'delete-workspace',
                       label: 'Delete Workspace',
                       icon: 'delete',
                       danger: true,
-                      action: () => {
-                        if (window.confirm(`Are you sure you want to remove workspace "${ws.name}"?`)) {
-                          trashWorkspace(ws.id);
+                      action: async () => {
+                        if (window.confirm(`Are you sure you want to permanently delete workspace "${ws.name}" and all its files? This cannot be undone.`)) {
+                          if (ws.path) {
+                            const res = await api.deleteWorkspace(ws.path);
+                            if (res.error) {
+                              alert('Failed to delete workspace files: ' + res.error);
+                            }
+                          }
+                          removeWorkspace(ws.id);
                         }
                       }
                     }
@@ -188,13 +264,18 @@ const GetStarted = () => {
             <h1 className="page-header__title">Get Started</h1>
             <p className="page-header__subtitle">Welcome to CSPLS. Set up your workspace or explore guided sample models to begin.</p>
           </div>
-          <div className="page-header__actions">
+          <div className="page-header__actions" style={{ display: 'flex', gap: '8px' }}>
+            <button className="btn btn-primary" type="button" onClick={handleOpenWorkspace}>
+              <span className="material-symbols-outlined">folder_open</span>
+              <span>Open Workspace</span>
+            </button>
             <button className="btn btn-primary" type="button" onClick={() => setIsWorkspaceModalOpen(true)}>
               <span className="material-symbols-outlined">add</span>
               <span>Create Workspace</span>
               <kbd className="kbd">⌘W</kbd>
             </button>
           </div>
+
         </div>
 
         

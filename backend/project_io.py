@@ -46,7 +46,7 @@ def create_project(path: str, project_name: str):
     conn.close()
 
 
-def save_data(path: str, rows: list, columns: list, dtypes: list):
+def save_data(path: str, rows: list, columns: list, dtypes: list, dataset_name: str = None):
     conn = sqlite3.connect(path)
     cur = conn.cursor()
 
@@ -65,6 +65,8 @@ def save_data(path: str, rows: list, columns: list, dtypes: list):
     cur.executemany(f"INSERT INTO raw_data ({col_names}) VALUES ({placeholders})", rows)
 
     cur.execute("UPDATE metadata SET value = ? WHERE key = 'modified_at'", (datetime.utcnow().isoformat(),))
+    if dataset_name:
+        cur.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('dataset_name', ?)", (dataset_name,))
     conn.commit()
     conn.close()
 
@@ -83,9 +85,24 @@ def load_data(path: str):
 
     cur.execute("SELECT * FROM raw_data")
     rows = cur.fetchall()
+
+    cur.execute("SELECT value FROM metadata WHERE key='dataset_name'")
+    ds_row = cur.fetchone()
+    dataset_name = ds_row[0] if ds_row else None
+
     conn.close()
 
-    return {"columns": columns, "rows": [list(r) for r in rows]}
+    return {"columns": columns, "rows": [list(r) for r in rows], "dataset_name": dataset_name}
+
+
+def delete_data(path: str):
+    conn = sqlite3.connect(path)
+    cur = conn.cursor()
+    cur.execute("DROP TABLE IF EXISTS raw_data")
+    cur.execute("DELETE FROM metadata WHERE key='dataset_name'")
+    cur.execute("UPDATE metadata SET value = ? WHERE key = 'modified_at'", (datetime.utcnow().isoformat(),))
+    conn.commit()
+    conn.close()
 
 
 def load_metadata(path: str):

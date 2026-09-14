@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../store';
+import { api } from '../utils/api';
 
 interface StudyModalProps {
   isOpen: boolean;
@@ -11,6 +12,8 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
   const [name, setName] = useState('');
   const [type, setType] = useState('PLS-SEM');
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(workspaceId);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const { workspaces, activeWorkspaceId, addStudy, setActiveStudy } = useStore();
   const currentWorkspaceId = selectedWorkspaceId || workspaceId || activeWorkspaceId;
@@ -21,39 +24,50 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
       setName('');
       setType('PLS-SEM');
       setSelectedWorkspaceId(workspaceId || activeWorkspaceId || workspaces[0]?.id || '');
+      setError(null);
     }
   }, [isOpen, workspaceId, activeWorkspaceId, workspaces]);
 
   if (!isOpen) return null;
 
   const cleanName = name.trim();
-  const fileName = cleanName ? `${cleanName.replace(/[/\\?%*:|"<>]/g, '_')}.sqlite` : '';
-  const wsPath = currentWorkspace?.path || '~/CSPLS/Workspaces/Default';
+  const fileName = cleanName ? `${cleanName.replace(/[/\\?%*:|"<>]/g, '_')}.pls` : '';
+  const wsPath = currentWorkspace?.path || '';
   const separator = wsPath.includes('\\') ? '\\' : '/';
-  const studyFilePath = fileName ? `${wsPath.replace(/[/\\]+$/, '')}${separator}${fileName}` : '';
+  const studyFilePath = fileName && wsPath ? `${wsPath.replace(/[/\\]+$/, '')}${separator}${fileName}` : '';
 
-  const createStudyEntry = (path: string) => {
-    const newId = 'study_' + Date.now();
-    addStudy({
-      id: newId,
-      workspaceId: currentWorkspaceId || (currentWorkspace?.id ?? 'ws_default'),
-      name: cleanName,
-      type: type,
-      description: '',
-      lastModified: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-      path
-    });
-    setActiveStudy(newId);
-    onClose();
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!cleanName || !currentWorkspaceId) return;
+    if (!cleanName || !currentWorkspace) return;
 
-    // Studies belong to the local desktop workspace immediately. Analysis
-    // services can start later, but should never block creating a study.
-    createStudyEntry(studyFilePath);
+    setError(null);
+    setIsSubmitting(true);
+    try {
+      const res = await api.addProject(currentWorkspace.path, cleanName);
+      if (res.error) {
+        setError(res.error);
+        setIsSubmitting(false);
+        return;
+      }
+
+      const projectPath = res.project_path || studyFilePath;
+      const newId = projectPath || 'study_' + Date.now();
+      addStudy({
+        id: newId,
+        workspaceId: currentWorkspace.id,
+        name: cleanName,
+        type: type,
+        description: '',
+        lastModified: 'Just now',
+        path: projectPath
+      });
+      setActiveStudy(newId);
+      onClose();
+    } catch (err: any) {
+      setError(err?.message || 'Failed to create project');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -123,11 +137,17 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
                 Project file: <span style={{ fontFamily: 'var(--font-mono)' }}>{studyFilePath}</span>
               </div>
             )}
+
+            {error && (
+              <div style={{ color: 'var(--color-danger, #ef4444)', fontSize: '12px', marginTop: '10px' }}>
+                {error}
+              </div>
+            )}
           </div>
           <div className="modal__footer">
-            <button className="modal__btn-cancel" type="button" onClick={onClose}>Cancel</button>
-            <button className="modal__btn-create" type="submit" disabled={!cleanName || !currentWorkspaceId}>
-              Create Study
+            <button className="modal__btn-cancel" type="button" onClick={onClose} disabled={isSubmitting}>Cancel</button>
+            <button className="modal__btn-create" type="submit" disabled={!cleanName || !currentWorkspaceId || isSubmitting}>
+              {isSubmitting ? 'Creating...' : 'Create Study'}
             </button>
           </div>
         </form>

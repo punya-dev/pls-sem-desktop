@@ -27,7 +27,7 @@ function guessCategory(name: string): string {
   return 'General';
 }
 
-function processData(filename: string, headers: string[], rows: any[][]): ParsedDataset {
+export function processData(filename: string, headers: string[], rows: any[][]): ParsedDataset {
   const variables: ParsedVariable[] = headers.map((header, colIdx) => {
     let missingCount = 0;
     let min = Infinity;
