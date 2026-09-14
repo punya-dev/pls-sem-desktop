@@ -1,0 +1,79 @@
+/* Kept separate from the legacy application stylesheet so the import workbench
+   has stable dimensions and never inherits the old modal layout. */
+.dataset-import-overlay {
+  padding: 24px !important;
+}
+
+.dataset-import-modal {
+  width: min(84vw, 1240px) !important;
+  min-width: 900px !important;
+  height: min(86vh, 820px) !important;
+  max-height: 820px !important;
+  border-radius: 12px !important;
+}
+
+.dataset-import-header {
+  min-height: 54px;
+  padding: 12px 20px !important;
+}
+
+.dataset-import-header h2 {
+  font-size: 14px !important;
+  line-height: 20px;
+}
+
+.dataset-import-controls {
+  min-height: 58px;
+  gap: 10px !important;
+  padding: 12px 20px !important;
+}
+
+.dataset-import-controls label,
+.dataset-import-controls > div {
+  min-height: 30px;
+}
+
+.dataset-import-tabs {
+  min-height: 64px;
+  padding: 14px 20px 10px !important;
+}
+
+.dataset-import-workbench {
+  min-height: 0;
+}
+
+.dataset-import-table {
+  table-layout: fixed;
+}
+
+.dataset-import-table thead th {
+  height: 44px;
+  padding-top: 10px !important;
+  padding-bottom: 10px !important;
+}
+
+.dataset-import-table tbody td {
+  height: 51px;
+  padding-top: 8px !important;
+  padding-bottom: 8px !important;
+}
+
+.dataset-import-footer {
+  min-height: 66px;
+  padding: 12px 20px !important;
+}
+
+.dataset-import-footer > div:last-child {
+  display: flex;
+  align-items: center;
+  gap: 12px !important;
+}
+
+@media (max-width: 960px) {
+  .dataset-import-overlay { padding: 12px !important; }
+  .dataset-import-modal { min-width: 0 !important; width: 100% !important; }
+  .dataset-import-header, .dataset-import-controls, .dataset-import-tabs, .dataset-import-footer {
+    padding-left: 14px !important;
+    padding-right: 14px !important;
+  }
+}
