@@ -6,6 +6,7 @@ from scipy import stats
 import numpy as np
 import project_io
 import os
+import workspace_io
 
 
 app = FastAPI()
@@ -122,16 +123,6 @@ def project_treat_missing(path: str, method: str = "listwise"):
     }
 
 
-@app.post("/project/create")
-def create_project(path: str, name: str):
-    try:
-        project_io.create_project(path, name)
-        project_io.add_recent_project(path)
-        return {"status": "created", "path": path}
-    except FileExistsError:
-        return {"error": "A project already exists at this path"}
-
-
 @app.post("/project/open")
 def open_project(path: str):
     if not os.path.exists(path):
@@ -166,3 +157,40 @@ def get_project_metadata(path: str):
 @app.get("/project/recent")
 def recent_projects():
     return project_io.get_recent_projects()
+
+
+@app.post("/workspace/create")
+def create_workspace(folder_path: str, name: str):
+    try:
+        ws = workspace_io.create_workspace(folder_path, name)
+        workspace_io.add_recent_workspace(folder_path)
+        return {"status": "created", "path": folder_path, "workspace": ws}
+    except FileExistsError as e:
+        return {"error": str(e)}
+
+
+@app.post("/workspace/open")
+def open_workspace(folder_path: str):
+    ws = workspace_io.load_workspace(folder_path)
+    if ws is None:
+        return {"error": "Not a valid workspace"}
+    workspace_io.add_recent_workspace(folder_path)
+    
+    return {"status": "opened", "path": folder_path, "workspace": ws}
+
+
+@app.get("/workspace/recent")
+def recent_workspaces():
+    return workspace_io.get_recent_workspaces()
+
+
+@app.post("/workspace/add-project")
+def add_project(folder_path: str, project_name: str):
+    project_filename = f"{project_name}.pls"
+    full_project_path = os.path.join(folder_path, project_filename)
+
+    project_io.create_project(full_project_path, project_name)
+    project_io.add_recent_project(full_project_path)
+    ws = workspace_io.add_project_to_workspace(folder_path, project_filename, project_name)
+
+    return {"status": "created", "project_path": full_project_path, "workspace": ws}

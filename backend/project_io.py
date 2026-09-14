@@ -2,8 +2,7 @@ import sqlite3
 import json
 import os
 from datetime import datetime
-
-SETTINGS_PATH = os.path.expanduser("~/.pls_sem_desktop_settings.json")
+import settings_io
 
 def create_project(path: str, project_name: str):
     if os.path.exists(path):
@@ -97,29 +96,16 @@ def load_metadata(path: str):
     conn.close()
     return dict(rows)
 
-def _load_settings():
-    if not os.path.exists(SETTINGS_PATH):
-        return {"recent_projects": []}
-    with open(SETTINGS_PATH, "r") as f:
-        return json.load(f)
-
-def _save_settings(settings):
-    with open(SETTINGS_PATH, "w") as f:
-        json.dump(settings, f)
 
 def add_recent_project(path: str):
-    settings = _load_settings()
-    recents = [p for p in settings["recent_projects"] if p != path]  # dedupe
-    recents.insert(0, path)  # most recent first
-    settings["recent_projects"] = recents[:10]  # keep last 10
-    _save_settings(settings)
+    settings_io.add_recent("recent_projects",path)
 
 def get_recent_projects():
-    settings = _load_settings()
+    paths = settings_io.get_recent("recent_projects")
     projects = []
-    for path in settings["recent_projects"]:
+    for path in paths:
         if not os.path.exists(path):
-            continue  # skip deleted/moved files
+            continue
         try:
             meta = load_metadata(path)
             projects.append({
