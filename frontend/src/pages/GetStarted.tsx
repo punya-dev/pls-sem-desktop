@@ -6,101 +6,52 @@ import InputDialog from '../components/InputDialog';
 
 const GetStarted = () => {
   const navigate = useNavigate();
-  const { workspaces, addWorkspace, setActiveWorkspace, archivedWorkspaces, trash, archiveWorkspace, renameWorkspace, trashWorkspace } = useStore();
+  const { workspaces, addWorkspace, setActiveWorkspace, archivedWorkspaces, archiveWorkspace, renameWorkspace, deleteWorkspace, requestDelete, openTab } = useStore();
   const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [inputDialogConfig, setInputDialogConfig] = useState<{isOpen: boolean; title: string; placeholder: string; submitLabel: string; onSubmit: (val: string) => void}>({
     isOpen: false, title: '', placeholder: '', submitLabel: '', onSubmit: () => {}
   });
 
-
-
   return (
     <>
-      <header className="titlebar window-drag" id="titlebar">
+      <div className="app-body">
+        
+        <aside className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`} id="sidebar">
 
-    
-    <div className="titlebar__left no-drag">
-      
-      <div className="titlebar__traffic-light-space" aria-hidden="true"></div>
-
-      
-      <div className="brand">
-        <svg className="brand__logo" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="CSPLS Logo">
-          <rect width="48" height="48" rx="10" fill="#6B4EE6"/>
-          <circle cx="16" cy="16" r="4" fill="#FFFFFF"/>
-          <circle cx="32" cy="18" r="4" fill="#C7D2FE"/>
-          <circle cx="20" cy="32" r="5" fill="#EEF2FF"/>
-          <circle cx="34" cy="32" r="3.5" fill="#A5B4FC"/>
-          <path d="M16 16L32 18M16 16L20 32M20 32L34 32M32 18L34 32" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeOpacity="0.85"/>
-        </svg>
-        <span className="brand__name">CSPLS</span>
-      </div>
-    </div>
-
-    
-    <div className="titlebar__center no-drag">
-      <span className="titlebar__version">CSPLS 1.1</span>
-    </div>
-
-    
-    <div className="titlebar__right no-drag">
-      <button className="icon-btn" id="theme-toggle-btn" title="Toggle Theme" type="button">
-        <span className="material-symbols-outlined">light_mode</span>
-      </button>
-      <button className="icon-btn" title="Settings" type="button">
-        <span className="material-symbols-outlined">settings</span>
-      </button>
-
-      <span className="v-divider"></span>
-
-      <div className="user-badge" role="button" tabIndex={0}>
-        <div className="user-badge__avatar">
-          <span>MV</span>
-          <span className="user-badge__status"></span>
-        </div>
-        <span className="user-badge__name">M. Vance</span>
-      </div>
-    </div>
-  </header>
-
-
-  
-  <div className="app-body">
-
-    
-    <aside className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`} id="sidebar">
-
-      
-      <div className="sidebar__top">
-        <div>
           
-          <div className="sidebar-header" style={{'paddingBottom': '10px', 'borderBottom': 'none'}}>
-            <span className="sidebar-header__label">Workspaces</span>
-            <div className="sidebar-header__actions">
-              <button className="icon-btn icon-btn--sm" title="Search workspaces" type="button" onClick={() => setInputDialogConfig({isOpen: true, title: 'Search Workspaces', placeholder: 'Enter workspace name...', submitLabel: 'Search', onSubmit: () => {}})}>
-                <span className="material-symbols-outlined">search</span>
-              </button>
-              <button className="sidebar-create-folder-btn" title="Create Workspace" type="button" onClick={() => setIsWorkspaceModalOpen(true)}>
-                <svg fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
-                  <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path>
-                  <line x1="12" x2="12" y1="10" y2="16"></line>
-                  <line x1="9" x2="15" y1="13" y2="13"></line>
-                </svg>
-              </button>
-              <button className="icon-btn icon-btn--sm" id="sidebar-collapse-btn" title="Collapse sidebar" type="button" onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}>
-                <span className="material-symbols-outlined">left_panel_close</span>
-              </button>
-            </div>
-          </div>
+          <div className="sidebar__top">
+            <div className="sidebar-ws-container">
+              
+              <div className="sidebar-header" style={{'paddingBottom': '10px', 'borderBottom': 'none'}}>
+                <span className="sidebar-header__label">Workspaces</span>
+                <div className="sidebar-header__actions">
+                  <button className="icon-btn icon-btn--sm" title="Search workspaces" type="button" onClick={() => setInputDialogConfig({isOpen: true, title: 'Search Workspaces', placeholder: 'Enter workspace name...', submitLabel: 'Search', onSubmit: () => {}})}>
+                    <span className="material-symbols-outlined">search</span>
+                  </button>
+                  <button className="sidebar-create-folder-btn" title="Create Workspace" type="button" onClick={() => setIsWorkspaceModalOpen(true)}>
+                    <svg fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
+                      <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path>
+                      <line x1="12" x2="12" y1="10" y2="16"></line>
+                      <line x1="9" x2="15" y1="13" y2="13"></line>
+                    </svg>
+                  </button>
+                  <button className="icon-btn icon-btn--sm" id="sidebar-collapse-btn" title="Collapse sidebar" type="button" onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}>
+                    <span className="material-symbols-outlined">left_panel_close</span>
+                  </button>
+                </div>
+              </div>
 
-          <div id="sidebar-ws-list" style={{'display': 'flex', 'flexDirection': 'column', 'gap': '2px'}}>
-            {workspaces.map(ws => (
-              <button 
-                key={ws.id} 
-                className="sidebar-item" 
-                type="button" 
-                onClick={() => { setActiveWorkspace(ws.id); navigate('/workspace'); }}
+              <div id="sidebar-ws-list" style={{'display': 'flex', 'flexDirection': 'column', 'gap': '2px'}}>
+                {workspaces.map(ws => (
+                  <button 
+                    key={ws.id} 
+                    className="sidebar-item" 
+                    type="button" 
+                    onClick={() => {
+                      setActiveWorkspace(ws.id);
+                      openTab({ type: 'workspace', title: ws.name, workspaceId: ws.id });
+                    }}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   useStore.getState().openContextMenu(e.clientX, e.clientY, [
@@ -110,9 +61,12 @@ const GetStarted = () => {
                       icon: 'delete',
                       danger: true,
                       action: () => {
-                        if (window.confirm(`Are you sure you want to remove workspace "${ws.name}"?`)) {
-                          trashWorkspace(ws.id);
-                        }
+                        requestDelete({
+                          title: 'Delete Workspace',
+                          itemName: ws.name,
+                          message: 'Are you sure? This workspace and all its contents will be permanently deleted and cannot be recovered.',
+                          onConfirm: () => deleteWorkspace(ws.id),
+                        });
                       }
                     }
                   ]);
@@ -130,16 +84,12 @@ const GetStarted = () => {
 
       
       <div className="sidebar__bottom">
-        <button className="sidebar-item" type="button" data-action="archive" onClick={() => navigate('/workspace?panel=archive')}>
+        <button className="sidebar-item" type="button" data-action="archive" onClick={() => openTab({ id: 'tab-archive', type: 'archive', title: 'Archive' })}>
           <span className="sidebar-item__left">
             <span className="material-symbols-outlined">inventory_2</span>
             <span>Archive</span>
           </span>
           <span className="sidebar-item__badge">{archivedWorkspaces.length}</span>
-        </button>
-        <button className="sidebar-item" type="button" onClick={() => navigate('/workspace?panel=trash')}>
-          <span className="sidebar-item__left"><span className="material-symbols-outlined">delete</span><span>Trash</span></span>
-          <span className="sidebar-item__badge">{trash.length}</span>
         </button>
 
         <button className="sidebar-item" type="button" data-action="docs">
@@ -162,18 +112,6 @@ const GetStarted = () => {
             <span className="truncate">Feedback &amp; Reports</span>
           </span>
         </button>
-
-        
-        <div className="license-badge">
-          <span className="material-symbols-outlined license-badge__icon">verified_user</span>
-          <div className="license-badge__content">
-            <span className="license-badge__label">Faculty Multi-Seat</span>
-            <span className="license-badge__status">
-              <span className="license-badge__dot"></span>
-              Active
-            </span>
-          </div>
-        </div>
       </div>
     </aside>
 

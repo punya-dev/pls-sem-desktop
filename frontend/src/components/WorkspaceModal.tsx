@@ -10,7 +10,7 @@ interface WorkspaceModalProps {
 const WorkspaceModal = ({ isOpen, onClose }: WorkspaceModalProps) => {
   const [name, setName] = useState('');
   const [location, setLocation] = useState('');
-  const { addWorkspace, setActiveWorkspace } = useStore();
+  const { addWorkspace, setActiveWorkspace, openTab } = useStore();
   const navigate = useNavigate();
 
   if (!isOpen) return null;
@@ -59,6 +59,11 @@ const WorkspaceModal = ({ isOpen, onClose }: WorkspaceModalProps) => {
       path: calculatedPath
     });
     setActiveWorkspace(newId);
+    openTab({
+      type: 'workspace',
+      title: cleanName,
+      workspaceId: newId,
+    });
     setName('');
     setLocation('');
     onClose();

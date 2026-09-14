@@ -3,6 +3,13 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/forms";
 
+.material-symbols-outlined {
+  font-family: 'Material Symbols Outlined' !important;
+  font-feature-settings: 'liga' 1 !important;
+  -webkit-font-feature-settings: 'liga' 1 !important;
+  text-rendering: optimizeLegibility !important;
+}
+
 @theme {
   --color-accent: #6b4ee6;
   --color-accent-hover: #5a3dc2;

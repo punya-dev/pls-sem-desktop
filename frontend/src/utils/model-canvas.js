@@ -23,6 +23,38 @@ export function initModelCanvas() {
   const emptyHint = document.getElementById('canvas-empty-hint');
   const bgRect = document.getElementById('bg-rect');
 
+  // Ensure all arrowhead markers exist in SVG defs
+  let defs = svg.querySelector('defs');
+  if (!defs) {
+    defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+    svg.insertBefore(defs, svg.firstChild);
+  }
+  const requiredMarkers = [
+    { id: 'arrow-solid', tag: 'polygon', attrs: { points: '1 2, 9 5, 1 8', fill: 'var(--color-text-primary, #1e293b)' }, refX: '8', refY: '5' },
+    { id: 'arrow-solid-selected', tag: 'polygon', attrs: { points: '1 2, 9 5, 1 8', fill: 'var(--color-accent, #6B4EE6)' }, refX: '8', refY: '5' },
+    { id: 'arrow-open', tag: 'path', attrs: { d: 'M 2 2 L 8 5 L 2 8', fill: 'none', stroke: 'var(--color-text-primary, #1e293b)', 'stroke-width': '1.5', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, refX: '7', refY: '5' },
+    { id: 'arrow-open-selected', tag: 'path', attrs: { d: 'M 2 2 L 8 5 L 2 8', fill: 'none', stroke: 'var(--color-accent, #6B4EE6)', 'stroke-width': '1.5', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, refX: '7', refY: '5' },
+    { id: 'arrow-diamond', tag: 'polygon', attrs: { points: '5 1.5, 8.5 5, 5 8.5, 1.5 5', fill: 'var(--color-text-primary, #1e293b)' }, refX: '5', refY: '5' },
+    { id: 'arrow-diamond-selected', tag: 'polygon', attrs: { points: '5 1.5, 8.5 5, 5 8.5, 1.5 5', fill: 'var(--color-accent, #6B4EE6)' }, refX: '5', refY: '5' },
+    { id: 'arrow-circle', tag: 'circle', attrs: { cx: '5', cy: '5', r: '3', fill: 'var(--color-text-primary, #1e293b)' }, refX: '5', refY: '5' },
+    { id: 'arrow-circle-selected', tag: 'circle', attrs: { cx: '5', cy: '5', r: '3', fill: 'var(--color-accent, #6B4EE6)' }, refX: '5', refY: '5' },
+  ];
+  requiredMarkers.forEach(m => {
+    if (!defs.querySelector(`#${m.id}`)) {
+      const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+      marker.setAttribute('id', m.id);
+      marker.setAttribute('markerWidth', '10');
+      marker.setAttribute('markerHeight', '10');
+      marker.setAttribute('refX', m.refX);
+      marker.setAttribute('refY', m.refY);
+      marker.setAttribute('orient', 'auto');
+      const child = document.createElementNS('http://www.w3.org/2000/svg', m.tag);
+      Object.entries(m.attrs).forEach(([k, v]) => child.setAttribute(k, v));
+      marker.appendChild(child);
+      defs.appendChild(marker);
+    }
+  });
+
   // State
   let nodes = [];
   let edges = [];
