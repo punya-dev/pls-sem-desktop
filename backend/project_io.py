@@ -205,3 +205,53 @@ def load_model_spec(path: str):
         "diagram_layout": layout_data,
         "updated_at": row_dict.get("updated_at"),
     }
+
+
+def save_results(path: str, algorithm: str, results_dict: dict):
+    if not os.path.exists(path):
+        return None
+    conn = sqlite3.connect(path)
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS results (
+            id INTEGER PRIMARY KEY,
+            algorithm TEXT,
+            results_json TEXT,
+            created_at TEXT
+        )
+    """)
+    now = datetime.now(timezone.utc).isoformat()
+    results_str = json.dumps(results_dict)
+    cur.execute("DELETE FROM results WHERE algorithm = ?", (algorithm,))
+    cur.execute(
+        "INSERT INTO results (algorithm, results_json, created_at) VALUES (?, ?, ?)",
+        (algorithm, results_str, now),
+    )
+    cur.execute("UPDATE metadata SET value = ? WHERE key = 'modified_at'", (now,))
+    conn.commit()
+    conn.close()
+    return {"status": "saved", "created_at": now}
+
+
+def load_results(path: str, algorithm: str = "pls"):
+    if not os.path.exists(path):
+        return None
+    conn = sqlite3.connect(path)
+    cur = conn.cursor()
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='results'")
+    if cur.fetchone() is None:
+        conn.close()
+        return None
+    cur.execute(
+        "SELECT results_json, created_at FROM results WHERE algorithm = ? ORDER BY id DESC LIMIT 1",
+        (algorithm,),
+    )
+    row = cur.fetchone()
+    conn.close()
+    if not row or not row[0]:
+        return None
+    return {
+        "algorithm": algorithm,
+        "results": json.loads(row[0]),
+        "created_at": row[1],
+    }

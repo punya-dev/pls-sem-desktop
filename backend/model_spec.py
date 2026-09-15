@@ -45,6 +45,7 @@ class ValidateModelRequest(BaseModel):
     spec: ModelSpec
     project_path: Optional[str] = None
     dataset_columns: Optional[List[str]] = None
+    columns: Optional[List[str]] = None
 
 
 class SaveModelRequest(BaseModel):
@@ -53,3 +54,21 @@ class SaveModelRequest(BaseModel):
     project_path: str
     spec: ModelSpec
     diagram_layout: Optional[Dict[str, Any]] = None
+
+
+class RunPlsRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    
+    project_path: str
+    spec: Optional[ModelSpec] = None
+    columns: Optional[List[str]] = None
+    rows: Optional[List[List[Any]]] = None
+    dataset_name: Optional[str] = None
+    scheme: str = "path"
+    max_iter: int = 300
+    tol: float = 1e-7
+    bootstrap: bool = False
+    n_boot: int = 500
+    missing_treatment: str = "mean"
+    missing_values: Optional[List[str]] = None
+

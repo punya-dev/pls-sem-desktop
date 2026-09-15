@@ -322,5 +322,53 @@ export const api = {
       return { error: err?.message || 'Failed to load model' };
     }
   },
+
+  async runPlsModel(
+    projectPath: string,
+    spec?: ModelSpec,
+    options?: {
+      scheme?: string;
+      max_iter?: number;
+      tol?: number;
+      bootstrap?: boolean;
+      n_boot?: number;
+      columns?: string[];
+      rows?: any[][];
+      dataset_name?: string;
+    }
+  ): Promise<{ status?: string; algorithm?: string; results?: any; validation?: ValidationResponse; error?: string }> {
+    try {
+      const res = await fetch(`${API_BASE}/project/run-pls`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_path: projectPath,
+          spec: spec || undefined,
+          scheme: options?.scheme || 'path',
+          max_iter: options?.max_iter || 300,
+          tol: options?.tol || 1e-7,
+          bootstrap: options?.bootstrap || false,
+          n_boot: options?.n_boot || 500,
+          columns: options?.columns || undefined,
+          rows: options?.rows || undefined,
+          dataset_name: options?.dataset_name || undefined,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to execute PLS-SEM calculation' };
+    }
+  },
+
+  async loadProjectResults(projectPath: string, algorithm: string = 'pls'): Promise<{ algorithm?: string; results?: any; created_at?: string; error?: string }> {
+    try {
+      const res = await fetch(
+        `${API_BASE}/project/load-results?path=${encodeURIComponent(projectPath)}&algorithm=${encodeURIComponent(algorithm)}`
+      );
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to load calculation results' };
+    }
+  },
 };
 

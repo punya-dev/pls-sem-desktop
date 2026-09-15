@@ -68,6 +68,8 @@ class PLSAlgorithm:
         max_iter: int = 300,
         tol: float = 1e-7,
         sign_alignment: bool = True,
+        missing_treatment: str = "mean",
+        missing_values: Optional[List[Any]] = None,
     ):
         """
         Args:
@@ -75,6 +77,8 @@ class PLSAlgorithm:
             max_iter: Maximum number of iterations for Wold algorithm.
             tol: Convergence tolerance for outer weights difference.
             sign_alignment: Whether to align signs of latent constructs with dominant indicator.
+            missing_treatment: How to handle missing values: 'mean' (default, SmartPLS standard) or 'listwise'.
+            missing_values: Optional list of explicit missing value indicators (e.g. [-99, '-99']).
         """
         if scheme not in ["path", "factor", "centroid"]:
             raise ValueError(f"Unknown inner weighting scheme: {scheme}. Use 'path', 'factor', or 'centroid'.")
@@ -82,6 +86,8 @@ class PLSAlgorithm:
         self.max_iter = max_iter
         self.tol = tol
         self.sign_alignment = sign_alignment
+        self.missing_treatment = missing_treatment
+        self.missing_values = missing_values if missing_values is not None else [-99, "-99"]
 
     def _parse_spec(self, model_spec: Any) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, str], List[Tuple[str, str]]]:
         """
@@ -120,13 +126,14 @@ class PLSAlgorithm:
 
         return constructs, indicator_col_map, paths
 
-    def fit(self, data: pd.DataFrame, model_spec: Any) -> Dict[str, Any]:
+    def fit(self, data: pd.DataFrame, model_spec: Any, missing_treatment: Optional[str] = None) -> Dict[str, Any]:
         """
         Runs the full PLS-SEM estimation.
 
         Args:
             data: pandas DataFrame of observations.
             model_spec: ModelSpec instance or dictionary specifying constructs, indicators, paths.
+            missing_treatment: Optional override for missing value treatment ('mean' or 'listwise').
 
         Returns:
             Dictionary containing full structural, measurement, reliability, validity,
@@ -147,7 +154,34 @@ class PLSAlgorithm:
                 all_required_cols.append(col)
 
         # Build clean numeric matrix of required columns
-        sub_data = data[all_required_cols].copy().dropna()
+        sub_data = data[all_required_cols].copy()
+        for col in all_required_cols:
+            sub_data[col] = pd.to_numeric(sub_data[col], errors='coerce')
+
+        # Replace designated missing markers (e.g. -99, "-99") with NaN
+        na_markers = list(self.missing_values or [-99, "-99"])
+        for mv in na_markers:
+            sub_data = sub_data.replace(mv, np.nan)
+            try:
+                mv_num = float(mv)
+                sub_data = sub_data.replace(mv_num, np.nan)
+                if mv_num.is_integer():
+                    sub_data = sub_data.replace(int(mv_num), np.nan)
+            except (ValueError, TypeError):
+                pass
+
+        # Apply missing value treatment
+        eff_treatment = (missing_treatment or self.missing_treatment or "mean").lower()
+        if eff_treatment == "mean":
+            for col in all_required_cols:
+                col_mean = sub_data[col].mean()
+                if pd.notna(col_mean):
+                    sub_data[col] = sub_data[col].fillna(col_mean)
+        elif eff_treatment == "listwise":
+            sub_data = sub_data.dropna()
+
+        # Drop any remaining unfillable rows (e.g. all-NaN column)
+        sub_data = sub_data.dropna()
         n_samples = len(sub_data)
         if n_samples < 5:
             raise ValueError(f"Insufficient valid data rows ({n_samples}) for PLS-SEM.")
@@ -546,15 +580,30 @@ class PLSAlgorithm:
                 htmt_val = float(mean_cross / denom_htmt)
                 htmt[c1][c2] = htmt_val
 
-        # Construct scores DataFrame
-        scores_df = pd.DataFrame(Y, columns=construct_ids, index=sub_data.index)
+        # Construct scores dictionary
+        scores_dict = {cid: [float(val) for val in Y[:, idx]] for idx, cid in enumerate(construct_ids)}
+
+        # Friendly display names for constructs and indicators
+        construct_names = {}
+        for cid, cinfo in constructs.items():
+            cname = cinfo.get("name")
+            if not cname or cname.startswith("node_") or cname.upper().startswith("LATENT"):
+                cols = [ind_col_map.get(iid, iid) for iid in cinfo["indicators"]]
+                stems = [c.rsplit("_", 1)[0].rsplit("-", 1)[0] for c in cols if c]
+                if stems and len(set(s.upper() for s in stems)) == 1:
+                    cname = stems[0].upper()
+            construct_names[cid] = cname or cid
+
+        indicator_names = {iid: ind_col_map.get(iid, iid) for iid in ind_col_map}
 
         return {
             "algorithm": "pls",
             "converged": converged,
             "iterations": iteration,
             "n_samples": n_samples,
-            "construct_scores": scores_df,
+            "construct_names": construct_names,
+            "indicator_names": indicator_names,
+            "construct_scores": scores_dict,
             "structural": {
                 "path_coefficients": path_coefs,
                 "r_squared": r_squared,

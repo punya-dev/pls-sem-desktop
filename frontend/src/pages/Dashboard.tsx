@@ -7,6 +7,7 @@ import InputDialog from '../components/InputDialog';
 import { DataManagerModal } from '../components/DataManagerModal';
 import { parseDatasetFile } from '../utils/dataset-parser';
 import type { ParsedDataset } from '../utils/dataset-parser';
+import { api } from '../utils/api';
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -69,10 +70,19 @@ const Dashboard = () => {
     }
   };
 
-  const handleImportComplete = (dataset: ParsedDataset) => {
+  const handleImportComplete = async (dataset: ParsedDataset) => {
     if (!importingStudyId) return;
     setStudyDataset(importingStudyId, dataset);
     touchStudy(importingStudyId);
+    const study = studies.find(s => s.id === importingStudyId);
+    if (study?.path) {
+      try {
+        const headers = dataset.variables.map(v => v.name);
+        await api.saveProjectDataJson(study.path, dataset.filename, headers, dataset.rows);
+      } catch (err) {
+        console.warn('Failed to save dataset to project in Dashboard:', err);
+      }
+    }
     setDatasetToImport(null);
     setImportingStudyId(null);
   };
@@ -436,7 +446,7 @@ const Dashboard = () => {
                         ) : (
                           <>
                             {studyDataset && (
-                              <div className="file-row file-row--muted" onClick={() => { setImportingStudyId(study.id); setDatasetToImport(studyDataset); }} onContextMenu={e => { e.preventDefault(); e.stopPropagation(); useStore.getState().openContextMenu(e.clientX, e.clientY, [{ id: 'rename', label: 'Rename Dataset', icon: 'edit', action: () => rename('Rename Dataset', studyDataset.filename, name => { setStudyDataset(study.id, { ...studyDataset, filename: name }); touchStudy(study.id); }) }, { id: 'delete', label: 'Delete Dataset', icon: 'delete', danger: true, action: () => { if (window.confirm(`Delete dataset "${studyDataset.filename}"?`)) { trashDataset(study.id); touchStudy(study.id); } } }]); }}>
+                              <div className="file-row file-row--muted" onClick={() => { setImportingStudyId(study.id); setDatasetToImport(studyDataset); }} onContextMenu={e => { e.preventDefault(); e.stopPropagation(); useStore.getState().openContextMenu(e.clientX, e.clientY, [{ id: 'rename', label: 'Rename Dataset', icon: 'edit', action: () => rename('Rename Dataset', studyDataset.filename, name => { const updated = { ...studyDataset, filename: name }; setStudyDataset(study.id, updated); touchStudy(study.id); if (study.path) { const headers = updated.variables.map(v => v.name); api.saveProjectDataJson(study.path, name, headers, updated.rows).catch(console.warn); } }) }, { id: 'delete', label: 'Delete Dataset', icon: 'delete', danger: true, action: () => { if (window.confirm(`Delete dataset "${studyDataset.filename}"?`)) { trashDataset(study.id); touchStudy(study.id); if (study.path) api.deleteProjectData(study.path).catch(console.warn); } } }]); }}>
                                 <div className="file-row__left"><span className="material-symbols-outlined">dataset</span><span>{studyDataset.filename}</span><span className="file-badge file-badge--default">{studyDataset.rows.length} rows</span><span className="file-badge file-badge--default">Dataset</span></div>
                                 <div className="file-row__meta"><span className="file-row__time">{study.lastModified}</span><span style={{width: '16px'}}></span></div>
                               </div>

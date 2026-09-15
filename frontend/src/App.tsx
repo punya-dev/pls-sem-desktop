@@ -26,6 +26,26 @@ function App() {
     return () => unlisten?.();
   }, []);
 
+  useEffect(() => {
+    // Prevent Backspace key from triggering browser back navigation outside editable inputs
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Backspace') {
+        const target = e.target as HTMLElement | null;
+        const isEditable = !!(target && (
+          target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable ||
+          target.getAttribute('contenteditable') === 'true'
+        ));
+        if (!isEditable) {
+          e.preventDefault();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, []);
+
   return (
     <BrowserRouter>
       <ContextMenu />

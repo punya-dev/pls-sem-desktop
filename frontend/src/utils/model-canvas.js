@@ -220,7 +220,7 @@ export function initModelCanvas() {
     }
   });
 
-  document.getElementById('btn-undo')?.addEventListener('click', () => {
+  function undo() {
     if (historyIndex > 0) {
       isUndoRedo = true;
       historyIndex--;
@@ -230,9 +230,9 @@ export function initModelCanvas() {
       render();
       isUndoRedo = false;
     }
-  });
+  }
 
-  document.getElementById('btn-redo')?.addEventListener('click', () => {
+  function redo() {
     if (historyIndex < history.length - 1) {
       isUndoRedo = true;
       historyIndex++;
@@ -242,6 +242,26 @@ export function initModelCanvas() {
       render();
       isUndoRedo = false;
     }
+  }
+
+  document.getElementById('btn-undo')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    undo();
+  });
+
+  document.getElementById('btn-redo')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    redo();
+  });
+
+  document.getElementById('btn-delete')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    deleteSelected();
+  });
+
+  document.getElementById('hud-delete')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    deleteSelected();
   });
 
   // --- Toolbar Modes ---
@@ -563,6 +583,39 @@ export function initModelCanvas() {
   };
   window.bindVariableDragEvents();
 
+  function cleanIndicatorStem(name) {
+    if (!name) return '';
+    const cleaned = name.replace(/[_\-\s.]*\d+$/i, '').trim();
+    return cleaned || name;
+  }
+
+  function deriveConstructName(indicatorNames) {
+    if (!indicatorNames || indicatorNames.length === 0) return '';
+    const stems = indicatorNames.map(cleanIndicatorStem).filter(Boolean);
+    if (stems.length === 0) return '';
+    
+    const first = stems[0].toUpperCase();
+    const allMatch = stems.every(s => s.toUpperCase() === first);
+    if (allMatch) return first;
+    
+    // Find longest common prefix
+    let prefix = stems[0];
+    for (let i = 1; i < stems.length; i++) {
+      while (!stems[i].toUpperCase().startsWith(prefix.toUpperCase()) && prefix.length > 0) {
+        prefix = prefix.slice(0, -1);
+      }
+    }
+    prefix = prefix.replace(/[_\-\s.]+$/, '').trim();
+    if (prefix.length >= 2) return prefix.toUpperCase();
+    return first;
+  }
+
+  function isDefaultOrDerivedName(label) {
+    if (!label) return true;
+    const l = label.trim().toUpperCase();
+    return l.startsWith('LATENT') || l.startsWith('NEW_CONSTRUCT') || l.startsWith('CONSTRUCT') || l.startsWith('NODE_') || l.startsWith('LV_');
+  }
+
   window.dropModelVariable = (name, clientX, clientY) => {
     if (!name) return;
     
@@ -589,11 +642,32 @@ export function initModelCanvas() {
           x: targetNode.x + 140,
           y: targetNode.y + (existingIndicators.length * 40)
         });
+
+        // Automatically refine construct name based on indicators if default
+        const allIndNames = [...existingIndicators.map(i => i.label), name];
+        const derived = deriveConstructName(allIndNames);
+        if (derived && isDefaultOrDerivedName(targetNode.label)) {
+          targetNode.label = derived;
+        }
+
         emptyHint.style.display = 'none';
         render();
+        pushHistory();
       }
     } else {
-      addNode(name.toUpperCase().replace(/_[0-9]+$/, ''), svgPt.x, svgPt.y);
+      // Dropping onto empty space: create latent node and attach this variable as its indicator
+      const stem = deriveConstructName([name]) || name.toUpperCase().replace(/[_\-\s.]*[0-9]+$/, '');
+      const newLatent = addNode(stem, svgPt.x, svgPt.y);
+      nodes.push({
+        id: generateId(),
+        label: name,
+        isLatent: false,
+        parentId: newLatent.id,
+        x: newLatent.x + 140,
+        y: newLatent.y
+      });
+      render();
+      pushHistory();
     }
   };
 
@@ -611,6 +685,7 @@ export function initModelCanvas() {
     nodes.push(node);
     emptyHint.style.display = 'none';
     render();
+    return node;
   }
 
   function createNodeShape(node, defaultW, defaultH, defaultFill, defaultStroke, isSelected) {
@@ -1761,6 +1836,13 @@ export function initModelCanvas() {
     const selectedEdges = edges.filter(e => selectedIds.has(e.id));
     const nodesToDelete = new Set(selectedIds);
     
+    // Cascade delete indicators if parent construct is deleted
+    nodes.forEach(n => {
+      if (n.parentId && nodesToDelete.has(n.parentId)) {
+        nodesToDelete.add(n.id);
+      }
+    });
+
     selectedEdges.forEach(edge => {
       const sourceNode = nodes.find(n => n.id === edge.sourceId);
       if (sourceNode && sourceNode.isLatent === false) {
@@ -1780,12 +1862,46 @@ export function initModelCanvas() {
   }
 
   // Delete key handler
-  window.addEventListener('keydown', (e) => {
-    // Check if target is not input/textarea
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  if (window._canvasKeydownHandler) {
+    window.removeEventListener('keydown', window._canvasKeydownHandler);
+  }
+  window._canvasKeydownHandler = (e) => {
+    // Check if target is input/textarea/contentEditable
+    const isInput = e.target && (
+      e.target.tagName === 'INPUT' || 
+      e.target.tagName === 'TEXTAREA' || 
+      e.target.isContentEditable ||
+      e.target.getAttribute('contenteditable') === 'true'
+    );
+    if (isInput) return;
 
-    if ((e.key === 'Delete' || e.key === 'Backspace') && selectedIds.size > 0) {
-      deleteSelected();
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault();
+      e.stopPropagation();
+      if (selectedIds.size > 0) {
+        deleteSelected();
+      }
+      return;
+    }
+
+    // Classic Undo & Redo shortcuts
+    if (e.metaKey || e.ctrlKey) {
+      if (e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.shiftKey) {
+          redo();
+        } else {
+          undo();
+        }
+        return;
+      }
+      if (e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        e.stopPropagation();
+        redo();
+        return;
+      }
     }
     
     if (selectedIds.size > 0) {
@@ -1813,19 +1929,24 @@ export function initModelCanvas() {
         render();
       }
     }
-  });
+  };
+  window.addEventListener('keydown', window._canvasKeydownHandler);
 
   function exportModelSpec() {
     const latentNodes = nodes.filter(n => n.isLatent !== false && !n.isText);
     const indicatorNodes = nodes.filter(n => n.isLatent === false && !n.isText);
 
     const constructs = latentNodes.map(ln => {
-      const indicators = indicatorNodes
-        .filter(ind => ind.parentId === ln.id)
-        .map(ind => ind.id);
+      const childInds = indicatorNodes.filter(ind => ind.parentId === ln.id);
+      const indicators = childInds.map(ind => ind.id);
+      let cname = ln.label;
+      if (!cname || isDefaultOrDerivedName(cname)) {
+        const derived = deriveConstructName(childInds.map(i => i.label));
+        if (derived) cname = derived;
+      }
       return {
         id: ln.id,
-        name: ln.label,
+        name: cname || ln.label || ln.id,
         type: ln.type === 'formative' ? 'formative' : 'reflective',
         indicators
       };
@@ -1894,6 +2015,9 @@ export function initModelCanvas() {
   window.getModelCanvasState = getModelCanvasState;
   window.loadModelCanvasState = loadModelCanvasState;
   window.toggleMeasurementMode = toggleMeasurementMode;
+  window.deleteSelectedModelPart = deleteSelected;
+  window.canvasUndo = undo;
+  window.canvasRedo = redo;
 }
 
 export function exportModelSpec() {
@@ -1919,6 +2043,24 @@ export function loadModelCanvasState(state) {
 export function toggleMeasurementMode(nodeId) {
   if (typeof window !== 'undefined' && window.toggleMeasurementMode) {
     window.toggleMeasurementMode(nodeId);
+  }
+}
+
+export function deleteSelectedModelPart() {
+  if (typeof window !== 'undefined' && window.deleteSelectedModelPart) {
+    window.deleteSelectedModelPart();
+  }
+}
+
+export function canvasUndo() {
+  if (typeof window !== 'undefined' && window.canvasUndo) {
+    window.canvasUndo();
+  }
+}
+
+export function canvasRedo() {
+  if (typeof window !== 'undefined' && window.canvasRedo) {
+    window.canvasRedo();
   }
 }
 

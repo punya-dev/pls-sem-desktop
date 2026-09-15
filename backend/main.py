@@ -10,8 +10,9 @@ import project_io
 import os
 import workspace_io
 import settings_io
-from model_spec import ModelSpec, ValidateModelRequest, SaveModelRequest
+from model_spec import ModelSpec, ValidateModelRequest, SaveModelRequest, RunPlsRequest
 from model_validator import validate_model_spec, ValidationResult
+from engine.pls.algorithm import PLSAlgorithm, run_pls
 
 
 
@@ -342,7 +343,7 @@ def delete_workspace(folder_path: str):
 
 @app.post("/model/validate")
 def validate_model(req: ValidateModelRequest):
-    dataset_cols = req.dataset_columns
+    dataset_cols = req.dataset_columns or req.columns
     if dataset_cols is None and req.project_path:
         project_data = project_io.load_data(req.project_path)
         if project_data and "columns" in project_data:
@@ -386,5 +387,86 @@ def load_project_model(path: str):
         return {"spec": None, "diagram_layout": None, "updated_at": None}
 
     return model_data
+
+
+@app.post("/project/run-pls")
+def run_project_pls(req: RunPlsRequest):
+    if not os.path.exists(req.project_path):
+        return {"error": "Project file does not exist"}
+
+    # 1. Load project data
+    data_dict = project_io.load_data(req.project_path)
+    if (not data_dict or not data_dict.get("rows")) and req.columns and req.rows:
+        try:
+            df_temp = pd.DataFrame(req.rows, columns=req.columns)
+            df_clean = df_temp.astype(object).where(pd.notnull(df_temp), None)
+            dtypes = list(df_clean.dtypes.astype(str))
+            project_io.save_data(req.project_path, df_clean.values.tolist(), list(df_clean.columns), dtypes, dataset_name=req.dataset_name)
+            data_dict = {"columns": list(df_clean.columns), "rows": df_clean.values.tolist(), "dataset_name": req.dataset_name}
+        except Exception as e:
+            print(f"Failed to auto-save dataset in run_project_pls: {e}")
+
+    if not data_dict or not data_dict.get("rows"):
+        return {"error": "No dataset found in project. Please import data first."}
+
+    df = pd.DataFrame(data_dict["rows"], columns=data_dict["columns"])
+    # Convert numeric columns where possible
+    for col in df.columns:
+        converted = pd.to_numeric(df[col], errors='coerce')
+        if converted.notnull().sum() > 0:
+            df[col] = converted
+
+    # 2. Resolve Model spec
+    spec = req.spec
+    if spec is None:
+        saved_model = project_io.load_model_spec(req.project_path)
+        if not saved_model or not saved_model.get("spec"):
+            return {"error": "No path model found. Please draw or save a model first."}
+        try:
+            spec = ModelSpec.model_validate(saved_model["spec"])
+        except Exception as e:
+            return {"error": f"Invalid saved model specification: {str(e)}"}
+
+    # 3. Validate model spec against dataset columns
+    validation = validate_model_spec(spec, dataset_columns=list(df.columns))
+    if not validation.is_valid:
+        return {
+            "error": "Model validation failed",
+            "validation": validation.model_dump(),
+        }
+
+    # 4. Execute PLS algorithm
+    try:
+        algo = PLSAlgorithm(
+            scheme=req.scheme,
+            max_iter=req.max_iter,
+            tol=req.tol,
+            missing_treatment=req.missing_treatment or "mean",
+            missing_values=req.missing_values,
+        )
+        res = algo.fit(df, spec)
+        if req.bootstrap:
+            res["significance"] = algo.bootstrap(df, spec, n_boot=req.n_boot)
+
+        # 5. Persist results in project file
+        project_io.save_results(req.project_path, "pls", res)
+
+        return {
+            "status": "success",
+            "algorithm": "pls",
+            "results": res,
+        }
+    except Exception as e:
+        return {"error": f"PLS-SEM calculation failed: {str(e)}"}
+
+
+@app.get("/project/load-results")
+def load_project_results(path: str, algorithm: str = "pls"):
+    if not os.path.exists(path):
+        return {"error": "Project file does not exist"}
+    data = project_io.load_results(path, algorithm=algorithm)
+    if data is None:
+        return {"results": None}
+    return data
 
 

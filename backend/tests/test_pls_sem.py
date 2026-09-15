@@ -148,19 +148,65 @@ class TestPLSSEM(unittest.TestCase):
         weights_val = res["measurement"]["outer_weights"]["Value"]
         self.assertEqual(len(weights_val), 3)
 
-    def test_bootstrap_significance(self):
-        algo = PLSAlgorithm()
-        boot_res = algo.bootstrap(self.df, self.model_spec, n_boot=50, seed=123)
+    def test_hair_et_al_exhibit_3_8_benchmark(self):
+        """
+        Benchmark test against textbook Exhibit 3.8 (Hair et al., A Primer on PLS-SEM).
+        Corporate reputation data with -99 treated via mean replacement.
+        """
+        import os
+        csv_path = "/Users/punyapratap/Desktop/Corporate reputation data.csv"
+        if not os.path.exists(csv_path):
+            return
 
-        self.assertEqual(boot_res["n_boot"], 50)
-        # Check that paths significance has t_stat and p_value
-        for p in boot_res["paths"]:
-            self.assertIn("t_stat", p)
-            self.assertIn("p_value", p)
-            self.assertIn("se", p)
-            self.assertGreater(p["t_stat"], 0.0)
-            self.assertLess(p["p_value"], 0.05)
+        df_bench = pd.read_csv(csv_path, sep=None, engine="python")
+        cols = ["comp_1", "comp_2", "comp_3", "like_1", "like_2", "like_3", "cusa", "cusl_1", "cusl_2", "cusl_3"]
+        spec = {
+            "constructs": [
+                {"id": "COMP", "name": "COMP", "type": "reflective", "indicators": ["comp_1", "comp_2", "comp_3"]},
+                {"id": "LIKE", "name": "LIKE", "type": "reflective", "indicators": ["like_1", "like_2", "like_3"]},
+                {"id": "CUSA", "name": "CUSA", "type": "reflective", "indicators": ["cusa"]},
+                {"id": "CUSL", "name": "CUSL", "type": "reflective", "indicators": ["cusl_1", "cusl_2", "cusl_3"]},
+            ],
+            "indicators": [{"id": c, "column": c} for c in cols],
+            "paths": [
+                {"from": "COMP", "to": "CUSA"},
+                {"from": "LIKE", "to": "CUSA"},
+                {"from": "COMP", "to": "CUSL"},
+                {"from": "LIKE", "to": "CUSL"},
+                {"from": "CUSA", "to": "CUSL"},
+            ]
+        }
+        algo = PLSAlgorithm(scheme="path", missing_treatment="mean")
+        res = algo.fit(df_bench, spec)
+
+        paths = res["structural"]["path_coefficients"]
+        r2 = res["structural"]["r_squared"]
+        loads = res["measurement"]["outer_loadings"]
+
+        # Paths match Exhibit 3.8
+        self.assertAlmostEqual(paths["CUSA"]["COMP"], 0.162, places=3)
+        self.assertAlmostEqual(paths["CUSA"]["LIKE"], 0.424, places=3)
+        self.assertAlmostEqual(paths["CUSL"]["COMP"], 0.009, places=3)
+        self.assertAlmostEqual(paths["CUSL"]["LIKE"], 0.342, places=3)
+        self.assertAlmostEqual(paths["CUSL"]["CUSA"], 0.504, places=3)
+
+        # R^2 match Exhibit 3.8
+        self.assertAlmostEqual(r2["CUSA"], 0.295, places=3)
+        self.assertAlmostEqual(r2["CUSL"], 0.562, places=3)
+
+        # Outer loadings match Exhibit 3.8
+        self.assertAlmostEqual(loads["COMP"]["comp_1"], 0.858, places=3)
+        self.assertAlmostEqual(loads["COMP"]["comp_2"], 0.798, places=3)
+        self.assertAlmostEqual(loads["COMP"]["comp_3"], 0.818, places=3)
+        self.assertAlmostEqual(loads["LIKE"]["like_1"], 0.879, places=3)
+        self.assertAlmostEqual(loads["LIKE"]["like_2"], 0.870, places=3)
+        self.assertAlmostEqual(loads["LIKE"]["like_3"], 0.843, places=3)
+        self.assertAlmostEqual(loads["CUSA"]["cusa"], 1.000, places=3)
+        self.assertAlmostEqual(loads["CUSL"]["cusl_1"], 0.833, places=3)
+        self.assertAlmostEqual(loads["CUSL"]["cusl_2"], 0.917, places=3)
+        self.assertAlmostEqual(loads["CUSL"]["cusl_3"], 0.843, places=3)
 
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -11,10 +11,30 @@ interface DataManagerModalProps {
 
 export const DataManagerModal: React.FC<DataManagerModalProps> = ({ dataset: initialDataset, onImport, onCancel }) => {
   const rawDatasetRef = useRef<ParsedDataset>(initialDataset);
-  const [dataset, setDataset] = useState<ParsedDataset>(initialDataset);
+
+  // Auto-detect if -99 exists in data
+  const detectedMarker = useMemo(() => {
+    for (const row of initialDataset.rows || []) {
+      for (const val of row || []) {
+        if (val === -99 || val === '-99') return '-99';
+      }
+    }
+    return '';
+  }, [initialDataset]);
+
+  const [missingMarker, setMissingMarker] = useState(detectedMarker);
+  const [treatment, setTreatment] = useState<'none' | 'listwise' | 'mean'>('mean');
+  const [dataset, setDataset] = useState<ParsedDataset>(() => {
+    if (detectedMarker || true) {
+      const headers = initialDataset.variables.map(v => v.name);
+      return processData(initialDataset.filename, headers, initialDataset.rows, {
+        missingValueMarker: detectedMarker,
+        treatment: 'mean',
+      });
+    }
+    return initialDataset;
+  });
   const [activeTab, setActiveTab] = useState<'variables' | 'data'>('variables');
-  const [missingMarker, setMissingMarker] = useState('');
-  const [treatment, setTreatment] = useState<'none' | 'listwise' | 'mean'>('none');
   const [sortCol, setSortCol] = useState<number | null>(null);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
