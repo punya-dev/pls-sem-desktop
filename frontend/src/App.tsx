@@ -9,6 +9,7 @@ import GetStarted from './pages/GetStarted';
 import Dashboard from './pages/Dashboard';
 import ModelEditor from './pages/ModelEditor';
 import ArchiveView from './pages/ArchiveView';
+import DatasetView from './pages/DatasetView';
 
 function App() {
   const { tabs, activeTabId, settings, theme } = useStore();
@@ -45,6 +46,9 @@ function App() {
     }
     if (activeTab.type === 'model') {
       return <ModelEditor key={activeTab.id} />;
+    }
+    if (activeTab.type === 'dataset') {
+      return <DatasetView key={activeTab.id} />;
     }
     if (activeTab.type === 'archive') {
       return <ArchiveView key={activeTab.id} />;

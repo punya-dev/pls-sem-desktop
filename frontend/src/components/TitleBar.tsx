@@ -112,7 +112,7 @@ export const TitleBar: React.FC = () => {
       </div>
 
       {/* ─── Center Section: Browser / VSCode Tabs ─── */}
-      <div className="titlebar__center">
+      <div className="titlebar__center no-drag">
         <TabBar />
       </div>
 

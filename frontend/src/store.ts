@@ -90,7 +90,7 @@ export interface DeleteConfirmDialog {
 
 export interface AppTab {
   id: string;
-  type: 'get-started' | 'workspace' | 'model' | 'archive';
+  type: 'get-started' | 'workspace' | 'model' | 'archive' | 'dataset';
   title: string;
   workspaceId?: string | null;
   studyId?: string | null;
@@ -118,6 +118,7 @@ interface AppState {
   closeTab: (id: string) => void;
   setActiveTab: (id: string) => void;
   updateTabTitle: (id: string, title: string) => void;
+  reorderTabs: (fromIndex: number, toIndex: number) => void;
 
   // Workspaces & Studies
   workspaces: Workspace[];
@@ -298,6 +299,31 @@ export const useStore = create<AppState>()(
           };
         }
 
+        if (tabInput.type === 'dataset' && tabInput.studyId) {
+          const existing = state.tabs.find(t => t.type === 'dataset' && t.studyId === tabInput.studyId);
+          if (existing) {
+            return {
+              activeTabId: existing.id,
+              activeStudyId: tabInput.studyId,
+              activeWorkspaceId: tabInput.workspaceId ?? state.activeWorkspaceId,
+            };
+          }
+          const id = tabInput.id || `tab-dataset-${tabInput.studyId}`;
+          const newTab: AppTab = {
+            id,
+            type: 'dataset',
+            title: tabInput.title || 'Dataset',
+            workspaceId: tabInput.workspaceId,
+            studyId: tabInput.studyId,
+          };
+          return {
+            tabs: [...state.tabs, newTab],
+            activeTabId: id,
+            activeStudyId: tabInput.studyId,
+            activeWorkspaceId: tabInput.workspaceId ?? state.activeWorkspaceId,
+          };
+        }
+
         const id = tabInput.id || `tab-${Date.now()}`;
         const newTab: AppTab = { ...tabInput, id };
         return { tabs: [...state.tabs, newTab], activeTabId: id };
@@ -326,6 +352,9 @@ export const useStore = create<AppState>()(
             nextModelId = nextTab.modelId ?? null;
             nextStudyId = nextTab.studyId ?? null;
             nextWsId = nextTab.workspaceId ?? null;
+          } else if (nextTab.type === 'dataset') {
+            nextStudyId = nextTab.studyId ?? null;
+            nextWsId = nextTab.workspaceId ?? null;
           }
         }
 
@@ -349,6 +378,9 @@ export const useStore = create<AppState>()(
           if (tab.workspaceId) nextWs = tab.workspaceId;
           if (tab.studyId) nextStudy = tab.studyId;
           if (tab.modelId) nextModel = tab.modelId;
+        } else if (tab.type === 'dataset') {
+          if (tab.workspaceId) nextWs = tab.workspaceId;
+          if (tab.studyId) nextStudy = tab.studyId;
         }
         return {
           activeTabId: id,
@@ -360,6 +392,12 @@ export const useStore = create<AppState>()(
       updateTabTitle: (id, title) => set((state) => ({
         tabs: state.tabs.map(t => t.id === id ? { ...t, title } : t)
       })),
+      reorderTabs: (fromIndex, toIndex) => set((state) => {
+        const tabs = [...state.tabs];
+        const [moved] = tabs.splice(fromIndex, 1);
+        tabs.splice(toIndex, 0, moved);
+        return { tabs };
+      }),
 
       // Workspaces & Studies
       workspaces: INITIAL_WORKSPACES,
