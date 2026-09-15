@@ -245,10 +245,29 @@ export const TabBar: React.FC = () => {
                   } as React.CSSProperties
                 }
               >
+                {/* Collapse/expand arrow — only toggles collapse */}
                 <button
                   type="button"
-                  className="tab-group-pill"
-                  onClick={() => toggleGroupCollapse(item.workspaceId)}
+                  className="tab-group-chevron-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleGroupCollapse(item.workspaceId);
+                  }}
+                  title={isCollapsed ? 'Expand group' : 'Collapse group'}
+                >
+                  <span className="material-symbols-outlined tab-group-chevron">
+                    {isCollapsed ? 'chevron_right' : 'chevron_left'}
+                  </span>
+                </button>
+
+                {/* Workspace name — opens the workspace tab */}
+                <button
+                  type="button"
+                  className="tab-group-name-btn"
+                  onClick={() => {
+                    const wsTab = item.tabs.find((t) => t.type === 'workspace');
+                    if (wsTab) setActiveTab(wsTab.id);
+                  }}
                   onContextMenu={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
@@ -260,18 +279,11 @@ export const TabBar: React.FC = () => {
                       y: e.clientY,
                     });
                   }}
-                  title={`${item.workspaceName} (${item.tabs.length} tabs) • Click to ${
-                    isCollapsed ? 'expand' : 'collapse'
-                  } • Right-click for options`}
+                  title={`Open ${item.workspaceName}`}
                 >
-                  <span className="material-symbols-outlined tab-group-chevron">
-                    {isCollapsed ? 'chevron_right' : 'chevron_left'}
-                  </span>
                   <span className="tab-group-title">{item.workspaceName}</span>
                   {isCollapsed && (
-                    <span className="tab-group-count">
-                      {item.tabs.length}
-                    </span>
+                    <span className="tab-group-count">{item.tabs.length}</span>
                   )}
                 </button>
 
