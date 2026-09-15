@@ -118,6 +118,7 @@ interface AppState {
   closeTab: (id: string) => void;
   setActiveTab: (id: string) => void;
   updateTabTitle: (id: string, title: string) => void;
+  reorderTabs: (fromIndex: number, toIndex: number) => void;
 
   // Workspaces & Studies
   workspaces: Workspace[];
@@ -391,6 +392,12 @@ export const useStore = create<AppState>()(
       updateTabTitle: (id, title) => set((state) => ({
         tabs: state.tabs.map(t => t.id === id ? { ...t, title } : t)
       })),
+      reorderTabs: (fromIndex, toIndex) => set((state) => {
+        const tabs = [...state.tabs];
+        const [moved] = tabs.splice(fromIndex, 1);
+        tabs.splice(toIndex, 0, moved);
+        return { tabs };
+      }),
 
       // Workspaces & Studies
       workspaces: INITIAL_WORKSPACES,

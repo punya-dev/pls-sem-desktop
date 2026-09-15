@@ -3,7 +3,7 @@ import { useStore, type AppTab } from '../store';
 import WorkspaceModal from './WorkspaceModal';
 
 export const TabBar: React.FC = () => {
-  const { tabs, activeTabId, setActiveTab, closeTab, openTab, workspaces } = useStore();
+  const { tabs, activeTabId, setActiveTab, closeTab, openTab, workspaces, reorderTabs } = useStore();
   const scrollRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -11,6 +11,10 @@ export const TabBar: React.FC = () => {
   const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Drag-to-reorder state
+  const dragTabId = useRef<string | null>(null);
+  const dragOverTabId = useRef<string | null>(null);
 
   // Close dropdown on outside click and reset search
   useEffect(() => {
@@ -183,6 +187,7 @@ export const TabBar: React.FC = () => {
     const isActive = tab.id === activeTabId;
     const iconName = getTabIcon(tab);
     const label = tab.type === 'get-started' ? 'Home' : tab.title;
+    const tabFlatIndex = tabs.findIndex((t) => t.id === tab.id);
 
     return (
       <div
@@ -196,6 +201,29 @@ export const TabBar: React.FC = () => {
           }
         }}
         title={tab.type === 'get-started' ? 'Home' : tab.title}
+        draggable
+        onDragStart={(e) => {
+          dragTabId.current = tab.id;
+          e.dataTransfer.effectAllowed = 'move';
+        }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          dragOverTabId.current = tab.id;
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          if (!dragTabId.current || dragTabId.current === tab.id) return;
+          const fromIndex = tabs.findIndex((t) => t.id === dragTabId.current);
+          const toIndex = tabFlatIndex;
+          if (fromIndex !== -1 && toIndex !== -1) reorderTabs(fromIndex, toIndex);
+          dragTabId.current = null;
+          dragOverTabId.current = null;
+        }}
+        onDragEnd={() => {
+          dragTabId.current = null;
+          dragOverTabId.current = null;
+        }}
       >
         {iconName && <span className="material-symbols-outlined tab-icon">{iconName}</span>}
         <span className="tab-label">{label}</span>
@@ -263,7 +291,7 @@ export const TabBar: React.FC = () => {
                   </span>
                 </button>
 
-                {/* Workspace name — opens the workspace tab */}
+                {/* Workspace name — opens the workspace tab, styled as a tab when active */}
                 <button
                   type="button"
                   className={`tab-group-name-btn${isWorkspaceActive ? ' tab-group-name-btn--active' : ''}`}
@@ -283,6 +311,7 @@ export const TabBar: React.FC = () => {
                   }}
                   title={`Open ${item.workspaceName}`}
                 >
+                  <span className="material-symbols-outlined tab-icon" style={{ fontSize: '15px' }}>folder</span>
                   <span className="tab-group-title">{item.workspaceName}</span>
                   {isCollapsed && childTabCount > 0 && (
                     <span className="tab-group-count">{childTabCount}</span>
