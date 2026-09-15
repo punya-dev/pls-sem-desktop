@@ -15,9 +15,9 @@ const Dashboard = () => {
   const { 
     workspaces, archivedWorkspaces, activeWorkspaceId, setActiveWorkspace,
     studies, setActiveStudy, models, setActiveModel, addModel,
-    datasetsByStudy, setStudyDataset, touchStudy, archiveWorkspace, restoreWorkspace, renameWorkspace, trash,
-    trashWorkspace, trashStudy, trashModel, trashDataset, restoreTrashItem, permanentlyDeleteTrashItem,
-    renameStudy, duplicateStudy, renameModel, duplicateModel
+    datasetsByStudy, setStudyDataset, touchStudy, archiveWorkspace, restoreWorkspace, renameWorkspace,
+    deleteWorkspace, deleteStudy, deleteModel, deleteDataset, requestDelete,
+    renameStudy, duplicateStudy, renameModel, duplicateModel, openTab
   } = useStore();
   
   useEffect(() => {
@@ -27,15 +27,11 @@ const Dashboard = () => {
   }, [activeWorkspaceId, workspaces, setActiveWorkspace]);
 
   const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = useState(false);
-  const [isWorkspaceDropdownOpen, setIsWorkspaceDropdownOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isWorkspaceSearchOpen, setIsWorkspaceSearchOpen] = useState(false);
   const [workspaceQuery, setWorkspaceQuery] = useState('');
   const [isStudySearchOpen, setIsStudySearchOpen] = useState(false);
   const [studyQuery, setStudyQuery] = useState('');
-  const [showArchive, setShowArchive] = useState(() => new URLSearchParams(location.search).get('panel') === 'archive');
-  const [showTrash, setShowTrash] = useState(() => new URLSearchParams(location.search).get('panel') === 'trash');
-  const [expandedArchivedWorkspaces, setExpandedArchivedWorkspaces] = useState<Set<string>>(new Set());
   const [expandedStudies, setExpandedStudies] = useState<Set<string>>(new Set());
   
   const [isStudyModalOpen, setIsStudyModalOpen] = useState(false);
@@ -116,17 +112,6 @@ const Dashboard = () => {
     setInputDialogConfig({ isOpen: true, title, placeholder: 'Enter a name', submitLabel: 'Save', initialValue, onSubmit });
   };
 
-  const trashPath = (item: typeof trash[number]) => {
-    if (item.kind === 'workspace') return '';
-    if (item.kind === 'study') return item.workspaceName ?? '';
-    return [item.workspaceName, item.studyName].filter(Boolean).join(' / ');
-  };
-
-  const trashDate = (timestamp: string) => {
-    const date = new Date(timestamp);
-    return Number.isNaN(date.getTime()) ? timestamp.split(',')[0] : date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
-  };
-
   const handleCreateModel = () => {
     if (modelName.trim() && modelModalStudyId) {
       const id = 'model' + Date.now();
@@ -140,53 +125,23 @@ const Dashboard = () => {
       setModelModalOpen(false);
       setActiveStudy(modelModalStudyId);
       setActiveModel(id);
-      navigate('/model/' + id);
+      openTab({
+        type: 'model',
+        title: modelName.trim(),
+        modelId: id,
+        studyId: modelModalStudyId,
+        workspaceId: activeWorkspaceId,
+      });
     }
   };
 
   return (
     <>
-      <header className="titlebar window-drag">
-        <div className="titlebar__left no-drag">
-          <div className="titlebar__traffic-light-space" aria-hidden="true"></div>
-          <div className="brand">
-            <svg className="brand__logo" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <rect width="48" height="48" rx="10" fill="#6B4EE6"/>
-              <circle cx="16" cy="16" r="4" fill="#FFFFFF"/>
-              <circle cx="32" cy="18" r="4" fill="#C7D2FE"/>
-              <circle cx="20" cy="32" r="5" fill="#EEF2FF"/>
-              <circle cx="34" cy="32" r="3.5" fill="#A5B4FC"/>
-              <path d="M16 16L32 18M16 16L20 32M20 32L34 32M32 18L34 32" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeOpacity="0.85"/>
-            </svg>
-            <span className="brand__name">CSPLS</span>
-          </div>
-        </div>
-        <div className="titlebar__center no-drag">
-          <span className="titlebar__version">CSPLS 1.1</span>
-        </div>
-        <div className="titlebar__right no-drag">
-          <button className="icon-btn" title="Toggle Theme" type="button">
-            <span className="material-symbols-outlined">light_mode</span>
-          </button>
-          <button className="icon-btn" title="Settings" type="button">
-            <span className="material-symbols-outlined">settings</span>
-          </button>
-          <span className="v-divider"></span>
-          <div className="user-badge" role="button" tabIndex={0}>
-            <div className="user-badge__avatar">
-              <span>MV</span>
-              <span className="user-badge__status"></span>
-            </div>
-            <span className="user-badge__name">M. Vance</span>
-          </div>
-        </div>
-      </header>
-
       <div className="app-body">
         
         <aside className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`} id="sidebar">
           <div className="sidebar__top">
-            <div>
+            <div className="sidebar-ws-container">
               <div className="sidebar-header" style={{paddingBottom: '10px', borderBottom: 'none'}}>
                 {isWorkspaceSearchOpen ? <div className="inline-search-wrap"><input autoFocus className="sidebar-inline-search" value={workspaceQuery} onChange={event => setWorkspaceQuery(event.target.value)} onBlur={() => { if (!workspaceQuery) setIsWorkspaceSearchOpen(false); }} placeholder="Filter workspaces…" />{workspaceQuery && <button className="inline-search-clear" type="button" aria-label="Clear workspace search" onMouseDown={event => event.preventDefault()} onClick={() => setWorkspaceQuery('')}>×</button>}</div> : <span className="sidebar-header__label">Workspaces</span>}
                 <div className="sidebar-header__actions">
@@ -210,9 +165,12 @@ const Dashboard = () => {
                 {filteredWorkspaces.map(ws => (
                   <button 
                     key={ws.id} 
-                    className={`sidebar-item ${ws.id === activeWorkspaceId ? 'active' : ''}`} 
-                    type="button" 
-                    onClick={() => { setActiveWorkspace(ws.id); setShowArchive(false); setShowTrash(false); navigate('/workspace'); }}
+                    className={`sidebar-item ${ws.id === activeWorkspaceId ? 'active' : ''}`}
+                    type="button"
+                    onClick={() => {
+                      setActiveWorkspace(ws.id);
+                      openTab({ type: 'workspace', title: ws.name, workspaceId: ws.id });
+                    }}
                     onContextMenu={(e) => {
                       e.preventDefault();
                       useStore.getState().openContextMenu(e.clientX, e.clientY, [
@@ -231,9 +189,12 @@ const Dashboard = () => {
                           icon: 'delete', 
                           danger: true, 
                           action: () => {
-                            if (window.confirm(`Are you sure you want to remove workspace "${ws.name}"?`)) {
-                              trashWorkspace(ws.id);
-                            }
+                            requestDelete({
+                              title: 'Delete Workspace',
+                              itemName: ws.name,
+                              message: 'Are you sure? This workspace and all its contents will be permanently deleted and cannot be recovered.',
+                              onConfirm: () => deleteWorkspace(ws.id),
+                            });
                           } 
                         }
                       ]);
@@ -251,16 +212,12 @@ const Dashboard = () => {
           </div>
 
           <div className="sidebar__bottom">
-            <button className={`sidebar-item ${showArchive ? 'active' : ''}`} type="button" data-action="archive" onClick={() => { setShowArchive(value => !value); setShowTrash(false); }}>
+            <button className="sidebar-item" type="button" data-action="archive" onClick={() => openTab({ id: 'tab-archive', type: 'archive', title: 'Archive' })}>
               <span className="sidebar-item__left">
                 <span className="material-symbols-outlined">inventory_2</span>
                 <span>Archive</span>
               </span>
               <span className="sidebar-item__badge">{archivedWorkspaces.length}</span>
-            </button>
-            <button className={`sidebar-item ${showTrash ? 'active' : ''}`} type="button" onClick={() => { setShowTrash(value => !value); setShowArchive(false); }}>
-              <span className="sidebar-item__left"><span className="material-symbols-outlined">delete</span><span>Trash</span></span>
-              <span className="sidebar-item__badge">{trash.length}</span>
             </button>
             <button className="sidebar-item" type="button" data-action="docs">
               <span className="sidebar-item__left">
@@ -280,16 +237,6 @@ const Dashboard = () => {
                 <span className="truncate">Feedback & Reports</span>
               </span>
             </button>
-            <div className="license-badge">
-              <span className="material-symbols-outlined license-badge__icon">verified_user</span>
-              <div className="license-badge__content">
-                <span className="license-badge__label">Faculty Multi-Seat</span>
-                <span className="license-badge__status">
-                  <span className="license-badge__dot"></span>
-                  Active
-                </span>
-              </div>
-            </div>
           </div>
         </aside>
 
@@ -298,60 +245,220 @@ const Dashboard = () => {
             
             <div className="ws-header animate-fade-in">
               <div className="ws-header__left">
-                <h1 className="ws-header__greeting">{showArchive ? 'Archived workspaces' : showTrash ? 'Trash' : 'Welcome back,'}</h1>
-                {!showArchive && !showTrash && <div className="ws-header__workspace-pill" id="workspace-switcher-btn" title="Switch Workspace" onClick={() => setIsWorkspaceDropdownOpen(!isWorkspaceDropdownOpen)} style={{ position: 'relative' }}>
-                  <span className="ws-header__workspace-name" id="current-workspace-name">{activeWorkspace?.name || 'Workspace'}</span>
-                  <span className="material-symbols-outlined">expand_more</span>
-                  {isWorkspaceDropdownOpen && (
-                    <div className="workspace-dropdown" style={{ position: 'absolute', top: '100%', left: 0, marginTop: '8px', background: 'var(--color-bg-surface)', border: '1px solid var(--color-border-subtle)', borderRadius: 'var(--radius-md)', padding: '4px', zIndex: 10, minWidth: '180px', boxShadow: 'var(--shadow-md)' }}>
-                      {workspaces.map(ws => (
-                        <div key={ws.id} className="cspls-context-menu-item" onClick={(e) => { e.stopPropagation(); setActiveWorkspace(ws.id); setIsWorkspaceDropdownOpen(false); }}>
-                          <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>folder</span>
-                          <span style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}>{ws.name}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>}
-                {!showArchive && !showTrash && <><span style={{width: '1px', height: '16px', background: 'var(--color-border-divider)', margin: '0 4px'}}></span>
-                  <button type="button" style={{padding: '4px', borderRadius: 'var(--radius-sm)', color: 'var(--color-text-hint)', transition: 'all var(--transition-fast)'}} title="New Workspace" onClick={() => setIsWorkspaceModalOpen(true)}>
-                    <span className="material-symbols-outlined" style={{fontSize: '18px'}}>add</span>
-                  </button></>}
+                <h1 style={{ fontSize: '24px', fontWeight: 700, color: 'var(--color-accent, #6B4EE6)', letterSpacing: '-0.02em', margin: 0 }}>
+                  {activeWorkspace?.name || 'Workspace'}
+                </h1>
               </div>
-              {!showArchive && !showTrash && <div className="ws-header__actions">
+              <div className="ws-header__actions">
                 <button className="btn-ws-primary" type="button" onClick={handleCreateStudy}>
                   <span className="material-symbols-outlined">add</span>
                   <span>New Study</span>
                   <kbd className="kbd">⌘S</kbd>
                 </button>
-              </div>}
+              </div>
             </div>
 
-            {showTrash ? (
-              <div className="studies-list">
-                {trash.length ? trash.map(item => <div className="study-entry archive-entry" key={item.id}><div className="study-row trash-row"><div className="study-row__left"><span className="material-symbols-outlined study-folder">{item.kind === 'dataset' ? 'dataset' : item.kind === 'model' ? 'account_tree' : 'folder'}</span><span className="study-row__name">{item.name}</span>{trashPath(item) && <span className="trash-path">{trashPath(item)}</span>}<span className="study-row__count">{item.kind}</span></div><div className="study-row__meta trash-row__meta"><span className="study-row__time">{trashDate(item.deletedAt)}</span><button className="archive-restore-btn trash-action trash-action--restore" data-tooltip={`Deleted on ${item.deletedAt}`} type="button" onClick={() => restoreTrashItem(item.id)}>Restore</button><button className="archive-restore-btn trash-action trash-action--danger" type="button" onClick={() => { if (window.confirm(`Permanently delete ${item.name}? This cannot be undone.`)) permanentlyDeleteTrashItem(item.id); }}>Delete forever</button></div></div></div>) : <div className="empty-state" style={{padding: '32px 16px', textAlign: 'center'}}>Trash is empty.</div>}
-              </div>
-            ) : showArchive ? (
-              <div className="studies-list">
-                {archivedWorkspaces.length ? archivedWorkspaces.map(workspace => {
-                  const isExpanded = expandedArchivedWorkspaces.has(workspace.id);
-                  const archivedStudies = studies.filter(study => study.workspaceId === workspace.id);
-                  return <div className="study-entry archive-entry" key={workspace.id}>
-                    <div className="study-row" onClick={() => setExpandedArchivedWorkspaces(previous => { const next = new Set(previous); next.has(workspace.id) ? next.delete(workspace.id) : next.add(workspace.id); return next; })}>
-                      <div className="study-row__left"><span className="material-symbols-outlined study-folder">{isExpanded ? 'inventory_2' : 'inventory_2'}</span><span className="study-row__name">{workspace.name}</span><span className="study-row__count">Archived</span></div>
-                      <div className="study-row__meta"><button className="archive-restore-btn" type="button" onClick={event => { event.stopPropagation(); restoreWorkspace(workspace.id); }}>Restore</button><span className="study-row__chevron" style={{transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)'}}><span className="material-symbols-outlined study-chevron"></span></span></div>
+{showTrash ? (
+  <div className="studies-list">
+    {trash.length ? trash.map(item => (
+      <div className="study-entry archive-entry" key={item.id}>
+        <div className="study-row trash-row">
+          <div className="study-row__left">
+            <span className="material-symbols-outlined study-folder">
+              {item.kind === 'dataset'
+                ? 'dataset'
+                : item.kind === 'model'
+                  ? 'account_tree'
+                  : 'folder'}
+            </span>
+            <span className="study-row__name">{item.name}</span>
+            {trashPath(item) && (
+              <span className="trash-path">{trashPath(item)}</span>
+            )}
+            <span className="study-row__count">{item.kind}</span>
+          </div>
+
+          <div className="study-row__meta trash-row__meta">
+            <span className="study-row__time">
+              {trashDate(item.deletedAt)}
+            </span>
+
+            <button
+              className="archive-restore-btn trash-action trash-action--restore"
+              data-tooltip={`Deleted on ${item.deletedAt}`}
+              type="button"
+              onClick={() => restoreTrashItem(item.id)}
+            >
+              Restore
+            </button>
+
+            <button
+              className="archive-restore-btn trash-action trash-action--danger"
+              type="button"
+              onClick={() => {
+                if (window.confirm(`Permanently delete ${item.name}? This cannot be undone.`)) {
+                  permanentlyDeleteTrashItem(item.id);
+                }
+              }}
+            >
+              Delete forever
+            </button>
+          </div>
+        </div>
+      </div>
+    )) : (
+      <div
+        className="empty-state"
+        style={{padding: '32px 16px', textAlign: 'center'}}
+      >
+        Trash is empty.
+      </div>
+    )}
+  </div>
+) : showArchive ? (
+  <div className="studies-list">
+    {archivedWorkspaces.length ? archivedWorkspaces.map(workspace => {
+      const isExpanded = expandedArchivedWorkspaces.has(workspace.id);
+      const archivedStudies = studies.filter(
+        study => study.workspaceId === workspace.id
+      );
+
+      return (
+        <div className="study-entry archive-entry" key={workspace.id}>
+          <div
+            className="study-row"
+            onClick={() =>
+              setExpandedArchivedWorkspaces(previous => {
+                const next = new Set(previous);
+
+                if (next.has(workspace.id)) {
+                  next.delete(workspace.id);
+                } else {
+                  next.add(workspace.id);
+                }
+
+                return next;
+              })
+            }
+          >
+            <div className="study-row__left">
+              <span className="material-symbols-outlined study-folder">
+                inventory_2
+              </span>
+              <span className="study-row__name">{workspace.name}</span>
+              <span className="study-row__count">Archived</span>
+            </div>
+
+            <div className="study-row__meta">
+              <button
+                className="archive-restore-btn"
+                type="button"
+                onClick={event => {
+                  event.stopPropagation();
+                  restoreWorkspace(workspace.id);
+                }}
+              >
+                Restore
+              </button>
+
+              <span
+                className="study-row__chevron"
+                style={{
+                  transform: isExpanded
+                    ? 'rotate(90deg)'
+                    : 'rotate(0deg)'
+                }}
+              >
+                <span className="material-symbols-outlined study-chevron"></span>
+              </span>
+            </div>
+          </div>
+
+          {isExpanded && (
+            <div className="study-children archive-children">
+              {archivedStudies.length ? (
+                archivedStudies.map(study => (
+                  <div key={study.id}>
+                    <div className="file-row archive-readonly">
+                      <div className="file-row__left">
+                        <span className="material-symbols-outlined">
+                          folder
+                        </span>
+                        <span>{study.name}</span>
+                        <span className="file-badge file-badge--default">
+                          Study
+                        </span>
+                      </div>
+
+                      <div className="file-row__meta">
+                        <span className="file-row__time">
+                          {study.lastModified}
+                        </span>
+                      </div>
                     </div>
-                    {isExpanded && <div className="study-children archive-children">
-                      {archivedStudies.length ? archivedStudies.map(study => <div key={study.id}>
-                        <div className="file-row archive-readonly"><div className="file-row__left"><span className="material-symbols-outlined">folder</span><span>{study.name}</span><span className="file-badge file-badge--default">Study</span></div><div className="file-row__meta"><span className="file-row__time">{study.lastModified}</span></div></div>
-                        {datasetsByStudy[study.id] && <div className="file-row archive-readonly archive-file"><div className="file-row__left"><span className="material-symbols-outlined">dataset</span><span>{datasetsByStudy[study.id].filename}</span><span className="file-badge file-badge--default">{datasetsByStudy[study.id].rows.length} rows</span></div></div>}
-                        {models.filter(model => model.studyId === study.id).map(model => <div className="file-row archive-readonly archive-file" key={model.id}><div className="file-row__left"><span className="material-symbols-outlined">account_tree</span><span>{model.name}</span><span className="file-badge file-badge--default">{model.type}</span></div><div className="file-row__meta"><span className="file-row__time">{model.lastModified}</span></div></div>)}
-                      </div>) : <div className="archive-empty">No studies in this workspace.</div>}
-                    </div>}
-                  </div>;
-                }) : <div className="empty-state" style={{padding: '32px 16px', textAlign: 'center'}}>No archived workspaces.</div>}
-              </div>
-            ) : <div style={{flex: '1', display: 'flex', flexDirection: 'column'}}>
+
+                    {datasetsByStudy[study.id] && (
+                      <div className="file-row archive-readonly archive-file">
+                        <div className="file-row__left">
+                          <span className="material-symbols-outlined">
+                            dataset
+                          </span>
+                          <span>
+                            {datasetsByStudy[study.id].filename}
+                          </span>
+                          <span className="file-badge file-badge--default">
+                            {datasetsByStudy[study.id].rows.length} rows
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {models
+                      .filter(model => model.studyId === study.id)
+                      .map(model => (
+                        <div
+                          className="file-row archive-readonly archive-file"
+                          key={model.id}
+                        >
+                          <div className="file-row__left">
+                            <span className="material-symbols-outlined">
+                              account_tree
+                            </span>
+                            <span>{model.name}</span>
+                            <span className="file-badge file-badge--default">
+                              {model.type}
+                            </span>
+                          </div>
+
+                          <div className="file-row__meta">
+                            <span className="file-row__time">
+                              {model.lastModified}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                ))
+              ) : (
+                <div className="archive-empty">
+                  No studies in this workspace.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    }) : (
+      <div
+        className="empty-state"
+        style={{padding: '32px 16px', textAlign: 'center'}}
+      >
+        No archived workspaces.
+      </div>
+    )}
+  </div>
+) : (
+  <div style={{flex: '1', display: 'flex', flexDirection: 'column'}}>
               <div className="studies-header">
                 <div className="studies-header__left" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                   {isStudySearchOpen ? <div className="inline-search-wrap"><input autoFocus className="studies-inline-search" value={studyQuery} onChange={event => setStudyQuery(event.target.value)} onBlur={() => { if (!studyQuery) setIsStudySearchOpen(false); }} placeholder="Filter studies…" />{studyQuery && <button className="inline-search-clear" type="button" aria-label="Clear study search" onMouseDown={event => event.preventDefault()} onClick={() => setStudyQuery('')}>×</button>}</div> : <span style={{ color: 'var(--color-text-secondary)' }}>Studies</span>}
@@ -402,9 +509,12 @@ const Dashboard = () => {
                                   icon: 'delete', 
                                   danger: true, 
                                   action: () => {
-                                    if (window.confirm(`Are you sure you want to remove study "${study.name}"?`)) {
-                                      trashStudy(study.id);
-                                    }
+                                    requestDelete({
+                                      title: 'Delete Study',
+                                      itemName: study.name,
+                                      message: 'Are you sure? This study and all its models and datasets will be permanently deleted and cannot be recovered.',
+                                      onConfirm: () => deleteStudy(study.id),
+                                    });
                                   } 
                                 }
                               ]);
@@ -446,13 +556,92 @@ const Dashboard = () => {
                         ) : (
                           <>
                             {studyDataset && (
-                              <div className="file-row file-row--muted" onClick={() => { setImportingStudyId(study.id); setDatasetToImport(studyDataset); }} onContextMenu={e => { e.preventDefault(); e.stopPropagation(); useStore.getState().openContextMenu(e.clientX, e.clientY, [{ id: 'rename', label: 'Rename Dataset', icon: 'edit', action: () => rename('Rename Dataset', studyDataset.filename, name => { const updated = { ...studyDataset, filename: name }; setStudyDataset(study.id, updated); touchStudy(study.id); if (study.path) { const headers = updated.variables.map(v => v.name); api.saveProjectDataJson(study.path, name, headers, updated.rows).catch(console.warn); } }) }, { id: 'delete', label: 'Delete Dataset', icon: 'delete', danger: true, action: () => { if (window.confirm(`Delete dataset "${studyDataset.filename}"?`)) { trashDataset(study.id); touchStudy(study.id); if (study.path) api.deleteProjectData(study.path).catch(console.warn); } } }]); }}>
+<div
+  className="file-row file-row--muted"
+  onClick={() => {
+    setImportingStudyId(study.id);
+    setDatasetToImport(studyDataset);
+  }}
+  onContextMenu={e => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    useStore.getState().openContextMenu(
+      e.clientX,
+      e.clientY,
+      [
+        {
+          id: 'rename',
+          label: 'Rename Dataset',
+          icon: 'edit',
+          action: () =>
+            rename(
+              'Rename Dataset',
+              studyDataset.filename,
+              name => {
+                const updated = {
+                  ...studyDataset,
+                  filename: name
+                };
+
+                setStudyDataset(study.id, updated);
+                touchStudy(study.id);
+
+                if (study.path) {
+                  const headers = updated.variables.map(v => v.name);
+
+                  api.saveProjectDataJson(
+                    study.path,
+                    name,
+                    headers,
+                    updated.rows
+                  ).catch(console.warn);
+                }
+              }
+            )
+        },
+        {
+          id: 'delete',
+          label: 'Delete Dataset',
+          icon: 'delete',
+          danger: true,
+          action: () => {
+            requestDelete({
+              title: 'Delete Dataset',
+              itemName: studyDataset.filename,
+              message:
+                'Are you sure? This dataset will be permanently deleted and cannot be recovered.',
+              onConfirm: () => {
+                trashDataset(study.id);
+                touchStudy(study.id);
+
+                if (study.path) {
+                  api.deleteProjectData(study.path).catch(console.warn);
+                }
+              }
+            });
+          }
+        }
+      ]
+    );
+  }}
+>
                                 <div className="file-row__left"><span className="material-symbols-outlined">dataset</span><span>{studyDataset.filename}</span><span className="file-badge file-badge--default">{studyDataset.rows.length} rows</span><span className="file-badge file-badge--default">Dataset</span></div>
                                 <div className="file-row__meta"><span className="file-row__time">{study.lastModified}</span><span style={{width: '16px'}}></span></div>
                               </div>
                             )}
                             {studyModels.map(model => (
-                              <div key={model.id} className="file-row" onClick={() => { setActiveStudy(study.id); setActiveModel(model.id); navigate('/model/' + model.id); }} onContextMenu={e => { e.preventDefault(); e.stopPropagation(); useStore.getState().openContextMenu(e.clientX, e.clientY, [{ id: 'rename', label: 'Rename Model', icon: 'edit', action: () => rename('Rename Model', model.name, name => renameModel(model.id, name)) }, { id: 'duplicate', label: 'Duplicate Model', icon: 'content_copy', action: () => duplicateModel(model.id) }, { id: 'delete', label: 'Delete Model', icon: 'delete', danger: true, action: () => { if (window.confirm(`Delete model "${model.name}"?`)) trashModel(model.id); } }]); }}>
+                              <div key={model.id} className="file-row" onClick={() => {
+                                setActiveStudy(study.id);
+                                setActiveModel(model.id);
+                                openTab({
+                                  type: 'model',
+                                  title: model.name,
+                                  modelId: model.id,
+                                  studyId: study.id,
+                                  workspaceId: activeWorkspaceId,
+                                });
+                              }} onContextMenu={e => { e.preventDefault(); e.stopPropagation(); useStore.getState().openContextMenu(e.clientX, e.clientY, [{ id: 'rename', label: 'Rename Model', icon: 'edit', action: () => rename('Rename Model', model.name, name => renameModel(model.id, name)) }, { id: 'duplicate', label: 'Duplicate Model', icon: 'content_copy', action: () => duplicateModel(model.id) }, { id: 'delete', label: 'Delete Model', icon: 'delete', danger: true, action: () => { requestDelete({ title: 'Delete Model', itemName: model.name, message: 'Are you sure? This model will be permanently deleted and cannot be recovered.', onConfirm: () => deleteModel(model.id) }); } }]); }}>
                                 <div className="file-row__left">
                                   <span className="material-symbols-outlined">{model.type === 'Dataset' ? 'dataset' : 'account_tree'}</span>
                                   <span>{model.name}</span>
@@ -475,7 +664,7 @@ const Dashboard = () => {
                   );
                 })}
               </div>
-            </div>}
+            </div>
           </div>
         </main>
       </div>

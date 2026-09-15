@@ -13,8 +13,7 @@ const WorkspaceModal = ({ isOpen, onClose }: WorkspaceModalProps) => {
   const [location, setLocation] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const { workspaces, addWorkspace, setActiveWorkspace } = useStore();
+  const { workspaces, addWorkspace, setActiveWorkspace, openTab } = useStore();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -64,11 +63,12 @@ const WorkspaceModal = ({ isOpen, onClose }: WorkspaceModalProps) => {
 
   const handleCreateWorkspace = async () => {
     if (!cleanName) return;
-    setError(null);
+setError(null);
     setIsCreating(true);
 
     try {
       const res = await api.createWorkspace(calculatedPath, cleanName);
+
       if (res?.error) {
         if (res.error.toLowerCase().includes('already exists')) {
           await api.openWorkspace(calculatedPath);
@@ -82,6 +82,7 @@ const WorkspaceModal = ({ isOpen, onClose }: WorkspaceModalProps) => {
 
     const newId = calculatedPath;
     const existing = workspaces.find(w => w.path === calculatedPath);
+
     if (!existing) {
       addWorkspace({
         id: newId,
@@ -89,7 +90,16 @@ const WorkspaceModal = ({ isOpen, onClose }: WorkspaceModalProps) => {
         path: calculatedPath
       });
     }
-    setActiveWorkspace(existing ? existing.id : newId);
+
+    const workspaceId = existing ? existing.id : newId;
+
+    setActiveWorkspace(workspaceId);
+
+    openTab({
+      type: 'workspace',
+      title: cleanName,
+      workspaceId,
+    });
     setName('');
     setLocation('');
     setError(null);

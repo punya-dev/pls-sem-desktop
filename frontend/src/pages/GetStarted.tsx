@@ -7,14 +7,27 @@ import { api } from '../utils/api';
 
 const GetStarted = () => {
   const navigate = useNavigate();
-  const { workspaces, addWorkspace, removeWorkspace, setActiveWorkspace, archivedWorkspaces, trash, archiveWorkspace, renameWorkspace, trashWorkspace } = useStore();
+const {
+  workspaces,
+  addWorkspace,
+  removeWorkspace,
+  setActiveWorkspace,
+  archivedWorkspaces,
+  archiveWorkspace,
+  renameWorkspace,
+  requestDelete,
+  deleteWorkspace,
+  openTab,
+} = useStore();
   const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [inputDialogConfig, setInputDialogConfig] = useState<{isOpen: boolean; title: string; placeholder: string; submitLabel: string; onSubmit: (val: string) => void}>({
     isOpen: false, title: '', placeholder: '', submitLabel: '', onSubmit: () => {}
   });
 
-  const handleOpenWorkspace = async () => {
+
+ 
+    const handleOpenWorkspace = async () => {
     try {
       const { open } = await import('@tauri-apps/plugin-dialog');
       const selected = await open({
@@ -131,45 +144,109 @@ const GetStarted = () => {
     
     <aside className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`} id="sidebar">
 
-      
-      <div className="sidebar__top">
-        <div>
-          
-          <div className="sidebar-header" style={{'paddingBottom': '10px', 'borderBottom': 'none'}}>
-            <span className="sidebar-header__label">Workspaces</span>
-            <div className="sidebar-header__actions">
-              <button className="icon-btn icon-btn--sm" title="Search workspaces" type="button" onClick={() => setInputDialogConfig({isOpen: true, title: 'Search Workspaces', placeholder: 'Enter workspace name...', submitLabel: 'Search', onSubmit: () => {}})}>
-                <span className="material-symbols-outlined">search</span>
-              </button>
-              <button className="icon-btn icon-btn--sm" title="Open Workspace Folder" type="button" onClick={handleOpenWorkspace}>
-                <span className="material-symbols-outlined">folder_open</span>
-              </button>
-              <button className="sidebar-create-folder-btn" title="Create Workspace" type="button" onClick={() => setIsWorkspaceModalOpen(true)}>
-                <svg fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
-                  <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path>
-                  <line x1="12" x2="12" y1="10" y2="16"></line>
-                  <line x1="9" x2="15" y1="13" y2="13"></line>
-                </svg>
-              </button>
-              <button className="icon-btn icon-btn--sm" id="sidebar-collapse-btn" title="Collapse sidebar" type="button" onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}>
-                <span className="material-symbols-outlined">left_panel_close</span>
-              </button>
-            </div>
-          </div>
 
-          <div id="sidebar-ws-list" style={{'display': 'flex', 'flexDirection': 'column', 'gap': '2px'}}>
-            {workspaces.map(ws => (
-              <button 
-                key={ws.id} 
-                className="sidebar-item" 
-                type="button" 
-                onClick={async () => {
-                  if (ws.path) {
-                    await api.openWorkspace(ws.path);
-                  }
-                  setActiveWorkspace(ws.id);
-                  navigate('/workspace');
-                }}
+          
+<div className="sidebar__top">
+  <div className="sidebar-ws-container">
+
+    <div
+      className="sidebar-header"
+      style={{ paddingBottom: '10px', borderBottom: 'none' }}
+    >
+      <span className="sidebar-header__label">Workspaces</span>
+
+      <div className="sidebar-header__actions">
+        <button
+          className="icon-btn icon-btn--sm"
+          title="Search workspaces"
+          type="button"
+          onClick={() =>
+            setInputDialogConfig({
+              isOpen: true,
+              title: 'Search Workspaces',
+              placeholder: 'Enter workspace name...',
+              submitLabel: 'Search',
+              onSubmit: () => {},
+            })
+          }
+        >
+          <span className="material-symbols-outlined">search</span>
+        </button>
+
+        <button
+          className="icon-btn icon-btn--sm"
+          title="Open Workspace Folder"
+          type="button"
+          onClick={handleOpenWorkspace}
+        >
+          <span className="material-symbols-outlined">folder_open</span>
+        </button>
+
+        <button
+          className="sidebar-create-folder-btn"
+          title="Create Workspace"
+          type="button"
+          onClick={() => setIsWorkspaceModalOpen(true)}
+        >
+          <svg
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="2"
+            viewBox="0 0 24 24"
+          >
+            <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
+            <line x1="12" x2="12" y1="10" y2="16" />
+            <line x1="9" x2="15" y1="13" y2="13" />
+          </svg>
+        </button>
+
+        <button
+          className="icon-btn icon-btn--sm"
+          id="sidebar-collapse-btn"
+          title="Collapse sidebar"
+          type="button"
+          onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+        >
+          <span className="material-symbols-outlined">
+            left_panel_close
+          </span>
+        </button>
+      </div>
+    </div>
+
+    <div
+      id="sidebar-ws-list"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '2px',
+      }}
+    >
+      {workspaces.map(ws => (
+        <button
+          key={ws.id}
+          className="sidebar-item"
+          type="button"
+          onClick={async () => {
+            if (ws.path) {
+              const res = await api.openWorkspace(ws.path);
+
+              if (res.error) {
+                alert(res.error);
+                return;
+              }
+            }
+
+            setActiveWorkspace(ws.id);
+
+            openTab({
+              type: 'workspace',
+              title: ws.name,
+              workspaceId: ws.id,
+            });
+          }}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   useStore.getState().openContextMenu(e.clientX, e.clientY, [
@@ -186,16 +263,26 @@ const GetStarted = () => {
                       label: 'Delete Workspace',
                       icon: 'delete',
                       danger: true,
-                      action: async () => {
-                        if (window.confirm(`Are you sure you want to permanently delete workspace "${ws.name}" and all its files? This cannot be undone.`)) {
-                          if (ws.path) {
-                            const res = await api.deleteWorkspace(ws.path);
-                            if (res.error) {
-                              alert('Failed to delete workspace files: ' + res.error);
-                            }
-                          }
-                          removeWorkspace(ws.id);
-                        }
+action: () => {
+  requestDelete({
+    title: 'Delete Workspace',
+    itemName: ws.name,
+    message:
+      'Are you sure? This workspace and all its contents will be permanently deleted and cannot be recovered.',
+    onConfirm: async () => {
+      if (ws.path) {
+        const res = await api.deleteWorkspace(ws.path);
+
+        if (res.error) {
+          alert('Failed to delete workspace files: ' + res.error);
+          return;
+        }
+      }
+
+      deleteWorkspace(ws.id);
+    },
+  });
+}
                       }
                     }
                   ]);
@@ -213,16 +300,12 @@ const GetStarted = () => {
 
       
       <div className="sidebar__bottom">
-        <button className="sidebar-item" type="button" data-action="archive" onClick={() => navigate('/workspace?panel=archive')}>
+        <button className="sidebar-item" type="button" data-action="archive" onClick={() => openTab({ id: 'tab-archive', type: 'archive', title: 'Archive' })}>
           <span className="sidebar-item__left">
             <span className="material-symbols-outlined">inventory_2</span>
             <span>Archive</span>
           </span>
           <span className="sidebar-item__badge">{archivedWorkspaces.length}</span>
-        </button>
-        <button className="sidebar-item" type="button" onClick={() => navigate('/workspace?panel=trash')}>
-          <span className="sidebar-item__left"><span className="material-symbols-outlined">delete</span><span>Trash</span></span>
-          <span className="sidebar-item__badge">{trash.length}</span>
         </button>
 
         <button className="sidebar-item" type="button" data-action="docs">
@@ -245,18 +328,6 @@ const GetStarted = () => {
             <span className="truncate">Feedback &amp; Reports</span>
           </span>
         </button>
-
-        
-        <div className="license-badge">
-          <span className="material-symbols-outlined license-badge__icon">verified_user</span>
-          <div className="license-badge__content">
-            <span className="license-badge__label">Faculty Multi-Seat</span>
-            <span className="license-badge__status">
-              <span className="license-badge__dot"></span>
-              Active
-            </span>
-          </div>
-        </div>
       </div>
     </aside>
 

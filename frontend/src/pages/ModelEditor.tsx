@@ -12,13 +12,67 @@ import { Upload } from 'lucide-react';
 import '../model-canvas.css';
 import '../results.css';
 
+interface PathStat {
+  from: string;
+  to: string;
+  beta: number;
+  mean: number;
+  stdev: number;
+  tStat: number;
+  pValue: number;
+  stars: string;
+}
+
+const CONSTRUCT_LIST = [
+  { code: 'ATTR', name: 'ATTR', role: 'Endo', color: '#6366f1' },
+  { code: 'COMP', name: 'COMP', role: 'Exo', color: '#0ea5e9' },
+  { code: 'CSOR', name: 'CSOR', role: 'Exo', color: '#f59e0b' },
+  { code: 'CUSA', name: 'CUSA', role: 'Endo', color: '#10b981' },
+  { code: 'LIKE', name: 'LIKE', role: 'Endo', color: '#a855f7' },
+  { code: 'PERF', name: 'PERF', role: 'Exo', color: '#f43f5e' },
+  { code: 'QUAL', name: 'QUAL', role: 'Exo', color: '#14b8a6' },
+];
+
+const RAW_PATHS = [
+  { from: 'COMP', to: 'CUSA', baseBeta: 0.148, baseT: 2.114, baseP: 0.035 },
+  { from: 'COMP', to: 'LIKE', baseBeta: 0.344, baseT: 4.912, baseP: 0.0005 },
+  { from: 'COMP', to: 'PERF', baseBeta: 0.315, baseT: 4.418, baseP: 0.0003 },
+  { from: 'COMP', to: 'ATTR', baseBeta: 0.218, baseT: 3.105, baseP: 0.002 },
+  { from: 'CSOR', to: 'CUSA', baseBeta: 0.061, baseT: 0.982, baseP: 0.326 },
+  { from: 'CSOR', to: 'LIKE', baseBeta: 0.175, baseT: 2.834, baseP: 0.005 },
+  { from: 'CSOR', to: 'ATTR', baseBeta: 0.134, baseT: 2.041, baseP: 0.041 },
+  { from: 'CSOR', to: 'QUAL', baseBeta: 0.288, baseT: 3.962, baseP: 0.0004 },
+  { from: 'CUSA', to: 'LIKE', baseBeta: 0.428, baseT: 7.185, baseP: 0.0001 },
+  { from: 'CUSA', to: 'ATTR', baseBeta: 0.252, baseT: 3.518, baseP: 0.0008 },
+  { from: 'LIKE', to: 'ATTR', baseBeta: 0.536, baseT: 8.411, baseP: 0.0001 },
+  { from: 'PERF', to: 'CUSA', baseBeta: 0.291, baseT: 3.890, baseP: 0.0002 },
+  { from: 'PERF', to: 'LIKE', baseBeta: 0.089, baseT: 1.452, baseP: 0.147 },
+  { from: 'PERF', to: 'ATTR', baseBeta: 0.267, baseT: 3.712, baseP: 0.0003 },
+  { from: 'QUAL', to: 'CUSA', baseBeta: 0.384, baseT: 4.821, baseP: 0.0002 },
+  { from: 'QUAL', to: 'LIKE', baseBeta: 0.042, baseT: 0.672, baseP: 0.502 },
+  { from: 'QUAL', to: 'ATTR', baseBeta: 0.195, baseT: 2.894, baseP: 0.004 },
+  { from: 'QUAL', to: 'PERF', baseBeta: 0.462, baseT: 6.940, baseP: 0.0001 },
+  { from: 'ATTR', to: 'CUSA', baseBeta: 0.112, baseT: 1.984, baseP: 0.047 },
+  { from: 'ATTR', to: 'PERF', baseBeta: 0.168, baseT: 2.312, baseP: 0.021 },
+  { from: 'ATTR', to: 'LIKE', baseBeta: 0.205, baseT: 2.945, baseP: 0.003 },
+];
+
 const ModelEditor = () => {
   const navigate = useNavigate();
-  const { workspaces, activeWorkspaceId, studies, activeStudyId, activeModelId, models, datasetsByStudy, setStudyDataset, touchStudy } = useStore();
+  const { workspaces, activeWorkspaceId, studies, activeStudyId, activeModelId, models, datasetsByStudy, setStudyDataset, touchStudy, openTab } = useStore();
   
   const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId);
   const activeStudy = studies.find(s => s.id === activeStudyId);
   const activeModel = models.find(model => model.id === activeModelId);
+
+  const [currentView, setCurrentView] = useState<'model' | 'results'>('model');
+  const [hasCalculated, setHasCalculated] = useState(false);
+  const [isRecalculating, setIsRecalculating] = useState(false);
+  const [calcSeed, setCalcSeed] = useState(1);
+  const [resultsViewMode, setResultsViewMode] = useState<'matrix' | 'list'>('matrix');
+  const [highlightSignificant, setHighlightSignificant] = useState(true);
+  const [showTStats, setShowTStats] = useState(true);
+  const [resultsSearchQuery, setResultsSearchQuery] = useState('');
 
   const [datasetToImport, setDatasetToImport] = useState<ParsedDataset | null>(null);
   const [activeDataset, setActiveDataset] = useState<ParsedDataset | null>(() => activeStudyId ? datasetsByStudy[activeStudyId] ?? null : null);
@@ -50,7 +104,6 @@ const ModelEditor = () => {
   const [plsResults, setPlsResults] = useState<any>(null);
   const [activeResultTab, setActiveResultTab] = useState<string>('path_coefficients');
   const [resultViewMode, setResultViewMode] = useState<'matrix' | 'list'>('matrix');
-
 
   useEffect(() => {
     if (activeStudyId && datasetsByStudy[activeStudyId]) {
@@ -134,27 +187,54 @@ const ModelEditor = () => {
     try {
       event.dataTransfer.setData('text/plain', variableName);
       event.dataTransfer.setData('text', variableName);
-      event.dataTransfer.effectAllowed = 'copy';
-    } catch (e) {}
+    } catch {
+      // Ignore if webview restricts dataTransfer.setData
+    }
+
+    event.dataTransfer.effectAllowed = 'copy';
     (window as any).__draggedVariable = variableName;
   };
 
   const handleCanvasDrop = (event: React.DragEvent<any>) => {
     event.preventDefault();
     event.stopPropagation();
+
     let variableName = '';
+
     try {
-      variableName = event.dataTransfer?.getData('text/plain') || event.dataTransfer?.getData('text') || '';
-    } catch (e) {}
+      variableName =
+        event.dataTransfer?.getData('text/plain') ||
+        event.dataTransfer?.getData('text') ||
+        '';
+    } catch {
+      // Ignore
+    }
+
+    if (!variableName) {
+      variableName = (window as any).__draggedVariable || '';
+    }
+
+    (window as any).__draggedVariable = null;
+
+    if (variableName) {
+      (window as any).dropModelVariable?.(
+        variableName,
+        event.clientX,
+        event.clientY
+      );
+    }
     if (!variableName) {
       variableName = (window as any).__draggedVariable || '';
     }
     (window as any).__draggedVariable = null;
     if (variableName) {
-      (window as any).dropModelVariable?.(variableName, event.clientX, event.clientY);
+      (window as any).dropModelVariable?.(
+        variableName,
+        event.clientX,
+        event.clientY
+      );
     }
   };
-
 
   const switchView = (view: 'model' | 'results') => {
     const viewSlider = document.getElementById('main-view-slider');
@@ -162,7 +242,9 @@ const ModelEditor = () => {
     const viewResults = document.getElementById('view-results');
     const sliderBtns = viewSlider?.querySelectorAll('.view-slider__btn');
     const sliderBg = viewSlider?.querySelector('.view-slider__bg');
+
     if (!viewModel || !viewResults || !sliderBg || !sliderBtns) return;
+
     if (view === 'model') {
       (viewModel as HTMLElement).style.display = 'block';
       (viewResults as HTMLElement).style.display = 'none';
@@ -183,11 +265,14 @@ const ModelEditor = () => {
       alert('Please open or select an active project study first.');
       return;
     }
+
     try {
       setIsSaving(true);
+
       const spec = exportModelSpec();
       const layout = getModelCanvasState();
       const res = await api.saveProjectModel(activeStudy.path, spec, layout);
+
       if (res.error) {
         alert('Failed to save model: ' + res.error);
       } else {
@@ -206,14 +291,21 @@ const ModelEditor = () => {
       alert('Please open or select an active project study first.');
       return;
     }
+
     try {
       setIsCalculating(true);
+
       const spec = exportModelSpec();
       const layout = getModelCanvasState();
 
       // Ensure dataset is saved to project file if activeDataset is present
       const datasetHeaders = activeDataset?.variables?.map(v => v.name);
-      if (activeDataset && Array.isArray(activeDataset.rows) && activeDataset.rows.length > 0) {
+
+      if (
+        activeDataset &&
+        Array.isArray(activeDataset.rows) &&
+        activeDataset.rows.length > 0
+      ) {
         try {
           await api.saveProjectDataJson(
             activeStudy.path,
@@ -222,12 +314,20 @@ const ModelEditor = () => {
             activeDataset.rows
           );
         } catch (err) {
-          console.warn('Failed auto-saving active dataset before calculate:', err);
+          console.warn(
+            'Failed auto-saving active dataset before calculate:',
+            err
+          );
         }
       }
 
       // 1. Validate model spec with backend
-      const valRes = await api.validateModel(spec, activeStudy.path, datasetHeaders);
+      const valRes = await api.validateModel(
+        spec,
+        activeStudy.path,
+        datasetHeaders
+      );
+
       if (!valRes.is_valid) {
         setValidationModal(valRes);
         return;
@@ -237,11 +337,16 @@ const ModelEditor = () => {
       await api.saveProjectModel(activeStudy.path, spec, layout);
 
       // 3. Execute PLS-SEM algorithm
-      const runRes = await api.runPlsModel(activeStudy.path, spec, {
-        columns: datasetHeaders,
-        rows: activeDataset?.rows,
-        dataset_name: activeDataset?.filename,
-      });
+      const runRes = await api.runPlsModel(
+        activeStudy.path,
+        spec,
+        {
+          columns: datasetHeaders,
+          rows: activeDataset?.rows,
+          dataset_name: activeDataset?.filename,
+        }
+      );
+
       if (runRes.error) {
         alert('PLS-SEM calculation failed: ' + runRes.error);
         return;
@@ -251,20 +356,28 @@ const ModelEditor = () => {
         setPlsResults(runRes.results);
       }
 
-      setValidationSuccessToast(`PLS-SEM Calculation Complete! Converged in ${runRes.results?.iterations || 0} iterations`);
+      setValidationSuccessToast(
+        `PLS-SEM Calculation Complete! Converged in ${
+          runRes.results?.iterations || 0
+        } iterations`
+      );
+
       setTimeout(() => setValidationSuccessToast(null), 3500);
 
       // Show view slider and switch to results view
       const viewSlider = document.getElementById('main-view-slider');
+
       if (viewSlider) {
         (viewSlider as HTMLElement).style.display = 'flex';
       }
+
       switchView('results');
     } catch (err: any) {
       alert('Error calculating model: ' + err?.message);
     } finally {
       setIsCalculating(false);
     }
+  };
   };
 
   useEffect(() => {
@@ -572,18 +685,169 @@ const ModelEditor = () => {
         if (m.initResults) m.initResults();
       }).catch(() => {});
 
+    if (variableName) {
+      (window as any).dropModelVariable?.(
+        variableName,
+        event.clientX,
+        event.clientY
+      );
+    }
+  };
+
+  const switchView = (view: 'model' | 'results') => {
+    const viewSlider = document.getElementById('main-view-slider');
+    const viewModel = document.getElementById('view-model');
+    const viewResults = document.getElementById('view-results');
+    const sliderBtns = viewSlider?.querySelectorAll('.view-slider__btn');
+    const sliderBg = viewSlider?.querySelector('.view-slider__bg');
+
+    if (!viewModel || !viewResults || !sliderBg || !sliderBtns) return;
+
+    if (view === 'model') {
+      (viewModel as HTMLElement).style.display = 'block';
+      (viewResults as HTMLElement).style.display = 'none';
+      (sliderBg as HTMLElement).style.transform = 'translateX(0)';
+      sliderBtns[0].classList.add('active');
+      sliderBtns[1].classList.remove('active');
+    } else {
+      (viewModel as HTMLElement).style.display = 'none';
+      (viewResults as HTMLElement).style.display = 'block';
+      (sliderBg as HTMLElement).style.transform = 'translateX(100%)';
+      sliderBtns[1].classList.add('active');
+      sliderBtns[0].classList.remove('active');
+    }
+  };
+
+  const handleSaveModel = async () => {
+    if (!activeStudy?.path) {
+      alert('Please open or select an active project study first.');
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+      const spec = exportModelSpec();
+      const layout = getModelCanvasState();
+      const res = await api.saveProjectModel(activeStudy.path, spec, layout);
+
+      if (res.error) {
+        alert('Failed to save model: ' + res.error);
+      } else {
+        setSaveToast('Model saved successfully');
+        setTimeout(() => setSaveToast(null), 2500);
+      }
+    } catch (err: any) {
+      alert('Error saving model: ' + err?.message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleCalculate = async () => {
+    if (!activeStudy?.path) {
+      alert('Please open or select an active project study first.');
+      return;
+    }
+
+    try {
+      setIsCalculating(true);
+      const spec = exportModelSpec();
+      const layout = getModelCanvasState();
+
+      const datasetHeaders = activeDataset?.variables?.map(v => v.name);
+
+      if (
+        activeDataset &&
+        Array.isArray(activeDataset.rows) &&
+        activeDataset.rows.length > 0
+      ) {
+        try {
+          await api.saveProjectDataJson(
+            activeStudy.path,
+            activeDataset.filename || 'dataset',
+            datasetHeaders || [],
+            activeDataset.rows
+          );
+        } catch (err) {
+          console.warn(
+            'Failed auto-saving active dataset before calculate:',
+            err
+          );
+        }
+      }
+
+      const valRes = await api.validateModel(
+        spec,
+        activeStudy.path,
+        datasetHeaders
+      );
+
+      if (!valRes.is_valid) {
+        setValidationModal(valRes);
+        return;
+      }
+
+      await api.saveProjectModel(activeStudy.path, spec, layout);
+
+      const runRes = await api.runPlsModel(
+        activeStudy.path,
+        spec,
+        {
+          columns: datasetHeaders,
+          rows: activeDataset?.rows,
+          dataset_name: activeDataset?.filename,
+        }
+      );
+
+      if (runRes.error) {
+        alert('PLS-SEM calculation failed: ' + runRes.error);
+        return;
+      }
+
+      if (runRes.results) {
+        setPlsResults(runRes.results);
+      }
+
+      setValidationSuccessToast(
+        `PLS-SEM Calculation Complete! Converged in ${
+          runRes.results?.iterations || 0
+        } iterations`
+      );
+
+      setTimeout(() => setValidationSuccessToast(null), 3500);
+
+      const viewSlider = document.getElementById('main-view-slider');
+      if (viewSlider) {
+        (viewSlider as HTMLElement).style.display = 'flex';
+      }
+
+      switchView('results');
+    } catch (err: any) {
+      alert('Error calculating model: ' + err?.message);
+    } finally {
+      setIsCalculating(false);
+    }
+  };
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
       const viewSlider = document.getElementById('main-view-slider');
       const sliderBtns = viewSlider?.querySelectorAll('.view-slider__btn');
+
       if (sliderBtns) {
         sliderBtns.forEach(btn => {
           btn.addEventListener('click', (e) => {
             const target = e.currentTarget as HTMLElement | null;
-            switchView(target?.dataset?.view === 'results' ? 'results' : 'model');
+            switchView(
+              target?.dataset?.view === 'results' ? 'results' : 'model'
+            );
           });
         });
       }
     }, 120);
 
+    return () => clearTimeout(timer);
+  }, []);
 
     const handleColorPickerClosed = (e: any) => {
       const { id, color } = e.detail;
@@ -617,72 +881,175 @@ const ModelEditor = () => {
   }, []);
 
   return (
-    <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div
+      style={{
+        width: '100%',
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden'
+      }}
+    >
 
-  {/* ═══ TITLE BAR ═══ */}
-  <header className="titlebar window-drag">
-    <div className="titlebar__left no-drag">
-      <div className="titlebar__traffic-light-space" aria-hidden="true"></div>
-      <div
-        className="brand"
-        onClick={() => navigate('/')}
-        role="button"
-        tabIndex={0}
-        title="Go to Getting Started"
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') navigate('/'); }}
-      >
-        <svg className="brand__logo" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect width={48} height={48} rx={10} fill="#6B4EE6" />
-          <circle cx={16} cy={16} r={4} fill="#FFFFFF" />
-          <circle cx={32} cy={18} r={4} fill="#C7D2FE" />
-          <circle cx={20} cy={32} r={5} fill="#EEF2FF" />
-          <circle cx={34} cy={32} r="3.5" fill="#A5B4FC" />
-          <path d="M16 16L32 18M16 16L20 32M20 32L34 32M32 18L34 32" stroke="#FFFFFF" strokeWidth={2} strokeLinecap="round" strokeOpacity="0.85" />
-        </svg>
-        <span className="brand__name">CSPLS</span>
-      </div>
-    </div>
-    <div className="titlebar__center no-drag">
-      <span className="titlebar__version">CSPLS 1.1</span>
-    </div>
-    <div className="titlebar__right no-drag">
-      <button className="icon-btn" title="Toggle Theme" type="button">
-        <span className="material-symbols-outlined">light_mode</span>
-      </button>
-      <button className="icon-btn" title="Settings" type="button">
-        <span className="material-symbols-outlined">settings</span>
-      </button>
-      <span className="v-divider" />
-      <div className="user-badge" role="button" tabIndex={0}>
-        <div className="user-badge__avatar">
-          <span>MV</span>
-          <span className="user-badge__status" />
+      {/* ═══ TITLE BAR ═══ */}
+      <header className="titlebar window-drag">
+        <div className="titlebar__left no-drag">
+          <div
+            className="titlebar__traffic-light-space"
+            aria-hidden="true"
+          ></div>
+
+          <div
+            className="brand"
+            onClick={() => navigate('/')}
+            role="button"
+            tabIndex={0}
+            title="Go to Getting Started"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') navigate('/');
+            }}
+          >
+            <svg
+              className="brand__logo"
+              viewBox="0 0 48 48"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <rect width={48} height={48} rx={10} fill="#6B4EE6" />
+              <circle cx={16} cy={16} r={4} fill="#FFFFFF" />
+              <circle cx={32} cy={18} r={4} fill="#C7D2FE" />
+              <circle cx={20} cy={32} r={5} fill="#EEF2FF" />
+              <circle cx={34} cy={32} r="3.5" fill="#A5B4FC" />
+              <path
+                d="M16 16L32 18M16 16L20 32M20 32L34 32M32 18L34 32"
+                stroke="#FFFFFF"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeOpacity="0.85"
+              />
+            </svg>
+
+            <span className="brand__name">CSPLS</span>
+          </div>
         </div>
-        <span className="user-badge__name">M. Vance</span>
-      </div>
-    </div>
-  </header>
+
+        <div className="titlebar__center no-drag">
+          <span className="titlebar__version">CSPLS 1.1</span>
+        </div>
+
+        <div className="titlebar__right no-drag">
+          <button
+            className="icon-btn"
+            title="Toggle Theme"
+            type="button"
+          >
+            <span className="material-symbols-outlined">
+              light_mode
+            </span>
+          </button>
+
+          <button
+            className="icon-btn"
+            title="Settings"
+            type="button"
+          >
+            <span className="material-symbols-outlined">
+              settings
+            </span>
+          </button>
+
+          <span className="v-divider" />
+
+          <div
+            className="user-badge"
+            role="button"
+            tabIndex={0}
+          >
+            <div className="user-badge__avatar">
+              <span>MV</span>
+              <span className="user-badge__status" />
+            </div>
+
+            <span className="user-badge__name">
+              M. Vance
+            </span>
+          </div>
+        </div>
+      </header>
   {/* ═══ SUB-HEADER / CONTROL BAR ═══ */}
   <div className="subheader">
     <div className="subheader__breadcrumb">
-      <span className="subheader__breadcrumb-link" id="current-model-workspace" onClick={() => navigate('/workspace')}>{activeWorkspace?.name || 'Active_Workspace'}</span>
+      <span
+        className="subheader__breadcrumb-link"
+        id="current-model-workspace"
+        onClick={() => {
+          if (activeWorkspaceId) {
+            openTab({ type: 'workspace', title: activeWorkspace?.name || 'Workspace', workspaceId: activeWorkspaceId });
+          }
+        }}
+      >
+        {activeWorkspace?.name || 'Active_Workspace'}
+      </span>
       <span className="subheader__breadcrumb-sep">/</span>
-      <span className="subheader__breadcrumb-link" id="current-model-study" onClick={() => navigate('/workspace')}>{activeStudy?.name || 'Active_Study'}</span>
+      <span
+        className="subheader__breadcrumb-link"
+        id="current-model-study"
+        onClick={() => {
+          if (activeWorkspaceId) {
+            openTab({ type: 'workspace', title: activeWorkspace?.name || 'Workspace', workspaceId: activeWorkspaceId });
+          }
+        }}
+      >
+        {activeStudy?.name || 'Active_Study'}
+      </span>
       <span className="subheader__breadcrumb-sep">/</span>
       <span className="subheader__breadcrumb-link" style={{color: 'var(--color-accent)'}}>
         {activeModel ? `${activeModel.name}.splsm` : 'Untitled model.splsm'}
       </span>
     </div>
     <div className="subheader__actions">
-      {/* Segmented Control for Views (Hidden initially) */}
-      <div className="view-slider" id="main-view-slider" style={{display: 'none'}}>
-        <div className="view-slider__bg" />
-        <button className="view-slider__btn active" data-view="model">
-          <span className="material-symbols-outlined">polyline</span>
+      {/* Flush Model | Results Switcher */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', marginRight: '6px' }}>
+        <button
+          type="button"
+          onClick={() => setCurrentView('model')}
+          style={{
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            fontWeight: currentView === 'model' ? 600 : 500,
+            color: currentView === 'model' ? 'var(--color-accent, #6B4EE6)' : 'var(--color-text-muted, #64748B)',
+            padding: '4px 6px',
+            borderBottom: currentView === 'model' ? '2px solid var(--color-accent, #6B4EE6)' : '2px solid transparent',
+            transition: 'all 0.15s ease',
+          }}
+        >
           Model
         </button>
-        <button className="view-slider__btn" data-view="results">
-          <span className="material-symbols-outlined">table_chart</span>
+        <span style={{ color: '#CBD5E1', fontSize: '12px' }}>|</span>
+        <button
+          type="button"
+          onClick={() => {
+            if (hasCalculated) {
+              setCurrentView('results');
+            }
+          }}
+          disabled={!hasCalculated}
+          title={hasCalculated ? 'View Results' : 'Please calculate the model first'}
+          style={{
+            background: 'none',
+            border: 'none',
+            cursor: hasCalculated ? 'pointer' : 'not-allowed',
+            fontWeight: currentView === 'results' ? 600 : 500,
+            color: currentView === 'results' 
+              ? 'var(--color-accent, #6B4EE6)' 
+              : (hasCalculated ? 'var(--color-text-muted, #64748B)' : '#94A3B8'),
+            opacity: hasCalculated ? 1 : 0.45,
+            padding: '4px 6px',
+            borderBottom: currentView === 'results' ? '2px solid var(--color-accent, #6B4EE6)' : '2px solid transparent',
+            transition: 'all 0.15s ease',
+          }}
+        >
           Results
         </button>
       </div>
@@ -693,9 +1060,19 @@ const ModelEditor = () => {
         onClick={handleCalculate}
         disabled={isValidating || isCalculating}
       >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><polygon points="5 3 19 12 5 21 5 3" /></svg>
-        {isCalculating ? 'Calculating PLS...' : (isValidating ? 'Validating...' : 'Calculate')}
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
+          <polygon points="5 3 19 12 5 21 5 3" />
+        </svg>
+        {isCalculating
+          ? 'Calculating PLS...'
+          : (isValidating ? 'Validating...' : 'Calculate')}
       </button>
+
       <button
         className="subheader__btn"
         id="bootstrap-btn"
@@ -711,10 +1088,21 @@ const ModelEditor = () => {
         }}
         title="Run PLS Bootstrapping with significance testing (p-values, t-values, CIs)"
       >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 15, height: 15, marginRight: 4 }}>
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          style={{
+            width: 15,
+            height: 15,
+            marginRight: 4,
+          }}
+        >
           <path d="M18 20V10M12 20V4M6 20v-6" />
         </svg>
         Bootstrap
+      </button>
       </button>
       <div className="subheader__divider" />
       <button
@@ -739,10 +1127,10 @@ const ModelEditor = () => {
     </div>
   </div>
   {/* ═══ APP BODY ═══ */}
-  <div id="view-model" className="view-panel">
-    <div className="app-body">
+  <div id="view-model" className="view-panel" style={{ display: currentView === 'model' ? 'flex' : 'none', flex: 1, minHeight: 0, height: '100%', overflow: 'hidden' }}>
+    <div className="app-body" style={{ flex: 1, height: '100%', minHeight: 0, display: 'flex', overflow: 'hidden' }}>
       {/* ─── Variable Sidebar (Left) ─── */}
-      <aside className="var-sidebar" id="var-sidebar">
+      <aside className="var-sidebar" id="var-sidebar" style={{ height: '100%', display: 'flex', flexDirection: 'column', flexShrink: 0, overflow: 'hidden' }}>
         <div className="var-sidebar__search">
           <div className="var-sidebar__search-inner">
             <svg className="var-sidebar__search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx={11} cy={11} r={8} /><line x1={21} y1={21} x2="16.65" y2="16.65" /></svg>
@@ -766,14 +1154,11 @@ const ModelEditor = () => {
               <span className="var-sidebar__header-label">Dataset Variables</span>
               <span className="var-sidebar__count">0</span>
             </div>
-            <span style={{ fontSize: '10px', color: '#d97706', backgroundColor: '#fef3c7', border: '1px solid #fde68a', padding: '1px 6px', borderRadius: '4px', fontWeight: 500 }}>
-              Unlinked
-            </span>
           </div>
         )}
 
         {activeDataset ? (
-          <div className="var-sidebar__list" id="var-list">
+          <div className="var-sidebar__list" id="var-list" style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
             {categories.map(cat => {
               const varsInCat = visibleVariables.filter(v => String(v.category ?? 'General') === cat);
               if (varsInCat.length === 0) return null;
@@ -788,7 +1173,14 @@ const ModelEditor = () => {
                   </button>
                   <div className={`var-items ${areCategoriesCollapsed || collapsedCategories.has(cat) ? 'hidden' : ''}`}>
                     {varsInCat.map(v => (
-                      <div className="var-item" key={v.name} data-variable-name={String(v.name ?? '')} draggable onDragStart={event => handleVariableDragStart(event, String(v.name ?? ''))}>
+                      <div 
+                        className="var-item" 
+                        key={v.name} 
+                        data-variable-name={String(v.name ?? '')} 
+                        draggable 
+                        onDragStart={event => handleVariableDragStart(event, String(v.name ?? ''))}
+                        onDragEnd={() => { (window as any).__draggedVariable = null; }}
+                      >
                         <span className="var-item__name">{v.name}</span>
                         <span className="var-item__type">{String(v.scaleType ?? 'Unknown').slice(0, 3).toUpperCase()}</span>
                       </div>
@@ -799,35 +1191,52 @@ const ModelEditor = () => {
             })}
           </div>
         ) : (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '12px', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <div 
-                style={{ border: '2px dashed #cbd5e1', backgroundColor: '#f8fafc', borderRadius: '12px', padding: '16px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '10px', cursor: 'pointer', transition: 'border-color 0.2s, background-color 0.2s' }}
-                onClick={() => fileInputRef.current?.click()}
-                onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#818cf8'; e.currentTarget.style.backgroundColor = '#f1f5f9'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#cbd5e1'; e.currentTarget.style.backgroundColor = '#f8fafc'; }}
-              >
-                <div style={{ width: '40px', height: '40px', borderRadius: '50%', backgroundColor: '#e0e7ff', border: '1px solid #c7d2fe', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#4f46e5' }}>
-                  <svg style={{ width: '20px', height: '20px' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8"></path>
-                  </svg>
-                </div>
-                <div>
-                  <p style={{ fontSize: '12px', fontWeight: 600, color: '#1e293b', margin: '0 0 4px 0' }}>Drop dataset here</p>
-                  <p style={{ fontSize: '10px', color: '#94a3b8', margin: 0, lineHeight: 1.4 }}>CSV, TXT, or Excel (.xlsx) data matrix to populate variables</p>
-                </div>
-                <button 
-                  style={{ marginTop: '4px', height: '28px', padding: '0 12px', borderRadius: '4px', fontSize: '12px', fontWeight: 500, color: 'white', backgroundColor: '#4f46e5', border: 'none', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}
-                  disabled={isImporting}
-                  onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
-                >
-                  <svg style={{ width: '14px', height: '14px' }} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 4v16m8-8H4" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"></path></svg>
-                  <span>{isImporting ? 'Parsing...' : 'Select Dataset File'}</span>
-                </button>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px 16px', textAlign: 'center' }}>
+            <div 
+              style={{ 
+                width: '100%', 
+                border: '1px dashed #CBD5E1', 
+                backgroundColor: '#F8FAFC', 
+                borderRadius: '8px', 
+                padding: '24px 14px', 
+                display: 'flex', 
+                flexDirection: 'column', 
+                alignItems: 'center', 
+                gap: '8px', 
+                cursor: 'pointer',
+                transition: 'all 0.15s ease'
+              }}
+              onClick={() => fileInputRef.current?.click()}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#6B4EE6'; e.currentTarget.style.backgroundColor = '#F5F3FF'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#CBD5E1'; e.currentTarget.style.backgroundColor = '#F8FAFC'; }}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: '26px', color: '#6B4EE6' }}>upload_file</span>
+              <div>
+                <div style={{ fontSize: '12px', fontWeight: 600, color: '#1E293B' }}>Import Dataset</div>
+                <div style={{ fontSize: '11px', color: '#64748B', marginTop: '2px' }}>.csv, .xlsx, or .sav</div>
               </div>
-            </div>
-            <div style={{ textAlign: 'center', padding: '8px 0', borderTop: '1px solid #f1f5f9', marginTop: '12px' }}>
-              <span style={{ fontSize: '10px', color: '#94a3b8' }}>Variables will appear here once loaded</span>
+              <button 
+                type="button"
+                style={{ 
+                  marginTop: '6px', 
+                  height: '26px', 
+                  padding: '0 12px', 
+                  borderRadius: '6px', 
+                  fontSize: '11px', 
+                  fontWeight: 500, 
+                  color: 'white', 
+                  backgroundColor: '#6B4EE6', 
+                  border: 'none', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '4px', 
+                  cursor: 'pointer' 
+                }}
+                disabled={isImporting}
+                onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+              >
+                <span>{isImporting ? 'Parsing...' : 'Select File'}</span>
+              </button>
             </div>
             <input 
               type="file" 
@@ -842,7 +1251,17 @@ const ModelEditor = () => {
       {/* ─── Center Canvas Area ─── */}
       <main
         className="canvas-area"
-        onDragEnter={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }}
+        style={{
+          flex: 1,
+          height: '100%',
+          minHeight: 0,
+          position: 'relative',
+          overflow: 'hidden'
+        }}
+        onDragEnter={event => {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'copy';
+        }}
         onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }}
         onDrop={handleCanvasDrop}
       >
@@ -1095,29 +1514,131 @@ const ModelEditor = () => {
             <pattern id="dot-grid" width={20} height={20} patternUnits="userSpaceOnUse">
               <circle cx={2} cy={2} r={1} fill="rgba(100,116,139,0.25)" />
             </pattern>
-            <marker id="arrowhead" markerWidth={10} markerHeight={7} refX={9} refY="3.5" orient="auto">
-              <polygon points="0 0, 10 3.5, 0 7" fill="var(--color-text-secondary)" style={{pointerEvents: 'none'}} />
-            </marker>
-            <marker id="arrowhead-selected" markerWidth={10} markerHeight={7} refX={9} refY="3.5" orient="auto">
-              <polygon points="0 0, 10 3.5, 0 7" fill="var(--color-accent)" style={{pointerEvents: 'none'}} />
-            </marker>
+
+            {/* Standard Arrow Markers */}
             <marker id="arrow-solid" markerWidth={10} markerHeight={10} refX={8} refY={5} orient="auto">
-              <polygon points="1 2, 9 5, 1 8" fill="#1e293b" />
+              <polygon points="1 2, 9 5, 1 8" fill="var(--color-text-primary, #1e293b)" />
             </marker>
             <marker id="arrow-solid-selected" markerWidth={10} markerHeight={10} refX={8} refY={5} orient="auto">
-              <polygon points="1 2, 9 5, 1 8" fill="var(--color-accent)" />
+              <polygon points="1 2, 9 5, 1 8" fill="var(--color-accent, #6B4EE6)" />
             </marker>
+            
             <marker id="arrow-open" markerWidth={10} markerHeight={10} refX={7} refY={5} orient="auto">
-              <path d="M 2 2 L 8 5 L 2 8" fill="none" stroke="#1e293b" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M 2 2 L 8 5 L 2 8" fill="none" stroke="var(--color-text-primary, #1e293b)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
             </marker>
             <marker id="arrow-open-selected" markerWidth={10} markerHeight={10} refX={7} refY={5} orient="auto">
-              <path d="M 2 2 L 8 5 L 2 8" fill="none" stroke="var(--color-accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M 2 2 L 8 5 L 2 8" fill="none" stroke="var(--color-accent, #6B4EE6)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
             </marker>
+
             <marker id="arrow-diamond" markerWidth={10} markerHeight={10} refX={5} refY={5} orient="auto">
-              <polygon points="5 1.5, 8.5 5, 5 8.5, 1.5 5" fill="#1e293b" />
+              <polygon points="5 1.5, 8.5 5, 5 8.5, 1.5 5" fill="var(--color-text-primary, #1e293b)" />
             </marker>
             <marker id="arrow-diamond-selected" markerWidth={10} markerHeight={10} refX={5} refY={5} orient="auto">
-              <polygon points="5 1.5, 8.5 5, 5 8.5, 1.5 5" fill="var(--color-accent)" />
+              <polygon points="5 1.5, 8.5 5, 5 8.5, 1.5 5" fill="var(--color-accent, #6B4EE6)" />
+            </marker>
+
+            <marker id="arrow-circle" markerWidth={10} markerHeight={10} refX={5} refY={5} orient="auto">
+              <circle cx={5} cy={5} r={3} fill="var(--color-text-primary, #1e293b)" />
+            </marker>
+            <marker id="arrow-circle-selected" markerWidth={10} markerHeight={10} refX={5} refY={5} orient="auto">
+              <circle cx={5} cy={5} r={3} fill="var(--color-accent, #6B4EE6)" />
+            </marker>
+
+            {/* Aliases for arrowhead */}
+            <marker id="arrowhead" markerWidth={10} markerHeight={7} refX={9} refY={3.5} orient="auto">
+              <polygon points="0 0, 10 3.5, 0 7" fill="var(--color-text-secondary)" style={{pointerEvents: 'none'}} />
+            </marker>
+            <marker id="arrowhead-selected" markerWidth={10} markerHeight={7} refX={9} refY={3.5} orient="auto">
+              <polygon points="0 0, 10 3.5, 0 7" fill="var(--color-accent)" style={{pointerEvents: 'none'}} />
+            </marker>
+            <marker
+              id="arrow-solid"
+              markerWidth={10}
+              markerHeight={10}
+              refX={8}
+              refY={5}
+              orient="auto"
+            >
+              <polygon points="1 2, 9 5, 1 8" fill="#1e293b" />
+            </marker>
+
+            <marker
+              id="arrow-solid-selected"
+              markerWidth={10}
+              markerHeight={10}
+              refX={8}
+              refY={5}
+              orient="auto"
+            >
+              <polygon
+                points="1 2, 9 5, 1 8"
+                fill="var(--color-accent)"
+              />
+            </marker>
+
+            <marker
+              id="arrow-open"
+              markerWidth={10}
+              markerHeight={10}
+              refX={7}
+              refY={5}
+              orient="auto"
+            >
+              <path
+                d="M 2 2 L 8 5 L 2 8"
+                fill="none"
+                stroke="#1e293b"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </marker>
+
+            <marker
+              id="arrow-open-selected"
+              markerWidth={10}
+              markerHeight={10}
+              refX={7}
+              refY={5}
+              orient="auto"
+            >
+              <path
+                d="M 2 2 L 8 5 L 2 8"
+                fill="none"
+                stroke="var(--color-accent)"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </marker>
+
+            <marker
+              id="arrow-diamond"
+              markerWidth={10}
+              markerHeight={10}
+              refX={5}
+              refY={5}
+              orient="auto"
+            >
+              <polygon
+                points="5 1.5, 8.5 5, 5 8.5, 1.5 5"
+                fill="#1e293b"
+              />
+            </marker>
+
+            <marker
+              id="arrow-diamond-selected"
+              markerWidth={10}
+              markerHeight={10}
+              refX={5}
+              refY={5}
+              orient="auto"
+            >
+              <polygon
+                points="5 1.5, 8.5 5, 5 8.5, 1.5 5"
+                fill="var(--color-accent)"
+              />
+            </marker>
             </marker>
           </defs>
           <rect id="bg-rect" width="100%" height="100%" fill="url(#dot-grid)" />
@@ -1131,29 +1652,51 @@ const ModelEditor = () => {
       </main>
     </div>{/* /app-body */}
   </div>{/* /view-model */}
-  <div id="view-results" className="view-panel" style={{display: 'none'}}>
+  <div id="view-results" className="view-panel" style={{ display: currentView === 'results' ? 'flex' : 'none', flex: 1, minHeight: 0, height: '100%', overflow: 'hidden' }}>
     {/* ═══ APP BODY ═══ */}
-    <div className="app-body">
+    <div className="app-body" style={{ flex: 1, height: '100%', minHeight: 0, display: 'flex', overflow: 'hidden' }}>
       {/* ─── Results Hierarchy Tree (Left) ─── */}
       <aside className="results-sidebar" id="results-sidebar">
         <div className="results-sidebar__search">
           <div className="results-sidebar__search-wrap">
             <svg className="results-sidebar__search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx={11} cy={11} r={8} /><line x1={21} y1={21} x2="16.65" y2="16.65" /></svg>
-            <input type="text" className="results-sidebar__search-input" placeholder="Filter results... (⌘F)" />
+            <input 
+              type="text" 
+              className="results-sidebar__search-input" 
+              placeholder="Filter results... (⌘F)" 
+              value={resultsSearchQuery}
+              onChange={e => setResultsSearchQuery(e.target.value)}
+            />
           </div>
         </div>
         <div className="results-sidebar__tree" id="results-tree">
+          {/* Graphical output */}
+          <div className="tree-section">
+            <div className="tree-section__header" onClick={(e) => { (window as any).toggleTreeSection?.(e.currentTarget); }}>
+              <svg className="open" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
+              <span>Graphical output</span>
+            </div>
+            <div className="tree-section__items">
+              <a href="#" className="tree-item" onClick={(e) => { e.preventDefault(); setCurrentView('model'); }}>Path model graph</a>
+              <a href="#" className="tree-item" onClick={(e) => e.preventDefault()}>Outer model loadings</a>
+            </div>
+          </div>
           {/* Final results */}
           <div className="tree-section">
-            <div className="tree-section__header" onClick={(e) => { (window as any).toggleTreeSection(e.currentTarget); }}>
+            <div className="tree-section__header" onClick={(e) => { (window as any).toggleTreeSection?.(e.currentTarget); }}>
               <svg className="open" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
               <span>Final results</span>
             </div>
             <div className="tree-section__items">
               <a
                 href="#"
-                className={`tree-item ${activeResultTab === 'path_coefficients' ? 'active' : ''}`}
-                onClick={(e) => { e.preventDefault(); setActiveResultTab('path_coefficients'); }}
+                className={`tree-item ${
+                  activeResultTab === 'path_coefficients' ? 'active' : ''
+                }`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  setActiveResultTab('path_coefficients');
+                }}
               >
                 <div className="tree-item__left">
                   <div className="tree-item__dot" />
@@ -1205,47 +1748,83 @@ const ModelEditor = () => {
                   </span>
                 )}
               </a>
+              <a href="#" className="tree-item" onClick={(e) => e.preventDefault()}>Total indirect effects</a>
+              <a href="#" className="tree-item tree-item--sub" onClick={(e) => e.preventDefault()}>Specific indirect effects</a>
+              <a href="#" className="tree-item" onClick={(e) => e.preventDefault()}>Total effects</a>
+              <a href="#" className="tree-item" onClick={(e) => e.preventDefault()}>Outer loadings</a>
+              <a href="#" className="tree-item" onClick={(e) => e.preventDefault()}>Outer weights</a>
+              <a href="#" className="tree-item" onClick={(e) => e.preventDefault()}>Latent variables</a>
+              <a href="#" className="tree-item" onClick={(e) => e.preventDefault()}>Residuals</a>
             </div>
           </div>
           {/* Quality criteria */}
           <div className="tree-section">
-            <div className="tree-section__header" onClick={(e) => { (window as any).toggleTreeSection(e.currentTarget); }}>
+            <div className="tree-section__header" onClick={(e) => { (window as any).toggleTreeSection?.(e.currentTarget); }}>
               <svg className="open" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
               <span>Quality criteria</span>
             </div>
             <div className="tree-section__items">
               <a
                 href="#"
-                className={`tree-item ${activeResultTab === 'r_squared' ? 'active' : ''}`}
-                onClick={(e) => { e.preventDefault(); setActiveResultTab('r_squared'); }}
+                className={`tree-item ${
+                  activeResultTab === 'r_squared' ? 'active' : ''
+                }`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  setActiveResultTab('r_squared');
+                }}
               >
                 R-square (R²)
               </a>
+
               <a
                 href="#"
-                className={`tree-item ${activeResultTab === 'f_squared' ? 'active' : ''}`}
-                onClick={(e) => { e.preventDefault(); setActiveResultTab('f_squared'); }}
+                className={`tree-item ${
+                  activeResultTab === 'f_squared' ? 'active' : ''
+                }`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  setActiveResultTab('f_squared');
+                }}
               >
                 f-square (f²)
               </a>
+
               <a
                 href="#"
-                className={`tree-item ${activeResultTab === 'reliability' ? 'active' : ''}`}
-                onClick={(e) => { e.preventDefault(); setActiveResultTab('reliability'); }}
+                className={`tree-item ${
+                  activeResultTab === 'reliability' ? 'active' : ''
+                }`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  setActiveResultTab('reliability');
+                }}
               >
                 Construct reliability & validity
               </a>
+
               <a
                 href="#"
-                className={`tree-item ${activeResultTab === 'discriminant' ? 'active' : ''}`}
-                onClick={(e) => { e.preventDefault(); setActiveResultTab('discriminant'); }}
+                className={`tree-item ${
+                  activeResultTab === 'discriminant' ? 'active' : ''
+                }`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  setActiveResultTab('discriminant');
+                }}
               >
                 Discriminant validity
               </a>
+
               <a
                 href="#"
-                className={`tree-item ${activeResultTab === 'collinearity' ? 'active' : ''}`}
-                onClick={(e) => { e.preventDefault(); setActiveResultTab('collinearity'); }}
+                className={`tree-item ${
+                  activeResultTab === 'collinearity' ? 'active' : ''
+                }`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  setActiveResultTab('collinearity');
+                }}
               >
                 Collinearity statistics (VIF)
               </a>
@@ -1253,6 +1832,7 @@ const ModelEditor = () => {
           </div>
         </div>
       </aside>
+
       {/* ─── Center Results Area ─── */}
       <main className="results-main">
         {/* Header Area */}
@@ -1268,42 +1848,157 @@ const ModelEditor = () => {
             {activeResultTab === 'path_coefficients' && (
               <div className="view-toggle">
                 <div
-                  className={`view-toggle__btn ${resultViewMode === 'matrix' ? 'active' : ''}`}
+                  className={`view-toggle__btn ${
+                    resultViewMode === 'matrix' ? 'active' : ''
+                  }`}
                   onClick={() => setResultViewMode('matrix')}
                 >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                  </svg>
                   Matrix View
                 </div>
+
                 <div
-                  className={`view-toggle__btn ${resultViewMode === 'list' ? 'active' : ''}`}
+                  className={`view-toggle__btn ${
+                    resultViewMode === 'list' ? 'active' : ''
+                  }`}
                   onClick={() => setResultViewMode('list')}
                 >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                  </svg>
                   List View
                 </div>
+              </div>
+            )}
               </div>
             )}
           </div>
           <div className="report-filters">
             <div className="report-filters__left">
               {plsResults && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '13px', color: '#475569' }}>
-                  <span>Converged: <strong style={{ color: '#16a34a' }}>{plsResults.converged ? 'Yes' : 'No'}</strong></span>
-                  <span>Iterations: <strong>{plsResults.iterations}</strong></span>
-                  <span>Sample Size (N): <strong>{plsResults.n_samples}</strong></span>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '16px',
+                    fontSize: '13px',
+                    color: '#475569'
+                  }}
+                >
+                  <span>
+                    Converged:{' '}
+                    <strong style={{ color: '#16a34a' }}>
+                      {plsResults.converged ? 'Yes' : 'No'}
+                    </strong>
+                  </span>
+
+                  <span>
+                    Iterations:{' '}
+                    <strong>{plsResults.iterations}</strong>
+                  </span>
+
+                  <span>
+                    Sample Size (N):{' '}
+                    <strong>{plsResults.n_samples}</strong>
+                  </span>
                 </div>
               )}
             </div>
+
             <div className="report-filters__right">
-              <button className="report-action-btn" type="button" onClick={handleCopyCurrentTable}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
+              <button
+                className="report-action-btn"
+                type="button"
+                onClick={handleCopyCurrentTable}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                </svg>
                 Copy Table
               </button>
-              <button className="report-action-btn" type="button" onClick={handleExportCurrentTable}>Export CSV</button>
+
+              <button
+                className="report-action-btn"
+                type="button"
+                onClick={handleExportCurrentTable}
+              >
+                Export CSV
+              </button>
             </div>
           </div>
         </div>
 
+        {/* Table Area */}
+        {resultsViewMode === 'matrix' ? (
+          <div className="table-container">
+            <div className="scientific-table-wrap">
+              <table className="scientific-table">
+                <colgroup>
+                  <col style={{ width: 176 }} />
+                  {CONSTRUCT_LIST.map(c => (
+                    <col key={c.code} style={{ width: `${88 / CONSTRUCT_LIST.length}%` }} />
+                  ))}
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>Construct</th>
+                    {CONSTRUCT_LIST.map(c => (
+                      <th key={c.code}>{c.code}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {CONSTRUCT_LIST.map(from => (
+                    <tr key={from.code}>
+                      <td>
+                        <div className="construct-label">
+                          <div className="construct-dot" style={{ background: from.color }} />
+                          <span className="construct-name">{from.code}</span>
+                          <span className="construct-role">({from.role})</span>
+                        </div>
+                      </td>
+                      {CONSTRUCT_LIST.map(to => {
+                        if (from.code === to.code) {
+                          return <td key={to.code} className="cell-empty">—</td>;
+                        }
+                        const stat = getPathStat(from.code, to.code);
+                        const isSig = stat.pValue < 0.05;
+                        const sigClass = highlightSignificant && isSig
+                          ? (stat.pValue < 0.001 ? 'cell-sig--very-strong' : (stat.pValue < 0.01 ? 'cell-sig--strong' : 'cell-sig'))
+                          : (isSig ? '' : 'cell-ns');
+
+                        return (
+                          <td key={to.code} className={sigClass}>
+                            <div className="cell-value">
+                              {stat.beta.toFixed(3)}
+                              {highlightSignificant && stat.stars && (
+                                <span className="cell-stars">{stat.stars}</span>
+                              )}
+                            </div>
+                            {showTStats && (
+                              <div className="cell-stats">
+                                t={stat.tStat.toFixed(3)} · {stat.pValue < 0.001 ? 'p<0.001' : `p=${stat.pValue.toFixed(3)}`}
+                              </div>
+                            )}
+                          </td>
+                        );
         {/* Dynamic Table Area */}
         <div className="table-container">
           <div className="scientific-table-wrap">
@@ -1822,6 +2517,15 @@ const ModelEditor = () => {
                   ))}
                 </tbody>
               </table>
+              <div className="sig-legend">
+                <span style={{ color: 'var(--color-text-secondary)', fontWeight: 500 }}>Significance Legend:</span>
+                <div className="sig-legend__item"><span className="sig-legend__stars">*</span> p &lt; 0.05</div>
+                <div className="sig-legend__item"><span className="sig-legend__stars">**</span> p &lt; 0.01</div>
+                <div className="sig-legend__item"><span className="sig-legend__stars">***</span> p &lt; 0.001</div>
+                <span style={{ flex: 1 }} />
+                <div style={{ fontFamily: 'var(--font-sans)' }}>Based on 5000 bootstrap subsamples</div>
+              </div>
+            </div>
             ) : activeResultTab === 'bootstrap_significance' ? (
               !plsResults.significance ? (
                 <div style={{ padding: '60px 20px', textAlign: 'center', color: '#64748b' }}>
@@ -1978,7 +2682,73 @@ const ModelEditor = () => {
               </div>
             )}
           </div>
-        </div>
+        ) : (
+          <div className="table-container">
+            <div className="scientific-table-wrap">
+              <table className="scientific-table">
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: 'left', paddingLeft: '16px' }}>Path</th>
+                    <th style={{ textAlign: 'right' }}>Original Sample (β)</th>
+                    <th style={{ textAlign: 'right' }}>Sample Mean (M)</th>
+                    <th style={{ textAlign: 'right' }}>Standard Deviation (STDEV)</th>
+                    <th style={{ textAlign: 'right' }}>T Statistics (|O/STDEV|)</th>
+                    <th style={{ textAlign: 'right' }}>P Values</th>
+                    <th style={{ textAlign: 'center' }}>Significance</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredPaths.map((p) => {
+                    const isSig = p.pValue < 0.05;
+                    return (
+                      <tr key={`${p.from}->${p.to}`} style={{ borderBottom: '1px solid #F1F5F9' }}>
+                        <td style={{ padding: '8px 16px', fontWeight: 600 }}>
+                          <span style={{ color: '#6B4EE6' }}>{p.from}</span>
+                          <span style={{ margin: '0 8px', color: '#94A3B8' }}>→</span>
+                          <span style={{ color: '#0F172A' }}>{p.to}</span>
+                        </td>
+                        <td style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>{p.beta.toFixed(3)}</td>
+                        <td style={{ textAlign: 'right', fontFamily: 'monospace', color: '#64748B' }}>{p.mean.toFixed(3)}</td>
+                        <td style={{ textAlign: 'right', fontFamily: 'monospace', color: '#64748B' }}>{p.stdev.toFixed(3)}</td>
+                        <td style={{ textAlign: 'right', fontFamily: 'monospace', color: '#0F172A', fontWeight: 500 }}>{p.tStat.toFixed(3)}</td>
+                        <td style={{ textAlign: 'right', fontFamily: 'monospace', color: isSig && highlightSignificant ? '#059669' : '#0F172A', fontWeight: isSig && highlightSignificant ? 600 : 400 }}>
+                          {p.pValue < 0.001 ? '< 0.001' : p.pValue.toFixed(3)}
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          {isSig && highlightSignificant ? (
+                            <span style={{ 
+                              fontSize: '11px', 
+                              fontWeight: 600, 
+                              color: '#059669', 
+                              backgroundColor: '#ECFDF5', 
+                              border: '1px solid #A7F3D0',
+                              padding: '2px 8px', 
+                              borderRadius: '12px' 
+                            }}>
+                              Significant {p.stars}
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: '11px', color: '#94A3B8', backgroundColor: '#F8FAFC', padding: '2px 8px', borderRadius: '12px' }}>
+                              ns
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <div className="sig-legend">
+                <span style={{ color: 'var(--color-text-secondary)', fontWeight: 500 }}>Significance Legend:</span>
+                <div className="sig-legend__item"><span className="sig-legend__stars">*</span> p &lt; 0.05</div>
+                <div className="sig-legend__item"><span className="sig-legend__stars">**</span> p &lt; 0.01</div>
+                <div className="sig-legend__item"><span className="sig-legend__stars">***</span> p &lt; 0.001</div>
+                <span style={{ flex: 1 }} />
+                <div style={{ fontFamily: 'var(--font-sans)' }}>Based on 5000 bootstrap subsamples</div>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </div>{/* /app-body */}
   </div>{/* /view-results */}

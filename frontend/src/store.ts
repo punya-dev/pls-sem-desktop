@@ -68,21 +68,60 @@ export interface ContextMenuItem {
   action: () => void;
 }
 
-export type TrashItem =
-  | { id: string; kind: 'workspace'; name: string; deletedAt: string; workspace: Workspace; studies: Study[]; models: Model[]; datasets: Record<string, ParsedDataset> }
-  | { id: string; kind: 'study'; name: string; deletedAt: string; workspaceName?: string; study: Study; models: Model[]; dataset?: ParsedDataset }
-  | { id: string; kind: 'model'; name: string; deletedAt: string; workspaceName?: string; studyName?: string; model: Model }
-  | { id: string; kind: 'dataset'; name: string; deletedAt: string; workspaceName?: string; studyName?: string; studyId: string; dataset: ParsedDataset };
+export interface AppSettings {
+  version: string;
+  websiteUrl: string;
+  theme: 'light' | 'dark' | 'system';
+  fontFamily: 'Inter' | 'Roboto' | 'JetBrains Mono' | 'System';
+  language: 'en' | 'es' | 'de' | 'fr' | 'zh';
+  decimalSystem: 'point' | 'comma';
+  decimalDigits: number;
+  parallelProcessors: number | 'all';
+  keyboardLayout: 'qwerty' | 'azerty' | 'qwertz';
+  flipOrientation: boolean;
+}
+
+export interface DeleteConfirmDialog {
+  title?: string;
+  message?: string;
+  itemName?: string;
+  onConfirm: () => void;
+}
+
+export interface AppTab {
+  id: string;
+  type: 'get-started' | 'workspace' | 'model' | 'archive';
+  title: string;
+  workspaceId?: string | null;
+  studyId?: string | null;
+  modelId?: string | null;
+}
 
 interface AppState {
-  // Global
+  // Global & Settings
   theme: 'light' | 'dark';
   toggleTheme: () => void;
+  settings: AppSettings;
+  updateSettings: (partial: Partial<AppSettings>) => void;
+  isSettingsOpen: boolean;
+  setIsSettingsOpen: (open: boolean) => void;
+
+  // Deletion Confirmation Modal
+  deleteConfirmation: DeleteConfirmDialog | null;
+  requestDelete: (config: DeleteConfirmDialog) => void;
+  closeDeleteConfirm: () => void;
   
+  // Tabs (VSCode / Chrome Browser style)
+  tabs: AppTab[];
+  activeTabId: string;
+  openTab: (tab: Omit<AppTab, 'id'> & { id?: string }) => void;
+  closeTab: (id: string) => void;
+  setActiveTab: (id: string) => void;
+  updateTabTitle: (id: string, title: string) => void;
+
   // Workspaces & Studies
   workspaces: Workspace[];
   archivedWorkspaces: Workspace[];
-  trash: TrashItem[];
   activeWorkspaceId: string | null;
   studies: Study[];
   activeStudyId: string | null;
@@ -95,17 +134,14 @@ interface AppState {
   duplicateModel: (id: string) => void;
   setActiveModel: (id: string) => void;
 
-  
   addWorkspace: (ws: Workspace) => void;
   removeWorkspace: (id: string) => void;
   archiveWorkspace: (id: string) => void;
   restoreWorkspace: (id: string) => void;
-  trashWorkspace: (id: string) => void;
-  trashStudy: (id: string) => void;
-  trashModel: (id: string) => void;
-  trashDataset: (studyId: string) => void;
-  restoreTrashItem: (id: string) => void;
-  permanentlyDeleteTrashItem: (id: string) => void;
+  deleteWorkspace: (id: string) => void;
+  deleteStudy: (id: string) => void;
+  deleteModel: (id: string) => void;
+  deleteDataset: (studyId: string) => void;
   renameWorkspace: (id: string, name: string) => void;
   setActiveWorkspace: (id: string) => void;
   addStudy: (study: Study) => void;
@@ -163,17 +199,171 @@ const INITIAL_VARIABLES: Variable[] = [
   { id: 'v9', name: 'CUSA_1', category: 'CUSA', type: 'ORD' },
 ];
 
+const INITIAL_SETTINGS: AppSettings = {
+  version: '0.1.0',
+  websiteUrl: 'https://cspls.org',
+  theme: 'light',
+  fontFamily: 'Inter',
+  language: 'en',
+  decimalSystem: 'point',
+  decimalDigits: 3,
+  parallelProcessors: 'all',
+  keyboardLayout: 'qwerty',
+  flipOrientation: false,
+};
+
 export const useStore = create<AppState>()(
   persist(
     (set) => ({
-      // Global
+      // Global & Settings
       theme: 'light',
       toggleTheme: () => set((state) => ({ theme: state.theme === 'light' ? 'dark' : 'light' })),
+      settings: INITIAL_SETTINGS,
+      updateSettings: (partial) => set((state) => ({ settings: { ...state.settings, ...partial } })),
+      isSettingsOpen: false,
+      setIsSettingsOpen: (open) => set({ isSettingsOpen: open }),
+
+      // Deletion Confirmation Modal
+      deleteConfirmation: null,
+      requestDelete: (config) => set({ deleteConfirmation: config }),
+      closeDeleteConfirm: () => set({ deleteConfirmation: null }),
       
+      // Tabs (VSCode / Chrome Browser style)
+      tabs: [{ id: 'get-started', type: 'get-started', title: 'Home' }],
+      activeTabId: 'get-started',
+      openTab: (tabInput) => set((state) => {
+        if (tabInput.type === 'get-started') {
+          const existing = state.tabs.find(t => t.type === 'get-started');
+          if (existing) {
+            return { activeTabId: existing.id };
+          }
+          const newTab: AppTab = { id: 'get-started', type: 'get-started', title: 'Home' };
+          return { tabs: [...state.tabs, newTab], activeTabId: newTab.id };
+        }
+
+        if (tabInput.type === 'archive') {
+          const existing = state.tabs.find(t => t.type === 'archive');
+          if (existing) {
+            return { activeTabId: existing.id };
+          }
+          const id = tabInput.id || 'tab-archive';
+          const newTab: AppTab = { id, type: 'archive', title: 'Archive' };
+          return { tabs: [...state.tabs, newTab], activeTabId: id };
+        }
+        
+        if (tabInput.type === 'workspace' && tabInput.workspaceId) {
+          const existing = state.tabs.find(t => t.type === 'workspace' && t.workspaceId === tabInput.workspaceId);
+          if (existing) {
+            return { activeTabId: existing.id, activeWorkspaceId: tabInput.workspaceId };
+          }
+          const id = tabInput.id || `tab-ws-${tabInput.workspaceId}`;
+          const newTab: AppTab = {
+            id,
+            type: 'workspace',
+            title: tabInput.title || 'Workspace',
+            workspaceId: tabInput.workspaceId,
+          };
+          return {
+            tabs: [...state.tabs, newTab],
+            activeTabId: id,
+            activeWorkspaceId: tabInput.workspaceId,
+          };
+        }
+
+        if (tabInput.type === 'model' && tabInput.modelId) {
+          const existing = state.tabs.find(t => t.type === 'model' && t.modelId === tabInput.modelId);
+          if (existing) {
+            return {
+              activeTabId: existing.id,
+              activeModelId: tabInput.modelId,
+              activeStudyId: tabInput.studyId ?? state.activeStudyId,
+              activeWorkspaceId: tabInput.workspaceId ?? state.activeWorkspaceId,
+            };
+          }
+          const id = tabInput.id || `tab-model-${tabInput.modelId}`;
+          const newTab: AppTab = {
+            id,
+            type: 'model',
+            title: tabInput.title || 'Model',
+            workspaceId: tabInput.workspaceId,
+            studyId: tabInput.studyId,
+            modelId: tabInput.modelId,
+          };
+          return {
+            tabs: [...state.tabs, newTab],
+            activeTabId: id,
+            activeModelId: tabInput.modelId,
+            activeStudyId: tabInput.studyId ?? state.activeStudyId,
+            activeWorkspaceId: tabInput.workspaceId ?? state.activeWorkspaceId,
+          };
+        }
+
+        const id = tabInput.id || `tab-${Date.now()}`;
+        const newTab: AppTab = { ...tabInput, id };
+        return { tabs: [...state.tabs, newTab], activeTabId: id };
+      }),
+      closeTab: (id) => set((state) => {
+        const index = state.tabs.findIndex(t => t.id === id);
+        if (index === -1) return state;
+
+        const newTabs = state.tabs.filter(t => t.id !== id);
+        if (newTabs.length === 0) {
+          const homeTab: AppTab = { id: 'get-started', type: 'get-started', title: 'Home' };
+          return { tabs: [homeTab], activeTabId: 'get-started' };
+        }
+
+        let nextActiveId = state.activeTabId;
+        let nextWsId = state.activeWorkspaceId;
+        let nextStudyId = state.activeStudyId;
+        let nextModelId = state.activeModelId;
+
+        if (state.activeTabId === id) {
+          const nextTab = newTabs[Math.max(0, Math.min(index, newTabs.length - 1))];
+          nextActiveId = nextTab.id;
+          if (nextTab.type === 'workspace' && nextTab.workspaceId) {
+            nextWsId = nextTab.workspaceId;
+          } else if (nextTab.type === 'model') {
+            nextModelId = nextTab.modelId ?? null;
+            nextStudyId = nextTab.studyId ?? null;
+            nextWsId = nextTab.workspaceId ?? null;
+          }
+        }
+
+        return {
+          tabs: newTabs,
+          activeTabId: nextActiveId,
+          activeWorkspaceId: nextWsId,
+          activeStudyId: nextStudyId,
+          activeModelId: nextModelId,
+        };
+      }),
+      setActiveTab: (id) => set((state) => {
+        const tab = state.tabs.find(t => t.id === id);
+        if (!tab) return state;
+        let nextWs = state.activeWorkspaceId;
+        let nextStudy = state.activeStudyId;
+        let nextModel = state.activeModelId;
+        if (tab.type === 'workspace' && tab.workspaceId) {
+          nextWs = tab.workspaceId;
+        } else if (tab.type === 'model') {
+          if (tab.workspaceId) nextWs = tab.workspaceId;
+          if (tab.studyId) nextStudy = tab.studyId;
+          if (tab.modelId) nextModel = tab.modelId;
+        }
+        return {
+          activeTabId: id,
+          activeWorkspaceId: nextWs,
+          activeStudyId: nextStudy,
+          activeModelId: nextModel,
+        };
+      }),
+      updateTabTitle: (id, title) => set((state) => ({
+        tabs: state.tabs.map(t => t.id === id ? { ...t, title } : t)
+      })),
+
       // Workspaces & Studies
       workspaces: INITIAL_WORKSPACES,
       archivedWorkspaces: [],
-      trash: [],
       activeWorkspaceId: null,
       studies: INITIAL_STUDIES,
       activeStudyId: null,
@@ -182,14 +372,16 @@ export const useStore = create<AppState>()(
       activeModelId: null,
       addModel: (model) => set((state) => ({ models: [...state.models, model] })),
       removeModel: (id) => set((state) => ({ models: state.models.filter(model => model.id !== id) })),
-      renameModel: (id, name) => set((state) => ({ models: state.models.map(model => model.id === id ? { ...model, name, lastModified: 'Just now' } : model) })),
+      renameModel: (id, name) => set((state) => ({
+        models: state.models.map(model => model.id === id ? { ...model, name, lastModified: 'Just now' } : model),
+        tabs: state.tabs.map(tab => tab.type === 'model' && tab.modelId === id ? { ...tab, title: name } : tab),
+      })),
       duplicateModel: (id) => set((state) => {
         const model = state.models.find(item => item.id === id);
         return model ? { models: [...state.models, { ...model, id: `model_${Date.now()}`, name: `${model.name} copy`, lastModified: 'Just now' }] } : state;
       }),
       setActiveModel: (id) => set({ activeModelId: id }),
 
-      
       addWorkspace: (ws) => set((state) => ({ 
         workspaces: [...state.workspaces, ws],
         activeWorkspaceId: ws.id 
@@ -202,51 +394,67 @@ export const useStore = create<AppState>()(
       })),
       archiveWorkspace: (id) => set((state) => {
         const workspace = state.workspaces.find(item => item.id === id);
-        return workspace ? { workspaces: state.workspaces.filter(item => item.id !== id), archivedWorkspaces: [...state.archivedWorkspaces, workspace], activeWorkspaceId: state.activeWorkspaceId === id ? (state.workspaces.find(item => item.id !== id)?.id || null) : state.activeWorkspaceId } : state;
+        return workspace ? {
+          workspaces: state.workspaces.filter(item => item.id !== id),
+          archivedWorkspaces: [...state.archivedWorkspaces, workspace],
+          activeWorkspaceId: state.activeWorkspaceId === id ? (state.workspaces.find(item => item.id !== id)?.id || null) : state.activeWorkspaceId
+        } : state;
       }),
       restoreWorkspace: (id) => set((state) => {
         const workspace = state.archivedWorkspaces.find(item => item.id === id);
-        return workspace ? { workspaces: [...state.workspaces, workspace], archivedWorkspaces: state.archivedWorkspaces.filter(item => item.id !== id) } : state;
+        return workspace ? {
+          workspaces: [...state.workspaces, workspace],
+          archivedWorkspaces: state.archivedWorkspaces.filter(item => item.id !== id)
+        } : state;
       }),
-      trashWorkspace: (id) => set((state) => {
-        const workspace = state.workspaces.find(item => item.id === id);
-        if (!workspace) return state;
+      deleteWorkspace: (id) => set((state) => {
         const workspaceStudies = state.studies.filter(study => study.workspaceId === id);
         const studyIds = new Set(workspaceStudies.map(study => study.id));
-        const datasets = Object.fromEntries(Object.entries(state.datasetsByStudy).filter(([studyId]) => studyIds.has(studyId)));
-        const item: TrashItem = { id: `trash_${Date.now()}`, kind: 'workspace', name: workspace.name, deletedAt: new Date().toLocaleString(), workspace, studies: workspaceStudies, models: state.models.filter(model => studyIds.has(model.studyId)), datasets };
-        return { trash: [item, ...state.trash], workspaces: state.workspaces.filter(item => item.id !== id), studies: state.studies.filter(study => study.workspaceId !== id), models: state.models.filter(model => !studyIds.has(model.studyId)), datasetsByStudy: Object.fromEntries(Object.entries(state.datasetsByStudy).filter(([studyId]) => !studyIds.has(studyId))), activeWorkspaceId: state.activeWorkspaceId === id ? state.workspaces.find(item => item.id !== id)?.id ?? null : state.activeWorkspaceId };
+        const remainingTabs = state.tabs.filter(tab => tab.workspaceId !== id);
+        const nextTabs = remainingTabs.length > 0 ? remainingTabs : [{ id: 'get-started', type: 'get-started' as const, title: 'Home' }];
+        const nextActiveTabId = nextTabs.some(t => t.id === state.activeTabId) ? state.activeTabId : nextTabs[0].id;
+        return {
+          workspaces: state.workspaces.filter(item => item.id !== id),
+          archivedWorkspaces: state.archivedWorkspaces.filter(item => item.id !== id),
+          studies: state.studies.filter(study => study.workspaceId !== id),
+          models: state.models.filter(model => !studyIds.has(model.studyId)),
+          datasetsByStudy: Object.fromEntries(Object.entries(state.datasetsByStudy).filter(([studyId]) => !studyIds.has(studyId))),
+          activeWorkspaceId: state.activeWorkspaceId === id ? state.workspaces.find(item => item.id !== id)?.id ?? null : state.activeWorkspaceId,
+          tabs: nextTabs,
+          activeTabId: nextActiveTabId,
+        };
       }),
-      trashStudy: (id) => set((state) => {
-        const study = state.studies.find(item => item.id === id);
-        if (!study) return state;
-        const workspaceName = state.workspaces.find(workspace => workspace.id === study.workspaceId)?.name;
-        const item: TrashItem = { id: `trash_${Date.now()}`, kind: 'study', name: study.name, deletedAt: new Date().toLocaleString(), workspaceName, study, models: state.models.filter(model => model.studyId === id), dataset: state.datasetsByStudy[id] };
-        return { trash: [item, ...state.trash], studies: state.studies.filter(item => item.id !== id), models: state.models.filter(model => model.studyId !== id), datasetsByStudy: Object.fromEntries(Object.entries(state.datasetsByStudy).filter(([studyId]) => studyId !== id)), activeStudyId: state.activeStudyId === id ? null : state.activeStudyId };
+      deleteStudy: (id) => set((state) => {
+        const remainingTabs = state.tabs.filter(tab => tab.studyId !== id);
+        const nextTabs = remainingTabs.length > 0 ? remainingTabs : [{ id: 'get-started', type: 'get-started' as const, title: 'Home' }];
+        const nextActiveTabId = nextTabs.some(t => t.id === state.activeTabId) ? state.activeTabId : nextTabs[0].id;
+        return {
+          studies: state.studies.filter(item => item.id !== id),
+          models: state.models.filter(model => model.studyId !== id),
+          datasetsByStudy: Object.fromEntries(Object.entries(state.datasetsByStudy).filter(([studyId]) => studyId !== id)),
+          activeStudyId: state.activeStudyId === id ? null : state.activeStudyId,
+          tabs: nextTabs,
+          activeTabId: nextActiveTabId,
+        };
       }),
-      trashModel: (id) => set((state) => {
-        const model = state.models.find(item => item.id === id);
-        const study = model ? state.studies.find(item => item.id === model.studyId) : undefined;
-        const workspaceName = study ? state.workspaces.find(workspace => workspace.id === study.workspaceId)?.name : undefined;
-        return model ? { trash: [{ id: `trash_${Date.now()}`, kind: 'model', name: model.name, deletedAt: new Date().toLocaleString(), workspaceName, studyName: study?.name, model }, ...state.trash], models: state.models.filter(item => item.id !== id), activeModelId: state.activeModelId === id ? null : state.activeModelId } : state;
+      deleteModel: (id) => set((state) => {
+        const remainingTabs = state.tabs.filter(tab => tab.modelId !== id);
+        const nextTabs = remainingTabs.length > 0 ? remainingTabs : [{ id: 'get-started', type: 'get-started' as const, title: 'Home' }];
+        const nextActiveTabId = nextTabs.some(t => t.id === state.activeTabId) ? state.activeTabId : nextTabs[0].id;
+        return {
+          models: state.models.filter(item => item.id !== id),
+          activeModelId: state.activeModelId === id ? null : state.activeModelId,
+          tabs: nextTabs,
+          activeTabId: nextActiveTabId,
+        };
       }),
-      trashDataset: (studyId) => set((state) => {
-        const dataset = state.datasetsByStudy[studyId];
-        const study = state.studies.find(item => item.id === studyId);
-        const workspaceName = study ? state.workspaces.find(workspace => workspace.id === study.workspaceId)?.name : undefined;
-        return dataset ? { trash: [{ id: `trash_${Date.now()}`, kind: 'dataset', name: dataset.filename, deletedAt: new Date().toLocaleString(), workspaceName, studyName: study?.name, studyId, dataset }, ...state.trash], datasetsByStudy: Object.fromEntries(Object.entries(state.datasetsByStudy).filter(([id]) => id !== studyId)) } : state;
-      }),
-      restoreTrashItem: (id) => set((state) => {
-        const item = state.trash.find(entry => entry.id === id);
-        if (!item) return state;
-        const base = { trash: state.trash.filter(entry => entry.id !== id) };
-        if (item.kind === 'workspace') return { ...base, workspaces: [...state.workspaces, item.workspace], studies: [...state.studies, ...item.studies], models: [...state.models, ...item.models], datasetsByStudy: { ...state.datasetsByStudy, ...item.datasets } };
-        if (item.kind === 'study') return { ...base, studies: [...state.studies, item.study], models: [...state.models, ...item.models], datasetsByStudy: item.dataset ? { ...state.datasetsByStudy, [item.study.id]: item.dataset } : state.datasetsByStudy };
-        if (item.kind === 'model') return { ...base, models: [...state.models, item.model] };
-        return { ...base, datasetsByStudy: { ...state.datasetsByStudy, [item.studyId]: item.dataset } };
-      }),
-      permanentlyDeleteTrashItem: (id) => set((state) => ({ trash: state.trash.filter(item => item.id !== id) })),
-      renameWorkspace: (id, name) => set((state) => ({ workspaces: state.workspaces.map(workspace => workspace.id === id ? { ...workspace, name } : workspace) })),
+      deleteDataset: (studyId) => set((state) => ({
+        datasetsByStudy: Object.fromEntries(Object.entries(state.datasetsByStudy).filter(([id]) => id !== studyId))
+      })),
+      renameWorkspace: (id, name) => set((state) => ({
+        workspaces: state.workspaces.map(workspace => workspace.id === id ? { ...workspace, name } : workspace),
+        tabs: state.tabs.map(tab => tab.type === 'workspace' && tab.workspaceId === id ? { ...tab, title: name } : tab),
+      })),
       setActiveWorkspace: (id) => set({ activeWorkspaceId: id }),
       addStudy: (study) => set((state) => {
         const existingIdx = state.studies.findIndex(
@@ -381,12 +589,12 @@ export const useStore = create<AppState>()(
       partialize: (state) => ({
         workspaces: state.workspaces,
         archivedWorkspaces: state.archivedWorkspaces,
-        trash: state.trash,
         studies: state.studies,
         models: state.models,
         datasetsByStudy: state.datasetsByStudy,
         activeWorkspaceId: state.activeWorkspaceId,
         theme: state.theme,
+        settings: state.settings,
       }), // only persist these fields
     }
   )
