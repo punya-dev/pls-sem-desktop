@@ -538,13 +538,6 @@ body[data-window-fullscreen="true"] .titlebar__traffic-light-space {
   background: rgba(0, 0, 0, 0.06);
 }
 
-.tab-group-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
 .tab-group-title {
   max-width: 140px;
   overflow: hidden;
@@ -560,12 +553,14 @@ body[data-window-fullscreen="true"] .titlebar__traffic-light-space {
   line-height: 14px;
   margin-left: 1px;
   flex-shrink: 0;
+  background: rgba(0, 0, 0, 0.08);
+  color: var(--group-text);
 }
 
 .tab-group-chevron {
   font-size: 14px !important;
-  opacity: 0.6;
-  margin-left: -2px;
+  opacity: 0.55;
+  margin-right: -2px;
   flex-shrink: 0;
 }
 

@@ -124,25 +124,15 @@ export const TabBar: React.FC = () => {
     }
   };
 
-  // Color palette for workspace tab groups
+  // Alternating two-color palette: purple then neutral, cycling per group index
   const GROUP_PALETTE = [
-    { color: '#6B4EE6', bg: 'rgba(107, 78, 230, 0.08)', border: 'rgba(107, 78, 230, 0.28)', text: '#5936d9' },
-    { color: '#0284C7', bg: 'rgba(2, 132, 199, 0.08)', border: 'rgba(2, 132, 199, 0.28)', text: '#0369a1' },
-    { color: '#059669', bg: 'rgba(5, 150, 105, 0.08)', border: 'rgba(5, 150, 105, 0.28)', text: '#047857' },
-    { color: '#D97706', bg: 'rgba(217, 119, 6, 0.08)', border: 'rgba(217, 119, 6, 0.28)', text: '#b45309' },
-    { color: '#E11D48', bg: 'rgba(225, 29, 72, 0.08)', border: 'rgba(225, 29, 72, 0.28)', text: '#be123c' },
-    { color: '#4F46E5', bg: 'rgba(79, 70, 229, 0.08)', border: 'rgba(79, 70, 229, 0.28)', text: '#4338ca' },
-    { color: '#0D9488', bg: 'rgba(13, 148, 136, 0.08)', border: 'rgba(13, 148, 136, 0.28)', text: '#0f766e' },
+    { bg: 'rgba(107, 78, 230, 0.09)', border: 'rgba(107, 78, 230, 0.26)', text: '#5936d9' },
+    { bg: 'rgba(0, 0, 0, 0.04)', border: 'rgba(0,0,0,0.10)', text: 'var(--color-text-secondary)' },
   ];
 
-  const getWorkspaceColor = (workspaceId: string) => {
-    let hash = 0;
-    for (let i = 0; i < workspaceId.length; i++) {
-      hash = (hash << 5) - hash + workspaceId.charCodeAt(i);
-      hash |= 0;
-    }
-    const index = Math.abs(hash) % GROUP_PALETTE.length;
-    return GROUP_PALETTE[index];
+  // Assign palette by insertion order, not hash, so 1st group = purple, 2nd = white, etc.
+  const getWorkspaceColor = (workspaceId: string, groupIndex: number) => {
+    return GROUP_PALETTE[groupIndex % GROUP_PALETTE.length];
   };
 
   // Partition tabs into standalone tabs and workspace groups
@@ -158,6 +148,7 @@ export const TabBar: React.FC = () => {
 
   const stripItems: TabStripItem[] = [];
   const seenWorkspaces = new Set<string>();
+  let groupIndex = 0;
 
   for (const tab of tabs) {
     if (!tab.workspaceId) {
@@ -170,7 +161,8 @@ export const TabBar: React.FC = () => {
       const wsTabs = tabs.filter((t) => t.workspaceId === tab.workspaceId);
       const ws = workspaces.find((w) => w.id === tab.workspaceId);
       const wsName = ws?.name || tab.title || 'Workspace';
-      const color = getWorkspaceColor(tab.workspaceId);
+      const color = getWorkspaceColor(tab.workspaceId, groupIndex);
+      groupIndex++;
       stripItems.push({
         kind: 'group',
         workspaceId: tab.workspaceId,
@@ -184,12 +176,7 @@ export const TabBar: React.FC = () => {
   const renderSingleTab = (tab: AppTab, isInsideGroup = false) => {
     const isActive = tab.id === activeTabId;
     const iconName = getTabIcon(tab);
-    const label =
-      tab.type === 'get-started'
-        ? 'Home'
-        : tab.type === 'workspace' && isInsideGroup
-        ? 'Overview'
-        : tab.title;
+    const label = tab.type === 'get-started' ? 'Home' : tab.title;
 
     return (
       <div
@@ -233,6 +220,11 @@ export const TabBar: React.FC = () => {
             const isCollapsed = !!collapsedGroups[item.workspaceId];
             const hasActiveTab = item.tabs.some((t) => t.id === activeTabId);
 
+            // If only one tab in group and it's the workspace tab, render it as a plain tab (no collapse)
+            if (item.tabs.length === 1 && item.tabs[0].type === 'workspace') {
+              return renderSingleTab(item.tabs[0], false);
+            }
+
             return (
               <div
                 key={`group-${item.workspaceId}`}
@@ -241,7 +233,6 @@ export const TabBar: React.FC = () => {
                 }`}
                 style={
                   {
-                    '--group-color': item.color.color,
                     '--group-bg': item.color.bg,
                     '--group-border': item.color.border,
                     '--group-text': item.color.text,
@@ -267,24 +258,13 @@ export const TabBar: React.FC = () => {
                     isCollapsed ? 'expand' : 'collapse'
                   } • Right-click for options`}
                 >
-                  <span
-                    className="tab-group-dot"
-                    style={{ backgroundColor: item.color.color }}
-                  />
+                  <span className="material-symbols-outlined tab-group-chevron">
+                    {isCollapsed ? 'chevron_right' : 'chevron_left'}
+                  </span>
                   <span className="tab-group-title">{item.workspaceName}</span>
-                  {isCollapsed ? (
-                    <span
-                      className="tab-group-count"
-                      style={{
-                        backgroundColor: item.color.color,
-                        color: '#ffffff',
-                      }}
-                    >
+                  {isCollapsed && (
+                    <span className="tab-group-count">
                       {item.tabs.length}
-                    </span>
-                  ) : (
-                    <span className="material-symbols-outlined tab-group-chevron">
-                      expand_more
                     </span>
                   )}
                 </button>
