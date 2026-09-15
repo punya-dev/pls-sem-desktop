@@ -225,6 +225,9 @@ export const TabBar: React.FC = () => {
 
             const isCollapsed = !!collapsedGroups[item.workspaceId];
             const hasActiveTab = item.tabs.some((t) => t.id === activeTabId);
+            const wsTab = item.tabs.find((t) => t.type === 'workspace');
+            const isWorkspaceActive = wsTab?.id === activeTabId;
+            const childTabCount = item.tabs.filter((t) => t.type !== 'workspace').length;
 
             // If only one tab in group and it's the workspace tab, render it as a plain tab (no collapse)
             if (item.tabs.length === 1 && item.tabs[0].type === 'workspace') {
@@ -263,9 +266,8 @@ export const TabBar: React.FC = () => {
                 {/* Workspace name — opens the workspace tab */}
                 <button
                   type="button"
-                  className="tab-group-name-btn"
+                  className={`tab-group-name-btn${isWorkspaceActive ? ' tab-group-name-btn--active' : ''}`}
                   onClick={() => {
-                    const wsTab = item.tabs.find((t) => t.type === 'workspace');
                     if (wsTab) setActiveTab(wsTab.id);
                   }}
                   onContextMenu={(e) => {
@@ -282,8 +284,8 @@ export const TabBar: React.FC = () => {
                   title={`Open ${item.workspaceName}`}
                 >
                   <span className="tab-group-title">{item.workspaceName}</span>
-                  {isCollapsed && (
-                    <span className="tab-group-count">{item.tabs.length}</span>
+                  {isCollapsed && childTabCount > 0 && (
+                    <span className="tab-group-count">{childTabCount}</span>
                   )}
                 </button>
 
