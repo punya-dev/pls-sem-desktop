@@ -86,14 +86,20 @@ export const TabBar: React.FC = () => {
     return () => window.removeEventListener('mousedown', handleClose);
   }, [groupContextMenu]);
 
-  // Auto-expand group if active tab belongs to it
+  // Auto-expand group if active tab belongs to it.
+  // Use a ref for collapsedGroups so the effect only re-runs when activeTabId or tabs change,
+  // not when collapsedGroups changes — otherwise toggling collapse immediately re-expands.
+  const collapsedGroupsRef = useRef(collapsedGroups);
+  collapsedGroupsRef.current = collapsedGroups;
+
   useEffect(() => {
     if (!activeTabId) return;
     const activeTab = tabs.find((t) => t.id === activeTabId);
-    if (activeTab?.workspaceId && collapsedGroups[activeTab.workspaceId]) {
+    if (activeTab?.workspaceId && collapsedGroupsRef.current[activeTab.workspaceId]) {
       setCollapsedGroups((prev) => ({ ...prev, [activeTab.workspaceId!]: false }));
     }
-  }, [activeTabId, tabs, collapsedGroups]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTabId, tabs]);
 
   const toggleGroupCollapse = (wsId: string) => {
     setCollapsedGroups((prev) => ({
@@ -271,7 +277,10 @@ export const TabBar: React.FC = () => {
 
                 {!isCollapsed && (
                   <div className="tab-group-tabs">
-                    {item.tabs.map((t) => renderSingleTab(t, true))}
+                    {/* Skip the workspace tab itself — it's already represented by the group pill label */}
+                    {item.tabs
+                      .filter((t) => t.type !== 'workspace')
+                      .map((t) => renderSingleTab(t, true))}
                   </div>
                 )}
               </div>
