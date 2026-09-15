@@ -27,6 +27,7 @@ export const DatasetView: React.FC = () => {
   const [dataset, setDataset] = useState<ParsedDataset | null>(initialDataset);
   const [currentView, setCurrentView] = useState<'variables' | 'data'>('variables');
   const [searchFilter, setSearchFilter] = useState('');
+  const [isVariableSearchOpen, setIsVariableSearchOpen] = useState(false);
   const [sortCol, setSortCol] = useState<number | null>(null);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [saveToast, setSaveToast] = useState<string | null>(null);
@@ -262,60 +263,41 @@ export const DatasetView: React.FC = () => {
           </span>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          {/* Flush Variables | Data Switcher */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
-            <button
-              type="button"
-              onClick={() => setCurrentView('variables')}
-              style={{
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                fontWeight: currentView === 'variables' ? 600 : 500,
-                color: currentView === 'variables' ? 'var(--color-accent, #6B4EE6)' : 'var(--color-text-muted, #64748B)',
-                padding: '4px 8px',
-                borderBottom: currentView === 'variables' ? '2px solid var(--color-accent, #6B4EE6)' : '2px solid transparent',
-                transition: 'all 0.15s ease',
-              }}
-            >
-              Variables ({dataset.variables.length})
-            </button>
-            <span style={{ color: '#CBD5E1', fontSize: '12px' }}>|</span>
-            <button
-              type="button"
-              onClick={() => setCurrentView('data')}
-              style={{
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                fontWeight: currentView === 'data' ? 600 : 500,
-                color: currentView === 'data' ? 'var(--color-accent, #6B4EE6)' : 'var(--color-text-muted, #64748B)',
-                padding: '4px 8px',
-                borderBottom: currentView === 'data' ? '2px solid var(--color-accent, #6B4EE6)' : '2px solid transparent',
-                transition: 'all 0.15s ease',
-              }}
-            >
-              Data Matrix ({dataset.rows.length} rows)
-            </button>
-          </div>
-
-          <div style={{ width: '1px', height: '18px', background: 'var(--color-border-subtle)' }} />
-
-          {/* Inline search */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--color-bg-base)', border: '1px solid var(--color-border-subtle)', borderRadius: 'var(--radius-sm, 6px)', padding: '2px 8px' }}>
-            <span className="material-symbols-outlined" style={{ fontSize: '15px', color: 'var(--color-text-muted)' }}>search</span>
-            <input
-              type="text"
-              value={searchFilter}
-              onChange={e => setSearchFilter(e.target.value)}
-              placeholder="Filter..."
-              style={{ border: 'none', outline: 'none', background: 'transparent', fontSize: '12px', color: 'var(--color-text-primary)', width: '110px' }}
-            />
-            {searchFilter && (
-              <button type="button" onClick={() => setSearchFilter('')} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', padding: 0 }}>×</button>
-            )}
-          </div>
+        {/* Flush Variables | Data Switcher */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
+          <button
+            type="button"
+            onClick={() => setCurrentView('variables')}
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              fontWeight: currentView === 'variables' ? 600 : 500,
+              color: currentView === 'variables' ? 'var(--color-accent, #6B4EE6)' : 'var(--color-text-muted, #64748B)',
+              padding: '4px 8px',
+              borderBottom: currentView === 'variables' ? '2px solid var(--color-accent, #6B4EE6)' : '2px solid transparent',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            Variables ({dataset.variables.length})
+          </button>
+          <span style={{ color: '#CBD5E1', fontSize: '12px' }}>|</span>
+          <button
+            type="button"
+            onClick={() => setCurrentView('data')}
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              fontWeight: currentView === 'data' ? 600 : 500,
+              color: currentView === 'data' ? 'var(--color-accent, #6B4EE6)' : 'var(--color-text-muted, #64748B)',
+              padding: '4px 8px',
+              borderBottom: currentView === 'data' ? '2px solid var(--color-accent, #6B4EE6)' : '2px solid transparent',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            Data Matrix ({dataset.rows.length} rows)
+          </button>
         </div>
       </div>
 
@@ -384,7 +366,7 @@ export const DatasetView: React.FC = () => {
 
             {/* Variables Table */}
             <div style={{ flex: 1, overflow: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
+              <table style={{ width: '100%', minWidth: '960px', tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
                 <thead>
                   <tr style={{ background: 'var(--color-bg-raised)', borderBottom: '1px solid var(--color-border-subtle)', position: 'sticky', top: 0, zIndex: 10 }}>
                     <th style={{ padding: '8px 12px', width: '40px' }}>
@@ -395,14 +377,42 @@ export const DatasetView: React.FC = () => {
                         style={{ cursor: 'pointer' }}
                       />
                     </th>
-                    <th style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--color-text-secondary)' }}>Variable Name</th>
-                    <th style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--color-text-secondary)', width: '140px' }}>Scale Type</th>
-                    <th style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--color-text-secondary)', textAlign: 'right' }}>Missing</th>
-                    <th style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--color-text-secondary)', textAlign: 'right' }}>Mean</th>
-                    <th style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--color-text-secondary)', textAlign: 'right' }}>Median</th>
-                    <th style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--color-text-secondary)', textAlign: 'right' }}>Min</th>
-                    <th style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--color-text-secondary)', textAlign: 'right' }}>Max</th>
-                    <th style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--color-text-secondary)', textAlign: 'right' }}>Std. Dev</th>
+                    <th style={{ padding: '6px 12px', width: '220px', fontWeight: 600, color: 'var(--color-text-secondary)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {isVariableSearchOpen ? (
+                          <div className="inline-search-wrap" style={{ maxWidth: '160px' }}>
+                            <input 
+                              autoFocus 
+                              className="studies-inline-search" 
+                              value={searchFilter} 
+                              onChange={e => setSearchFilter(e.target.value)} 
+                              onBlur={() => { if (!searchFilter) setIsVariableSearchOpen(false); }} 
+                              placeholder="Filter variables…" 
+                            />
+                            {searchFilter && (
+                              <button className="inline-search-clear" type="button" aria-label="Clear variable search" onMouseDown={e => e.preventDefault()} onClick={() => setSearchFilter('')}>×</button>
+                            )}
+                          </div>
+                        ) : (
+                          <span>Variable Name</span>
+                        )}
+                        <button 
+                          type="button" 
+                          style={{ padding: '2px', borderRadius: 'var(--radius-sm)', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', background: 'transparent', cursor: 'pointer' }} 
+                          title="Filter variables" 
+                          onClick={() => { setIsVariableSearchOpen(open => !open); if (isVariableSearchOpen) setSearchFilter(''); }}
+                        >
+                          <span className="material-symbols-outlined" style={{ fontSize: '15px' }}>search</span>
+                        </button>
+                      </div>
+                    </th>
+                    <th style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--color-text-secondary)', width: '150px' }}>Scale Type</th>
+                    <th style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--color-text-secondary)', textAlign: 'right', width: '80px' }}>Missing</th>
+                    <th style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--color-text-secondary)', textAlign: 'right', width: '80px' }}>Mean</th>
+                    <th style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--color-text-secondary)', textAlign: 'right', width: '80px' }}>Median</th>
+                    <th style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--color-text-secondary)', textAlign: 'right', width: '80px' }}>Min</th>
+                    <th style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--color-text-secondary)', textAlign: 'right', width: '80px' }}>Max</th>
+                    <th style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--color-text-secondary)', textAlign: 'right', width: '90px' }}>Std. Dev</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -425,11 +435,11 @@ export const DatasetView: React.FC = () => {
                           <input 
                             type="checkbox" 
                             checked={v.selected} 
-                            onChange={() => toggleVariableSelection(idx)}
+                            onChange={() => toggleVariableSelection(idx)} 
                             style={{ cursor: 'pointer' }}
                           />
                         </td>
-                        <td style={{ padding: '8px 12px', fontWeight: 500, color: 'var(--color-text-primary)' }}>
+                        <td style={{ padding: '6px 12px', width: '220px', maxWidth: '220px', overflow: 'hidden', fontWeight: 500, color: 'var(--color-text-primary)' }}>
                           <EditableCell
                             value={v.name}
                             onChange={(newName) => updateVariableName(idx, newName)}

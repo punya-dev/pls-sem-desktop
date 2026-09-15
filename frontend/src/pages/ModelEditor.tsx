@@ -261,11 +261,6 @@ const ModelEditor = () => {
       setValidationSuccessToast(`PLS-SEM Calculation Complete! Converged in ${runRes.results?.iterations || 0} iterations`);
       setTimeout(() => setValidationSuccessToast(null), 3500);
 
-      // Show view slider and switch to results view
-      const viewSlider = document.getElementById('main-view-slider');
-      if (viewSlider) {
-        (viewSlider as HTMLElement).style.display = 'flex';
-      }
       switchView('results');
     } catch (err: any) {
       alert('Error calculating model: ' + err?.message);
@@ -704,11 +699,6 @@ const ModelEditor = () => {
         </button>
       </div>
 
-      <div className="view-slider" id="main-view-slider" style={{display: 'none'}}>
-        <div className="view-slider__bg" />
-        <button className="view-slider__btn" data-view="model">Model</button>
-        <button className="view-slider__btn" data-view="results">Results</button>
-      </div>
       <button
         className="subheader__btn subheader__btn--primary"
         id="calculate-btn"
@@ -1110,7 +1100,6 @@ const ModelEditor = () => {
           <div className="hud-divider" />
           <div className="hud-btn" id="hud-reset" title="Reset Default Styles"><span className="material-symbols-outlined" style={{fontSize: '18px'}}>restart_alt</span></div>
           <div className="hud-btn" id="hud-delete" title="Delete Selected Part (Delete / Backspace)"><span className="material-symbols-outlined" style={{fontSize: '18px', color: '#ef4444'}}>delete</span></div>
-          <div className="hud-btn" id="hud-clear" title="Clear Entire Canvas"><span className="material-symbols-outlined" style={{fontSize: '18px', color: '#64748b'}}>delete_sweep</span></div>
         </div>
         {/* SVG Engine Engine */}
         <svg id="model-svg" width="100%" height="100%" style={{display: 'block'}} onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }} onDrop={handleCanvasDrop}>

@@ -180,7 +180,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({ dataset: ini
         {/* ── Variables table ── */}
         {activeTab === 'variables' && (
           <div className="dm-body custom-scroll">
-            <table className="dm-table">
+            <table className="dm-table" style={{ minWidth: 640, tableLayout: 'fixed' }}>
               <thead>
                 <tr>
                   <th style={{ width: 40 }}>
@@ -192,11 +192,11 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({ dataset: ini
                       className="dm-checkbox"
                     />
                   </th>
-                  <th style={{ minWidth: 160 }}>Variable Name</th>
-                  <th style={{ width: 190 }}>Measurement Scale</th>
-                  <th className="dm-th--num" style={{ width: 85 }}>Min</th>
-                  <th className="dm-th--num" style={{ width: 85 }}>Max</th>
-                  <th className="dm-th--num" style={{ width: 85 }}>Missing</th>
+                  <th style={{ width: 220 }}>Variable Name</th>
+                  <th style={{ width: 170 }}>Measurement Scale</th>
+                  <th className="dm-th--num" style={{ width: 70 }}>Min</th>
+                  <th className="dm-th--num" style={{ width: 70 }}>Max</th>
+                  <th className="dm-th--num" style={{ width: 70 }}>Missing</th>
                 </tr>
               </thead>
               <tbody>

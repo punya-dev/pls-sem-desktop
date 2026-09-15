@@ -10,9 +10,25 @@ const GetStarted = () => {
   const { workspaces, activeWorkspaceId, addWorkspace, removeWorkspace, setActiveWorkspace, archivedWorkspaces, archiveWorkspace, renameWorkspace, deleteWorkspace, requestDelete, openTab } = useStore();
   const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [inputDialogConfig, setInputDialogConfig] = useState<{isOpen: boolean; title: string; placeholder: string; submitLabel: string; onSubmit: (val: string) => void}>({
+  const [inputDialogConfig, setInputDialogConfig] = useState<{isOpen: boolean; title: string; placeholder: string; submitLabel: string; initialValue?: string; onSubmit: (val: string) => void}>({
     isOpen: false, title: '', placeholder: '', submitLabel: '', onSubmit: () => {}
   });
+  const [workspaceQuery, setWorkspaceQuery] = useState('');
+  const [isWorkspaceSearchOpen, setIsWorkspaceSearchOpen] = useState(false);
+  const filteredWorkspaces = workspaces.filter(workspace => workspace.name.toLowerCase().includes(workspaceQuery.toLowerCase()));
+
+  const rename = (title: string, initialValue: string, onSubmit: (name: string) => void) => {
+    setInputDialogConfig({
+      isOpen: true,
+      title,
+      placeholder: 'Enter new name...',
+      submitLabel: 'Save',
+      initialValue,
+      onSubmit: (newName) => {
+        if (newName.trim()) onSubmit(newName.trim());
+      }
+    });
+  };
 
   const handleOpenSampleProject = () => {
     const ws = workspaces.find(w => w.id === activeWorkspaceId) || workspaces[0];
@@ -86,13 +102,26 @@ const GetStarted = () => {
             <div className="sidebar-ws-container">
               
               <div className="sidebar-header" style={{'paddingBottom': '10px', 'borderBottom': 'none'}}>
-                <span className="sidebar-header__label">Workspaces</span>
+                {isWorkspaceSearchOpen ? (
+                  <div className="inline-search-wrap">
+                    <input 
+                      autoFocus 
+                      className="sidebar-inline-search" 
+                      value={workspaceQuery} 
+                      onChange={event => setWorkspaceQuery(event.target.value)} 
+                      onBlur={() => { if (!workspaceQuery) setIsWorkspaceSearchOpen(false); }} 
+                      placeholder="Filter workspaces…" 
+                    />
+                    {workspaceQuery && (
+                      <button className="inline-search-clear" type="button" aria-label="Clear workspace search" onMouseDown={event => event.preventDefault()} onClick={() => setWorkspaceQuery('')}>×</button>
+                    )}
+                  </div>
+                ) : (
+                  <span className="sidebar-header__label">Workspaces</span>
+                )}
                 <div className="sidebar-header__actions">
-                  <button className="icon-btn icon-btn--sm" title="Search workspaces" type="button" onClick={() => setInputDialogConfig({isOpen: true, title: 'Search Workspaces', placeholder: 'Enter workspace name...', submitLabel: 'Search', onSubmit: () => {}})}>
+                  <button className={`icon-btn icon-btn--sm ${isWorkspaceSearchOpen ? 'active' : ''}`} title="Filter workspaces" type="button" onClick={() => { setIsWorkspaceSearchOpen(open => !open); if (isWorkspaceSearchOpen) setWorkspaceQuery(''); }}>
                     <span className="material-symbols-outlined">search</span>
-                  </button>
-                  <button className="icon-btn icon-btn--sm" title="Open Workspace Folder" type="button" onClick={handleOpenWorkspace}>
-                    <span className="material-symbols-outlined">folder_open</span>
                   </button>
                   <button className="sidebar-create-folder-btn" title="Create Workspace" type="button" onClick={() => setIsWorkspaceModalOpen(true)}>
                     <svg fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
@@ -108,7 +137,7 @@ const GetStarted = () => {
               </div>
 
               <div id="sidebar-ws-list" style={{'display': 'flex', 'flexDirection': 'column', 'gap': '2px'}}>
-                {workspaces.map(ws => (
+                {filteredWorkspaces.map(ws => (
                   <button 
                     key={ws.id} 
                     className="sidebar-item" 
@@ -124,18 +153,19 @@ const GetStarted = () => {
                       e.preventDefault();
                       useStore.getState().openContextMenu(e.clientX, e.clientY, [
                         {
-                          id: 'remove-from-sidebar',
-                          label: 'Remove from Sidebar',
-                          icon: 'close',
-                          action: () => {
-                            removeWorkspace(ws.id);
-                          }
+                          id: 'rename', label: 'Rename Workspace', icon: 'edit', action: () => rename('Rename Workspace', ws.name, name => renameWorkspace(ws.id, name))
                         },
                         {
-                          id: 'delete-workspace',
-                          label: 'Delete Workspace',
-                          icon: 'delete',
-                          danger: true,
+                          id: 'duplicate', label: 'Duplicate Workspace', icon: 'content_copy', action: () => useStore.getState().addWorkspace({ ...ws, id: `ws_${Date.now()}`, name: `${ws.name} copy` })
+                        },
+                        {
+                          id: 'archive', label: 'Archive Workspace', icon: 'inventory_2', action: () => archiveWorkspace(ws.id)
+                        },
+                        {
+                          id: 'delete', 
+                          label: 'Delete Workspace', 
+                          icon: 'delete', 
+                          danger: true, 
                           action: () => {
                             requestDelete({
                               title: 'Delete Workspace',
@@ -151,7 +181,7 @@ const GetStarted = () => {
                                 deleteWorkspace(ws.id);
                               },
                             });
-                          }
+                          } 
                         }
                       ]);
                     }}
@@ -162,6 +192,9 @@ const GetStarted = () => {
                     </span>
                   </button>
                 ))}
+                {isWorkspaceSearchOpen && workspaceQuery && filteredWorkspaces.length === 0 && (
+                  <span className="inline-search-empty">No workspaces found</span>
+                )}
               </div>
             </div>
           </div>

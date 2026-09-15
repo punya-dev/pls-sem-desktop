@@ -14,6 +14,7 @@ export const TabBar: React.FC = () => {
 
   // Drag-to-reorder state
   const dragTabId = useRef<string | null>(null);
+  const dragWsId = useRef<string | null>(null);
   const dragOverTabId = useRef<string | null>(null);
 
   // Close dropdown on outside click and reset search
@@ -183,6 +184,19 @@ export const TabBar: React.FC = () => {
     }
   }
 
+  const moveWorkspaceTabs = (fromWsId: string, targetTabId: string) => {
+    const wsTabs = tabs.filter((t) => t.workspaceId === fromWsId);
+    if (wsTabs.length === 0) return;
+
+    const remainingTabs = tabs.filter((t) => t.workspaceId !== fromWsId);
+    let insertIdx = remainingTabs.findIndex((t) => t.id === targetTabId);
+    if (insertIdx === -1) insertIdx = remainingTabs.length;
+
+    const newTabs = [...remainingTabs];
+    newTabs.splice(insertIdx, 0, ...wsTabs);
+    useStore.setState({ tabs: newTabs });
+  };
+
   const renderSingleTab = (tab: AppTab, isInsideGroup = false) => {
     const isActive = tab.id === activeTabId;
     const iconName = getTabIcon(tab);
@@ -213,6 +227,13 @@ export const TabBar: React.FC = () => {
         }}
         onDrop={(e) => {
           e.preventDefault();
+          if (dragWsId.current) {
+            moveWorkspaceTabs(dragWsId.current, tab.id);
+            dragWsId.current = null;
+            dragTabId.current = null;
+            dragOverTabId.current = null;
+            return;
+          }
           if (!dragTabId.current || dragTabId.current === tab.id) return;
           const fromIndex = tabs.findIndex((t) => t.id === dragTabId.current);
           const toIndex = tabFlatIndex;
@@ -222,6 +243,7 @@ export const TabBar: React.FC = () => {
         }}
         onDragEnd={() => {
           dragTabId.current = null;
+          dragWsId.current = null;
           dragOverTabId.current = null;
         }}
       >
@@ -273,8 +295,40 @@ export const TabBar: React.FC = () => {
                     '--group-bg': item.color.bg,
                     '--group-border': item.color.border,
                     '--group-text': item.color.text,
+                    cursor: isCollapsed ? 'grab' : undefined,
                   } as React.CSSProperties
                 }
+                draggable={isCollapsed}
+                onDragStart={(e) => {
+                  if (isCollapsed) {
+                    dragWsId.current = item.workspaceId;
+                    e.dataTransfer.effectAllowed = 'move';
+                  }
+                }}
+                onDragOver={(e) => {
+                  if (dragWsId.current || dragTabId.current) {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                  }
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (dragWsId.current && dragWsId.current !== item.workspaceId) {
+                    moveWorkspaceTabs(dragWsId.current, item.tabs[0].id);
+                  } else if (dragTabId.current) {
+                    const fromIndex = tabs.findIndex((t) => t.id === dragTabId.current);
+                    const toIndex = tabs.findIndex((t) => t.id === item.tabs[0].id);
+                    if (fromIndex !== -1 && toIndex !== -1) reorderTabs(fromIndex, toIndex);
+                  }
+                  dragWsId.current = null;
+                  dragTabId.current = null;
+                  dragOverTabId.current = null;
+                }}
+                onDragEnd={() => {
+                  dragWsId.current = null;
+                  dragTabId.current = null;
+                  dragOverTabId.current = null;
+                }}
               >
                 {/* Collapse/expand arrow — only toggles collapse */}
                 <button
