@@ -205,11 +205,7 @@ const GetStarted = () => {
                 <h1 className="page-header__title">Get Started</h1>
                 <p className="page-header__subtitle">Welcome to CSPLS. Set up your workspace or explore guided sample models to begin.</p>
               </div>
-              <div className="page-header__actions" style={{ display: 'flex', gap: '8px' }}>
-                <button className="btn btn-secondary" type="button" onClick={handleOpenWorkspace}>
-                  <span className="material-symbols-outlined">folder_open</span>
-                  <span>Open Workspace</span>
-                </button>
+              <div className="page-header__actions">
                 <button className="btn btn-primary" type="button" onClick={() => setIsWorkspaceModalOpen(true)}>
                   <span className="material-symbols-outlined">add</span>
                   <span>Create Workspace</span>

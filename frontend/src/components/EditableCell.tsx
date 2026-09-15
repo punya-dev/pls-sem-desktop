@@ -8,7 +8,13 @@ interface EditableCellProps {
   disabled?: boolean;
 }
 
-export const EditableCell: React.FC<EditableCellProps> = ({ value, onChange, type = 'text', className = '', disabled = false }) => {
+export const EditableCell: React.FC<EditableCellProps> = ({
+  value,
+  onChange,
+  type = 'text',
+  className = '',
+  disabled = false
+}) => {
   const [isEditing, setIsEditing] = useState(false);
   const [tempValue, setTempValue] = useState(value);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -20,6 +26,7 @@ export const EditableCell: React.FC<EditableCellProps> = ({ value, onChange, typ
   useEffect(() => {
     if (isEditing && inputRef.current) {
       inputRef.current.focus();
+      inputRef.current.select();
     }
   }, [isEditing]);
 
@@ -38,19 +45,25 @@ export const EditableCell: React.FC<EditableCellProps> = ({ value, onChange, typ
         value={tempValue}
         onChange={e => setTempValue(e.target.value)}
         onBlur={commit}
-        onKeyDown={e => e.key === 'Enter' && commit()}
-        className={`w-full bg-white border border-indigo-500 rounded shadow-sm outline-none px-1 py-0.5 m-[-2px] text-slate-900 ${className}`}
+        onKeyDown={e => {
+          if (e.key === 'Enter') commit();
+          if (e.key === 'Escape') {
+            setTempValue(value);
+            setIsEditing(false);
+          }
+        }}
+        className={`editable-cell-input ${className}`}
       />
     );
   }
 
   return (
-    <span 
-      onClick={() => !disabled && setIsEditing(true)} 
-      className={`block w-full truncate ${!disabled ? 'cursor-text hover:bg-slate-100 rounded' : ''} ${className}`}
-      title={!disabled ? "Click to edit" : undefined}
+    <span
+      onClick={() => !disabled && setIsEditing(true)}
+      className={`editable-cell-display ${!disabled ? 'editable-cell-display--interactive' : ''} ${className}`}
+      title={!disabled ? 'Click to edit' : undefined}
     >
-      {value}
+      {value !== '' && value !== null && value !== undefined ? value : '\u00A0'}
     </span>
   );
 };

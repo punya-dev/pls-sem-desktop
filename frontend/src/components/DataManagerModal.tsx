@@ -192,11 +192,11 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({ dataset: ini
                       className="dm-checkbox"
                     />
                   </th>
-                  <th>Variable Name</th>
-                  <th>Measurement Scale</th>
-                  <th className="dm-th--num">Min</th>
-                  <th className="dm-th--num">Max</th>
-                  <th className="dm-th--num">Missing</th>
+                  <th style={{ minWidth: 160 }}>Variable Name</th>
+                  <th style={{ width: 190 }}>Measurement Scale</th>
+                  <th className="dm-th--num" style={{ width: 85 }}>Min</th>
+                  <th className="dm-th--num" style={{ width: 85 }}>Max</th>
+                  <th className="dm-th--num" style={{ width: 85 }}>Missing</th>
                 </tr>
               </thead>
               <tbody>
