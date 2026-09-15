@@ -7,12 +7,22 @@ import { api } from '../utils/api';
 
 const GetStarted = () => {
   const navigate = useNavigate();
-  const { workspaces, addWorkspace, removeWorkspace, setActiveWorkspace, archivedWorkspaces, archiveWorkspace, renameWorkspace, deleteWorkspace, requestDelete, openTab } = useStore();
+  const { workspaces, activeWorkspaceId, addWorkspace, removeWorkspace, setActiveWorkspace, archivedWorkspaces, archiveWorkspace, renameWorkspace, deleteWorkspace, requestDelete, openTab } = useStore();
   const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [inputDialogConfig, setInputDialogConfig] = useState<{isOpen: boolean; title: string; placeholder: string; submitLabel: string; onSubmit: (val: string) => void}>({
     isOpen: false, title: '', placeholder: '', submitLabel: '', onSubmit: () => {}
   });
+
+  const handleOpenSampleProject = () => {
+    const ws = workspaces.find(w => w.id === activeWorkspaceId) || workspaces[0];
+    if (ws) {
+      setActiveWorkspace(ws.id);
+      openTab({ type: 'workspace', title: ws.name, workspaceId: ws.id });
+    } else {
+      setIsWorkspaceModalOpen(true);
+    }
+  };
 
   const handleOpenWorkspace = async () => {
     try {
@@ -296,7 +306,7 @@ const GetStarted = () => {
 
                 <div className="project-list">
 
-                  <div onClick={() => navigate('/workspace')} className="project-card animate-fade-in animate-fade-in-delay-4" style={{ cursor: 'pointer' }}>
+                  <div onClick={handleOpenSampleProject} className="project-card animate-fade-in animate-fade-in-delay-4" style={{ cursor: 'pointer' }}>
                     <div className="project-card__content">
                       <div className="project-card__info">
                         <h3 className="project-card__title">Corporate Reputation Model</h3>
@@ -305,7 +315,7 @@ const GetStarted = () => {
                     </div>
                   </div>
 
-                  <div onClick={() => navigate('/workspace')} className="project-card animate-fade-in animate-fade-in-delay-5" style={{ cursor: 'pointer' }}>
+                  <div onClick={handleOpenSampleProject} className="project-card animate-fade-in animate-fade-in-delay-5" style={{ cursor: 'pointer' }}>
                     <div className="project-card__content">
                       <div className="project-card__info">
                         <h3 className="project-card__title">Customer Satisfaction Index (ACSI/ECSI)</h3>
@@ -314,7 +324,7 @@ const GetStarted = () => {
                     </div>
                   </div>
 
-                  <div onClick={() => navigate('/workspace')} className="project-card animate-fade-in animate-fade-in-delay-6" style={{ cursor: 'pointer' }}>
+                  <div onClick={handleOpenSampleProject} className="project-card animate-fade-in animate-fade-in-delay-6" style={{ cursor: 'pointer' }}>
                     <div className="project-card__content">
                       <div className="project-card__info">
                         <h3 className="project-card__title">Technology Acceptance Model (TAM 3)</h3>
@@ -323,7 +333,7 @@ const GetStarted = () => {
                     </div>
                   </div>
 
-                  <div onClick={() => navigate('/workspace')} className="project-card animate-fade-in animate-fade-in-delay-7" style={{ cursor: 'pointer' }}>
+                  <div onClick={handleOpenSampleProject} className="project-card animate-fade-in animate-fade-in-delay-7" style={{ cursor: 'pointer' }}>
                     <div className="project-card__content">
                       <div className="project-card__info">
                         <h3 className="project-card__title">Meta-Analysis &amp; Moderation</h3>

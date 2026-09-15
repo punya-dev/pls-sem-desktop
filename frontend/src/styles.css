@@ -264,11 +264,21 @@ a:hover {
   user-select: none;
 }
 
+.titlebar__left,
+.titlebar__left * {
+  -webkit-app-region: no-drag !important;
+}
+
 .titlebar__left {
   display: flex;
   align-items: center;
   gap: 12px;
   flex-shrink: 0;
+}
+
+.titlebar__right,
+.titlebar__right * {
+  -webkit-app-region: no-drag !important;
 }
 
 .titlebar__right {
@@ -312,6 +322,7 @@ body[data-window-fullscreen="true"] .titlebar__traffic-light-space {
   margin: 0 8px;
   overflow: visible;
   position: relative;
+  -webkit-app-region: no-drag !important;
 }
 
 .titlebar__version {
@@ -322,6 +333,11 @@ body[data-window-fullscreen="true"] .titlebar__traffic-light-space {
 }
 
 /* ─── Window Tabs (VSCode / Chrome style) ─────────────────────────────────── */
+
+.tabbar-root,
+.tabbar-root * {
+  -webkit-app-region: no-drag !important;
+}
 
 .tabbar-root {
   display: flex;
