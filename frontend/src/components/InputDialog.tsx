@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 interface InputDialogProps {
   isOpen: boolean;
@@ -10,12 +10,25 @@ interface InputDialogProps {
   onSubmit: (value: string) => void;
 }
 
-const InputDialog = ({ isOpen, onClose, title, placeholder, submitLabel = 'Submit', initialValue = '', onSubmit }: InputDialogProps) => {
+const InputDialog = ({
+  isOpen,
+  onClose,
+  title,
+  placeholder,
+  submitLabel = 'Save',
+  initialValue = '',
+  onSubmit,
+}: InputDialogProps) => {
   const [value, setValue] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (isOpen) {
       setValue(initialValue);
+      // Focus and select-all after mount
+      requestAnimationFrame(() => {
+        inputRef.current?.select();
+      });
     }
   }, [isOpen, initialValue]);
 
@@ -30,7 +43,7 @@ const InputDialog = ({ isOpen, onClose, title, placeholder, submitLabel = 'Submi
 
   return (
     <div className="modal-overlay active" style={{ display: 'flex', zIndex: 9999 }} onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
+      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '380px' }}>
         <div className="modal__header">
           <h2 className="modal__title">{title}</h2>
           <button className="icon-btn icon-btn--sm" type="button" onClick={onClose}>
@@ -40,12 +53,12 @@ const InputDialog = ({ isOpen, onClose, title, placeholder, submitLabel = 'Submi
         <form onSubmit={handleSubmit}>
           <div className="modal__body">
             <div className="modal__field">
-              <label className="modal__label" htmlFor="input-dialog-value">Name</label>
-              <input 
+              <input
+                ref={inputRef}
                 id="input-dialog-value"
-                type="text" 
-                className="modal__input" 
-                placeholder={placeholder || 'Enter text...'} 
+                type="text"
+                className="modal__input"
+                placeholder={placeholder || 'Enter a name…'}
                 value={value}
                 onChange={e => setValue(e.target.value)}
                 autoFocus

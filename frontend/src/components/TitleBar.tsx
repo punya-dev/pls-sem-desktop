@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useStore } from '../store';
 import TabBar from './TabBar';
@@ -69,6 +69,16 @@ export const TitleBar: React.FC = () => {
   const [isLicenseActive, setIsLicenseActive] = useState(true);
   const [isLicenseHovered, setIsLicenseHovered] = useState(false);
   const [copiedKey, setCopiedKey] = useState(false);
+  const licenseHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleLicenseMouseEnter = () => {
+    if (licenseHideTimer.current) clearTimeout(licenseHideTimer.current);
+    setIsLicenseHovered(true);
+  };
+
+  const handleLicenseMouseLeave = () => {
+    licenseHideTimer.current = setTimeout(() => setIsLicenseHovered(false), 400);
+  };
 
   const licenseInfo = {
     type: 'Faculty Multi-Seat',
@@ -139,8 +149,8 @@ export const TitleBar: React.FC = () => {
         <div 
           className="license-indicator-wrapper" 
           style={{ position: 'relative', display: 'flex', alignItems: 'center' }}
-          onMouseEnter={() => setIsLicenseHovered(true)}
-          onMouseLeave={() => setIsLicenseHovered(false)}
+          onMouseEnter={handleLicenseMouseEnter}
+          onMouseLeave={handleLicenseMouseLeave}
         >
           <button
             type="button"
@@ -172,149 +182,54 @@ export const TitleBar: React.FC = () => {
           </button>
 
           {isLicenseHovered && (
-            <div
-              className="license-popup animate-fade-in"
-              style={{
-                position: 'absolute',
-                top: 'calc(100% + 8px)',
-                right: 0,
-                width: '270px',
-                backgroundColor: '#FFFFFF',
-                borderRadius: '10px',
-                boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.12), 0 8px 10px -6px rgba(0, 0, 0, 0.08)',
-                border: '1px solid #E2E8F0',
-                padding: '14px',
-                zIndex: 1000,
-                color: '#1E293B',
-                fontSize: '12px',
-                lineHeight: '1.4',
-                textAlign: 'left',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span
-                    style={{
-                      width: '7px',
-                      height: '7px',
-                      borderRadius: '50%',
-                      backgroundColor: isLicenseActive ? '#10B981' : '#EF4444',
-                    }}
-                  />
-                  <span style={{ fontWeight: 600, fontSize: '12px', color: isLicenseActive ? '#059669' : '#DC2626' }}>
-                    {isLicenseActive ? 'License Active' : 'License Deactivated'}
+            <div className="license-popup-card">
+              <div className="license-popup-card__header">
+                <span className="license-popup-card__status-dot" style={{ backgroundColor: isLicenseActive ? '#10B981' : '#EF4444' }} />
+                <span className="license-popup-card__status-text" style={{ color: isLicenseActive ? '#059669' : '#DC2626' }}>
+                  {isLicenseActive ? 'Active' : 'Inactive'}
+                </span>
+                <span className="license-popup-card__type">{licenseInfo.type}</span>
+              </div>
+
+              <div className="license-popup-card__rows">
+                <div className="license-popup-card__row">
+                  <span className="license-popup-card__key-label">Licensee</span>
+                  <span className="license-popup-card__key-value">{licenseInfo.licensee}</span>
+                </div>
+                <div className="license-popup-card__row">
+                  <span className="license-popup-card__key-label">Expiry</span>
+                  <span className="license-popup-card__key-value">
+                    {isLicenseActive ? `${licenseInfo.daysRemaining} days (${licenseInfo.expiryDate})` : 'Inactive'}
                   </span>
                 </div>
-                <span
-                  style={{
-                    fontSize: '10px',
-                    fontWeight: 600,
-                    backgroundColor: '#F1F5F9',
-                    color: '#475569',
-                    padding: '2px 6px',
-                    borderRadius: '4px',
-                  }}
-                >
-                  {licenseInfo.type}
-                </span>
-              </div>
-
-              <div style={{ marginBottom: '8px' }}>
-                <div style={{ fontSize: '10px', color: '#64748B', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
-                  Licensee
-                </div>
-                <div style={{ fontWeight: 500, color: '#0F172A', marginTop: '1px' }}>
-                  {licenseInfo.licensee}
-                </div>
-              </div>
-
-              <div style={{ marginBottom: '8px' }}>
-                <div style={{ fontSize: '10px', color: '#64748B', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
-                  License Key
-                </div>
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    backgroundColor: '#F8FAFC',
-                    border: '1px solid #E2E8F0',
-                    borderRadius: '6px',
-                    padding: '4px 8px',
-                    marginTop: '2px',
-                    fontFamily: 'monospace',
-                    fontSize: '11px',
-                    color: '#334155',
-                  }}
-                >
-                  <span style={{ letterSpacing: '0.02em' }}>{licenseInfo.key}</span>
+                <div className="license-popup-card__row license-popup-card__row--mono">
+                  <span className="license-popup-card__key-label">Key</span>
+                  <span className="license-popup-card__key-mono">{licenseInfo.key}</span>
                   <button
                     type="button"
+                    className="license-popup-card__copy-btn"
                     onClick={handleCopyKey}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      cursor: 'pointer',
-                      padding: '2px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      color: copiedKey ? '#10B981' : '#64748B',
-                    }}
-                    title={copiedKey ? 'Copied!' : 'Copy Key'}
+                    title={copiedKey ? 'Copied!' : 'Copy key'}
                   >
-                    <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>
+                    <span className="material-symbols-outlined" style={{ fontSize: '13px' }}>
                       {copiedKey ? 'check' : 'content_copy'}
                     </span>
                   </button>
                 </div>
               </div>
 
-              <div style={{ marginBottom: '12px' }}>
-                <div style={{ fontSize: '10px', color: '#64748B', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
-                  Expiry
-                </div>
-                <div style={{ fontWeight: 500, color: '#0F172A', marginTop: '1px' }}>
-                  {isLicenseActive ? `${licenseInfo.daysRemaining} days remaining (${licenseInfo.expiryDate})` : 'Inactive'}
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: '8px', paddingTop: '8px', borderTop: '1px solid #F1F5F9' }}>
+              <div className="license-popup-card__footer">
                 <button
                   type="button"
+                  className={`license-popup-card__action ${isLicenseActive ? 'license-popup-card__action--deactivate' : 'license-popup-card__action--activate'}`}
                   onClick={() => setIsLicenseActive(!isLicenseActive)}
-                  style={{
-                    flex: 1,
-                    padding: '5px 0',
-                    borderRadius: '6px',
-                    fontSize: '11px',
-                    fontWeight: 500,
-                    cursor: 'pointer',
-                    border: isLicenseActive ? '1px solid #FCA5A5' : '1px solid #86EFAC',
-                    backgroundColor: isLicenseActive ? '#FEF2F2' : '#F0FDF4',
-                    color: isLicenseActive ? '#DC2626' : '#16A34A',
-                    transition: 'all 0.15s ease',
-                  }}
                 >
                   {isLicenseActive ? 'Deactivate' : 'Activate'}
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    setIsSettingsOpen(true);
-                    setIsLicenseHovered(false);
-                  }}
-                  style={{
-                    flex: 1,
-                    padding: '5px 0',
-                    borderRadius: '6px',
-                    fontSize: '11px',
-                    fontWeight: 500,
-                    cursor: 'pointer',
-                    border: '1px solid #E2E8F0',
-                    backgroundColor: '#FFFFFF',
-                    color: '#334155',
-                    transition: 'all 0.15s ease',
-                  }}
+                  className="license-popup-card__action license-popup-card__action--manage"
+                  onClick={() => { setIsSettingsOpen(true); setIsLicenseHovered(false); }}
                 >
                   Manage
                 </button>
