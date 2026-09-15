@@ -1,0 +1,494 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { api } from '../utils/api';
+import type { ModelSpec } from '../utils/api';
+
+interface BootstrapModalProps {
+  isOpen: boolean;
+  projectPath: string;
+  spec?: ModelSpec;
+  datasetHeaders?: string[];
+  datasetRows?: any[][];
+  datasetName?: string;
+  onComplete: (results: any) => void;
+  onClose: () => void;
+}
+
+export const BootstrapModal: React.FC<BootstrapModalProps> = ({
+  isOpen,
+  projectPath,
+  spec,
+  datasetHeaders,
+  datasetRows,
+  datasetName,
+  onComplete,
+  onClose,
+}) => {
+  const [stage, setStage] = useState<'config' | 'running' | 'completed' | 'cancelled' | 'error'>('config');
+  const [nBoot, setNBoot] = useState<number>(500);
+  const [seed, setSeed] = useState<number>(42);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [current, setCurrent] = useState<number>(0);
+  const [total, setTotal] = useState<number>(500);
+  const [percent, setPercent] = useState<number>(0);
+  const [elapsedSec, setElapsedSec] = useState<number>(0);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const wsRef = useRef<WebSocket | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) {
+      // Reset modal state on close
+      setStage('config');
+      setCurrent(0);
+      setPercent(0);
+      setElapsedSec(0);
+      setErrorMsg(null);
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+    }
+  }, [isOpen]);
+
+  const handleStart = async () => {
+    try {
+      setStage('running');
+      setCurrent(0);
+      setTotal(nBoot);
+      setPercent(0);
+      setElapsedSec(0);
+      setErrorMsg(null);
+
+      const startRes = await api.startBootstrap(projectPath, spec, {
+        n_boot: nBoot,
+        seed: seed,
+        scheme: 'path',
+        columns: datasetHeaders,
+        rows: datasetRows,
+        dataset_name: datasetName,
+      });
+
+      if (startRes.error || !startRes.job_id) {
+        setStage('error');
+        setErrorMsg(startRes.error || 'Failed to initialize bootstrap job.');
+        return;
+      }
+
+      const currentJobId = startRes.job_id;
+      setJobId(currentJobId);
+
+      // Connect WebSocket
+      const ws = api.createBootstrapWebSocket(
+        currentJobId,
+        (msg: any) => {
+          if (msg.type === 'progress') {
+            setCurrent(msg.current);
+            setTotal(msg.total);
+            setPercent(msg.percent);
+            setElapsedSec(msg.elapsed_sec || 0);
+          } else if (msg.type === 'completed') {
+            setCurrent(msg.total || nBoot);
+            setPercent(100);
+            setElapsedSec(msg.elapsed_sec || 0);
+            setStage('completed');
+            if (msg.results) {
+              onComplete(msg.results);
+            }
+          } else if (msg.type === 'cancelled') {
+            setStage('cancelled');
+          } else if (msg.type === 'failed') {
+            setStage('error');
+            setErrorMsg(msg.error || 'Bootstrapping process encountered an error.');
+          }
+        },
+        (err) => {
+          console.warn('Bootstrap WebSocket error:', err);
+        },
+        () => {
+          // Closed
+        }
+      );
+
+      wsRef.current = ws;
+    } catch (err: any) {
+      setStage('error');
+      setErrorMsg(err?.message || 'Failed to start bootstrapping.');
+    }
+  };
+
+  const handleCancel = async () => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      try {
+        wsRef.current.send(JSON.stringify({ action: 'cancel' }));
+      } catch (e) {
+        // ignore
+      }
+    }
+    if (jobId) {
+      await api.cancelBootstrap(jobId);
+    }
+    setStage('cancelled');
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div style={{
+      position: 'fixed',
+      inset: 0,
+      backgroundColor: 'rgba(15, 23, 42, 0.65)',
+      backdropFilter: 'blur(4px)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 9999,
+    }}>
+      <div style={{
+        backgroundColor: '#ffffff',
+        borderRadius: '14px',
+        width: '520px',
+        maxWidth: '92vw',
+        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.08)',
+        border: '1px solid #e2e8f0',
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+      }}>
+        {/* Header */}
+        <div style={{
+          padding: '18px 24px',
+          borderBottom: '1px solid #f1f5f9',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          backgroundColor: '#f8fafc',
+        }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: '#0f172a' }}>
+              PLS-SEM Bootstrapping
+            </h3>
+            <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#64748b' }}>
+              Multi-core significance testing for path coefficients & loadings
+            </p>
+          </div>
+          {stage !== 'running' && (
+            <button
+              onClick={onClose}
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: '18px',
+                color: '#94a3b8',
+                padding: '4px 8px',
+                borderRadius: '6px',
+              }}
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
+        {/* Content Body */}
+        <div style={{ padding: '24px' }}>
+          {stage === 'config' && (
+            <div>
+              <div style={{ marginBottom: '18px' }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>
+                  Bootstrap Subsamples
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
+                  {[500, 1000, 2500, 5000].map((count) => (
+                    <button
+                      key={count}
+                      type="button"
+                      onClick={() => setNBoot(count)}
+                      style={{
+                        padding: '8px 12px',
+                        borderRadius: '8px',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        border: nBoot === count ? '2px solid #6366f1' : '1px solid #e2e8f0',
+                        backgroundColor: nBoot === count ? '#eef2ff' : '#ffffff',
+                        color: nBoot === count ? '#4f46e5' : '#475569',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      {count.toLocaleString()}
+                    </button>
+                  ))}
+                </div>
+                <span style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', display: 'block' }}>
+                  500 is ideal for quick checks; 5,000 is recommended for final academic publishing.
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', gap: '16px', marginBottom: '18px' }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>
+                    Random Seed
+                  </label>
+                  <input
+                    type="number"
+                    value={seed}
+                    onChange={(e) => setSeed(parseInt(e.target.value) || 42)}
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px',
+                      borderRadius: '8px',
+                      border: '1px solid #cbd5e1',
+                      fontSize: '13px',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                  <span style={{ fontSize: '11px', color: '#64748b', marginTop: '2px', display: 'block' }}>
+                    Ensures reproducible bootstrap distributions.
+                  </span>
+                </div>
+
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>
+                    Test Type & Scheme
+                  </label>
+                  <div style={{
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    backgroundColor: '#f8fafc',
+                    border: '1px solid #e2e8f0',
+                    fontSize: '12px',
+                    color: '#475569',
+                    lineHeight: '1.4',
+                  }}>
+                    Two-tailed test (α = 0.05)<br />
+                    <strong>Path Weighting</strong>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{
+                backgroundColor: '#f0fdf4',
+                border: '1px solid #bbf7d0',
+                borderRadius: '8px',
+                padding: '10px 14px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+              }}>
+                <span style={{ fontSize: '16px' }}>⚡</span>
+                <span style={{ fontSize: '12px', color: '#166534', lineHeight: '1.4' }}>
+                  Parallel CPU acceleration enabled. Resamples are distributed across all available CPU cores.
+                </span>
+              </div>
+            </div>
+          )}
+
+          {stage === 'running' && (
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <span style={{ fontSize: '13px', fontWeight: 600, color: '#1e293b' }}>
+                  Running Resamples...
+                </span>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: '#6366f1' }}>
+                  {percent.toFixed(1)}%
+                </span>
+              </div>
+
+              {/* Progress Track */}
+              <div style={{
+                width: '100%',
+                height: '10px',
+                backgroundColor: '#f1f5f9',
+                borderRadius: '9999px',
+                overflow: 'hidden',
+                position: 'relative',
+              }}>
+                <div style={{
+                  width: `${percent}%`,
+                  height: '100%',
+                  backgroundColor: '#6366f1',
+                  borderRadius: '9999px',
+                  transition: 'width 0.2s ease',
+                  backgroundImage: 'linear-gradient(45deg, rgba(255,255,255,0.15) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.15) 50%, rgba(255,255,255,0.15) 75%, transparent 75%, transparent)',
+                  backgroundSize: '1rem 1rem',
+                }} />
+              </div>
+
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                marginTop: '10px',
+                fontSize: '12px',
+                color: '#64748b',
+              }}>
+                <span>Iteration {current.toLocaleString()} of {total.toLocaleString()}</span>
+                <span>Elapsed: {elapsedSec.toFixed(1)}s</span>
+              </div>
+            </div>
+          )}
+
+          {stage === 'completed' && (
+            <div style={{ textAlign: 'center', padding: '12px 0' }}>
+              <div style={{
+                width: '48px',
+                height: '48px',
+                borderRadius: '50%',
+                backgroundColor: '#dcfce7',
+                color: '#16a34a',
+                fontSize: '24px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 12px',
+              }}>
+                ✓
+              </div>
+              <h4 style={{ margin: '0 0 4px', fontSize: '16px', fontWeight: 600, color: '#0f172a' }}>
+                Bootstrapping Complete!
+              </h4>
+              <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>
+                Successfully computed standard errors, t-values, and p-values for {total.toLocaleString()} resamples in {elapsedSec.toFixed(1)}s.
+              </p>
+            </div>
+          )}
+
+          {stage === 'cancelled' && (
+            <div style={{ textAlign: 'center', padding: '12px 0' }}>
+              <div style={{
+                width: '48px',
+                height: '48px',
+                borderRadius: '50%',
+                backgroundColor: '#fef3c7',
+                color: '#d97706',
+                fontSize: '24px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 12px',
+              }}>
+                !
+              </div>
+              <h4 style={{ margin: '0 0 4px', fontSize: '16px', fontWeight: 600, color: '#0f172a' }}>
+                Bootstrapping Cancelled
+              </h4>
+              <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>
+                Execution was cancelled mid-run. No changes were saved.
+              </p>
+            </div>
+          )}
+
+          {stage === 'error' && (
+            <div style={{ textAlign: 'center', padding: '12px 0' }}>
+              <div style={{
+                width: '48px',
+                height: '48px',
+                borderRadius: '50%',
+                backgroundColor: '#fee2e2',
+                color: '#dc2626',
+                fontSize: '24px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 12px',
+              }}>
+                ✕
+              </div>
+              <h4 style={{ margin: '0 0 4px', fontSize: '16px', fontWeight: 600, color: '#991b1b' }}>
+                Bootstrapping Failed
+              </h4>
+              <p style={{ margin: 0, fontSize: '12px', color: '#b91c1c' }}>
+                {errorMsg}
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Footer Buttons */}
+        <div style={{
+          padding: '14px 24px',
+          borderTop: '1px solid #f1f5f9',
+          backgroundColor: '#f8fafc',
+          display: 'flex',
+          justifyContent: 'flex-end',
+          gap: '10px',
+        }}>
+          {stage === 'config' && (
+            <>
+              <button
+                type="button"
+                onClick={onClose}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  border: '1px solid #cbd5e1',
+                  backgroundColor: '#ffffff',
+                  color: '#475569',
+                  fontSize: '13px',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleStart}
+                style={{
+                  padding: '8px 20px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  backgroundColor: '#4f46e5',
+                  color: '#ffffff',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+                }}
+              >
+                Start Bootstrapping
+              </button>
+            </>
+          )}
+
+          {stage === 'running' && (
+            <button
+              type="button"
+              onClick={handleCancel}
+              style={{
+                padding: '8px 16px',
+                borderRadius: '8px',
+                border: '1px solid #fca5a5',
+                backgroundColor: '#fef2f2',
+                color: '#b91c1c',
+                fontSize: '13px',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              Cancel Run
+            </button>
+          )}
+
+          {(stage === 'completed' || stage === 'cancelled' || stage === 'error') && (
+            <button
+              type="button"
+              onClick={onClose}
+              style={{
+                padding: '8px 20px',
+                borderRadius: '8px',
+                border: 'none',
+                backgroundColor: '#4f46e5',
+                color: '#ffffff',
+                fontSize: '13px',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              {stage === 'completed' ? 'View Results' : 'Close'}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};

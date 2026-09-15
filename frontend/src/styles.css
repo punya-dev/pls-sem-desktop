@@ -710,6 +710,13 @@ body[data-window-fullscreen="true"] .titlebar__traffic-light-space {
   display: flex;
   align-items: center;
   gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  transition: opacity var(--transition-fast);
+}
+
+.brand:hover {
+  opacity: 0.85;
 }
 
 .brand__logo {

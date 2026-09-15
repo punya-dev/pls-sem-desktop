@@ -1,10 +1,13 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
-import { initModelCanvas } from '../utils/model-canvas';
+import { initModelCanvas, exportModelSpec, getModelCanvasState, loadModelCanvasState } from '../utils/model-canvas';
 import { DataManagerModal } from '../components/DataManagerModal';
+import { BootstrapModal } from '../components/BootstrapModal';
 import type { ParsedDataset } from '../utils/dataset-parser';
-import { parseDatasetFile } from '../utils/dataset-parser';
+import { parseDatasetFile, processData } from '../utils/dataset-parser';
+import { api, type ValidationResponse } from '../utils/api';
+
 import { Upload } from 'lucide-react';
 import '../model-canvas.css';
 import '../results.css';
@@ -74,6 +77,7 @@ const ModelEditor = () => {
   const [datasetToImport, setDatasetToImport] = useState<ParsedDataset | null>(null);
   const [activeDataset, setActiveDataset] = useState<ParsedDataset | null>(() => activeStudyId ? datasetsByStudy[activeStudyId] ?? null : null);
   const [isImporting, setIsImporting] = useState(false);
+  const [isBootstrapModalOpen, setIsBootstrapModalOpen] = useState(false);
   const [variableFilter, setVariableFilter] = useState('');
   const [areCategoriesCollapsed, setAreCategoriesCollapsed] = useState(false);
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
@@ -91,164 +95,47 @@ const ModelEditor = () => {
   const [activeBorder, setActiveBorder] = useState<string>('#cbd5e1');
   const [activeText, setActiveText] = useState<string>('#1e293b');
 
-  const calculatedPaths: PathStat[] = useMemo(() => {
-    return RAW_PATHS.map((p, i) => {
-      const delta = Math.sin(calcSeed * 17 + i * 5) * 0.024;
-      const beta = Math.round((p.baseBeta + delta) * 1000) / 1000;
-      const mean = Math.round((beta - 0.003) * 1000) / 1000;
-      const stdev = Math.round((Math.abs(beta) / (p.baseT || 2.0)) * 1000) / 1000;
-      const tStat = Math.round((Math.abs(beta) / (stdev || 0.05)) * 1000) / 1000;
-      let pValue = p.baseP;
-      if (tStat >= 3.29) pValue = 0.0005;
-      else if (tStat >= 2.58) pValue = 0.005;
-      else if (tStat >= 1.96) pValue = 0.035;
-      else pValue = 0.220;
-
-      let stars = '';
-      if (pValue < 0.001) stars = '***';
-      else if (pValue < 0.01) stars = '**';
-      else if (pValue < 0.05) stars = '*';
-
-      return {
-        from: p.from,
-        to: p.to,
-        beta,
-        mean,
-        stdev,
-        tStat,
-        pValue,
-        stars,
-      };
-    });
-  }, [calcSeed]);
-
-  const pathMap = useMemo(() => {
-    const map = new Map<string, PathStat>();
-    calculatedPaths.forEach(p => {
-      map.set(`${p.from}->${p.to}`, p);
-    });
-    return map;
-  }, [calculatedPaths]);
-
-  const getPathStat = (from: string, to: string): PathStat => {
-    const existing = pathMap.get(`${from}->${to}`);
-    if (existing) return existing;
-    const hash = (from.charCodeAt(0) * 19 + to.charCodeAt(0) * 37 + calcSeed * 23) % 100;
-    const beta = Math.round((0.09 + (hash / 100) * 0.38) * 1000) / 1000;
-    const stdev = Math.round((0.045 + (hash % 15) * 0.003) * 1000) / 1000;
-    const tStat = Math.round((beta / stdev) * 1000) / 1000;
-    const pValue = tStat >= 3.29 ? 0.0005 : (tStat >= 2.58 ? 0.006 : (tStat >= 1.96 ? 0.038 : 0.185));
-    const stars = pValue < 0.001 ? '***' : (pValue < 0.01 ? '**' : (pValue < 0.05 ? '*' : ''));
-    return {
-      from,
-      to,
-      beta,
-      mean: Math.round((beta - 0.002) * 1000) / 1000,
-      stdev,
-      tStat,
-      pValue,
-      stars,
-    };
-  };
-
-  const allDisplayPaths = useMemo(() => {
-    const list: PathStat[] = [...calculatedPaths];
-    CONSTRUCT_LIST.forEach(from => {
-      CONSTRUCT_LIST.forEach(to => {
-        if (from.code !== to.code && !pathMap.has(`${from.code}->${to.code}`)) {
-          list.push(getPathStat(from.code, to.code));
-        }
-      });
-    });
-    return list;
-  }, [calculatedPaths, pathMap, calcSeed]);
-
-  const filteredPaths = useMemo(() => {
-    if (!resultsSearchQuery.trim()) return allDisplayPaths;
-    const q = resultsSearchQuery.toLowerCase().trim();
-    return allDisplayPaths.filter(p =>
-      p.from.toLowerCase().includes(q) ||
-      p.to.toLowerCase().includes(q) ||
-      `${p.from}->${p.to}`.toLowerCase().includes(q)
-    );
-  }, [allDisplayPaths, resultsSearchQuery]);
-
-  const handleCopyTable = () => {
-    if (resultsViewMode === 'matrix') {
-      const header = ['Construct', ...CONSTRUCT_LIST.map(c => c.code)].join('\t');
-      const rows = CONSTRUCT_LIST.map(from => {
-        const rowVals = CONSTRUCT_LIST.map(to => {
-          if (from.code === to.code) return '—';
-          const stat = getPathStat(from.code, to.code);
-          return stat.beta.toFixed(3);
-        });
-        return [from.code, ...rowVals].join('\t');
-      });
-      navigator.clipboard.writeText([header, ...rows].join('\n'));
-    } else {
-      const header = ['Path', 'Original Sample (β)', 'Sample Mean (M)', 'STDEV', 'T Statistics', 'P Value', 'Significance'].join('\t');
-      const rows = filteredPaths.map(p => [
-        `${p.from} -> ${p.to}`,
-        p.beta.toFixed(3),
-        p.mean.toFixed(3),
-        p.stdev.toFixed(3),
-        p.tStat.toFixed(3),
-        p.pValue < 0.001 ? '<0.001' : p.pValue.toFixed(3),
-        p.pValue < 0.05 ? `Significant ${p.stars}` : 'ns'
-      ].join('\t'));
-      navigator.clipboard.writeText([header, ...rows].join('\n'));
-    }
-    alert('Table copied to clipboard!');
-  };
-
-  const handleExportCSV = () => {
-    let csv = '';
-    if (resultsViewMode === 'matrix') {
-      const header = ['Construct', ...CONSTRUCT_LIST.map(c => c.code)].join(',');
-      const rows = CONSTRUCT_LIST.map(from => {
-        const rowVals = CONSTRUCT_LIST.map(to => {
-          if (from.code === to.code) return '""';
-          const stat = getPathStat(from.code, to.code);
-          return `"${stat.beta.toFixed(3)}"`;
-        });
-        return [`"${from.code}"`, ...rowVals].join(',');
-      });
-      csv = [header, ...rows].join('\n');
-    } else {
-      const header = ['Path', 'Original Sample (beta)', 'Sample Mean (M)', 'STDEV', 'T Statistics', 'P Value', 'Significance'].join(',');
-      const rows = filteredPaths.map(p => [
-        `"${p.from} -> ${p.to}"`,
-        `"${p.beta.toFixed(3)}"`,
-        `"${p.mean.toFixed(3)}"`,
-        `"${p.stdev.toFixed(3)}"`,
-        `"${p.tStat.toFixed(3)}"`,
-        `"${p.pValue < 0.001 ? '<0.001' : p.pValue.toFixed(3)}"`,
-        `"${p.pValue < 0.05 ? `Significant ${p.stars}` : 'ns'}"`
-      ].join(','));
-      csv = [header, ...rows].join('\n');
-    }
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `pls_sem_results_${resultsViewMode}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const handleRecalculate = () => {
-    setIsRecalculating(true);
-    setTimeout(() => {
-      setCalcSeed(prev => prev + 1);
-      setIsRecalculating(false);
-      setHasCalculated(true);
-      setCurrentView('results');
-    }, 450);
-  };
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveToast, setSaveToast] = useState<string | null>(null);
+  const [isValidating, setIsValidating] = useState(false);
+  const [isCalculating, setIsCalculating] = useState(false);
+  const [validationModal, setValidationModal] = useState<ValidationResponse | null>(null);
+  const [validationSuccessToast, setValidationSuccessToast] = useState<string | null>(null);
+  const [plsResults, setPlsResults] = useState<any>(null);
+  const [activeResultTab, setActiveResultTab] = useState<string>('path_coefficients');
+  const [resultViewMode, setResultViewMode] = useState<'matrix' | 'list'>('matrix');
 
   useEffect(() => {
-    setActiveDataset(activeStudyId ? datasetsByStudy[activeStudyId] ?? null : null);
-  }, [activeStudyId, datasetsByStudy]);
+    if (activeStudyId && datasetsByStudy[activeStudyId]) {
+      const ds = datasetsByStudy[activeStudyId];
+      setActiveDataset(ds);
+      // If dataset exists in store, ensure it is synced to the SQLite project file
+      if (activeStudy?.path && ds.rows && ds.rows.length > 0) {
+        api.loadProjectData(activeStudy.path).then((dataRes) => {
+          if (!dataRes || !Array.isArray(dataRes.rows) || dataRes.rows.length === 0) {
+            const headers = ds.variables.map(v => v.name);
+            api.saveProjectDataJson(activeStudy.path, ds.filename || 'dataset', headers, ds.rows).catch(console.warn);
+          }
+        }).catch(console.warn);
+      }
+    } else if (activeStudyId && activeStudy?.path) {
+      // Try to load dataset from project file if not in store
+      api.loadProjectData(activeStudy.path).then((dataRes) => {
+        if (dataRes && Array.isArray(dataRes.columns) && Array.isArray(dataRes.rows) && dataRes.rows.length > 0) {
+          const datasetName = dataRes.dataset_name || `${activeStudy.name} Data`;
+          const parsed = processData(datasetName, dataRes.columns, dataRes.rows);
+          setStudyDataset(activeStudyId, parsed);
+          setActiveDataset(parsed);
+        } else {
+          setActiveDataset(null);
+        }
+      }).catch(() => {
+        setActiveDataset(null);
+      });
+    } else {
+      setActiveDataset(null);
+    }
+  }, [activeStudyId, datasetsByStudy, activeStudy?.path, activeStudy?.name, setStudyDataset]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -265,9 +152,20 @@ const ModelEditor = () => {
     }
   };
 
-  const handleImportComplete = (dataset: ParsedDataset) => {
+  const handleImportComplete = async (dataset: ParsedDataset) => {
     setActiveDataset(dataset);
-    if (activeStudyId) { setStudyDataset(activeStudyId, dataset); touchStudy(activeStudyId); }
+    if (activeStudyId) {
+      setStudyDataset(activeStudyId, dataset);
+      touchStudy(activeStudyId);
+      if (activeStudy?.path) {
+        try {
+          const headers = dataset.variables.map(v => v.name);
+          await api.saveProjectDataJson(activeStudy.path, dataset.filename, headers, dataset.rows);
+        } catch (err) {
+          console.warn('Failed to save dataset to project in ModelEditor:', err);
+        }
+      }
+    }
     setDatasetToImport(null);
   };
 
@@ -292,24 +190,472 @@ const ModelEditor = () => {
     } catch {
       // Ignore if webview restricts dataTransfer.setData
     }
+
     event.dataTransfer.effectAllowed = 'copy';
     (window as any).__draggedVariable = variableName;
   };
 
-  const handleCanvasDrop = (event: React.DragEvent<HTMLElement | SVGSVGElement>) => {
+  const handleCanvasDrop = (event: React.DragEvent<any>) => {
     event.preventDefault();
+    event.stopPropagation();
+
     let variableName = '';
+
     try {
-      variableName = event.dataTransfer.getData('text/plain') || event.dataTransfer.getData('text');
+      variableName =
+        event.dataTransfer?.getData('text/plain') ||
+        event.dataTransfer?.getData('text') ||
+        '';
     } catch {
       // Ignore
+    }
+
+    if (!variableName) {
+      variableName = (window as any).__draggedVariable || '';
+    }
+
+    (window as any).__draggedVariable = null;
+
+    if (variableName) {
+      (window as any).dropModelVariable?.(
+        variableName,
+        event.clientX,
+        event.clientY
+      );
     }
     if (!variableName) {
       variableName = (window as any).__draggedVariable || '';
     }
     (window as any).__draggedVariable = null;
-    (window as any).dropModelVariable?.(variableName, event.clientX, event.clientY);
+    if (variableName) {
+      (window as any).dropModelVariable?.(
+        variableName,
+        event.clientX,
+        event.clientY
+      );
+    }
   };
+
+  const switchView = (view: 'model' | 'results') => {
+    const viewSlider = document.getElementById('main-view-slider');
+    const viewModel = document.getElementById('view-model');
+    const viewResults = document.getElementById('view-results');
+    const sliderBtns = viewSlider?.querySelectorAll('.view-slider__btn');
+    const sliderBg = viewSlider?.querySelector('.view-slider__bg');
+
+    if (!viewModel || !viewResults || !sliderBg || !sliderBtns) return;
+
+    if (view === 'model') {
+      (viewModel as HTMLElement).style.display = 'block';
+      (viewResults as HTMLElement).style.display = 'none';
+      (sliderBg as HTMLElement).style.transform = 'translateX(0)';
+      sliderBtns[0].classList.add('active');
+      sliderBtns[1].classList.remove('active');
+    } else {
+      (viewModel as HTMLElement).style.display = 'none';
+      (viewResults as HTMLElement).style.display = 'block';
+      (sliderBg as HTMLElement).style.transform = 'translateX(100%)';
+      sliderBtns[1].classList.add('active');
+      sliderBtns[0].classList.remove('active');
+    }
+  };
+
+  const handleSaveModel = async () => {
+    if (!activeStudy?.path) {
+      alert('Please open or select an active project study first.');
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+
+      const spec = exportModelSpec();
+      const layout = getModelCanvasState();
+      const res = await api.saveProjectModel(activeStudy.path, spec, layout);
+
+      if (res.error) {
+        alert('Failed to save model: ' + res.error);
+      } else {
+        setSaveToast('Model saved successfully');
+        setTimeout(() => setSaveToast(null), 2500);
+      }
+    } catch (err: any) {
+      alert('Error saving model: ' + err?.message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleCalculate = async () => {
+    if (!activeStudy?.path) {
+      alert('Please open or select an active project study first.');
+      return;
+    }
+
+    try {
+      setIsCalculating(true);
+
+      const spec = exportModelSpec();
+      const layout = getModelCanvasState();
+
+      // Ensure dataset is saved to project file if activeDataset is present
+      const datasetHeaders = activeDataset?.variables?.map(v => v.name);
+
+      if (
+        activeDataset &&
+        Array.isArray(activeDataset.rows) &&
+        activeDataset.rows.length > 0
+      ) {
+        try {
+          await api.saveProjectDataJson(
+            activeStudy.path,
+            activeDataset.filename || 'dataset',
+            datasetHeaders || [],
+            activeDataset.rows
+          );
+        } catch (err) {
+          console.warn(
+            'Failed auto-saving active dataset before calculate:',
+            err
+          );
+        }
+      }
+
+      // 1. Validate model spec with backend
+      const valRes = await api.validateModel(
+        spec,
+        activeStudy.path,
+        datasetHeaders
+      );
+
+      if (!valRes.is_valid) {
+        setValidationModal(valRes);
+        return;
+      }
+
+      // 2. Auto-save model
+      await api.saveProjectModel(activeStudy.path, spec, layout);
+
+      // 3. Execute PLS-SEM algorithm
+      const runRes = await api.runPlsModel(
+        activeStudy.path,
+        spec,
+        {
+          columns: datasetHeaders,
+          rows: activeDataset?.rows,
+          dataset_name: activeDataset?.filename,
+        }
+      );
+
+      if (runRes.error) {
+        alert('PLS-SEM calculation failed: ' + runRes.error);
+        return;
+      }
+
+      if (runRes.results) {
+        setPlsResults(runRes.results);
+      }
+
+      setValidationSuccessToast(
+        `PLS-SEM Calculation Complete! Converged in ${
+          runRes.results?.iterations || 0
+        } iterations`
+      );
+
+      setTimeout(() => setValidationSuccessToast(null), 3500);
+
+      // Show view slider and switch to results view
+      const viewSlider = document.getElementById('main-view-slider');
+
+      if (viewSlider) {
+        (viewSlider as HTMLElement).style.display = 'flex';
+      }
+
+      switchView('results');
+    } catch (err: any) {
+      alert('Error calculating model: ' + err?.message);
+    } finally {
+      setIsCalculating(false);
+    }
+  };
+  };
+
+  useEffect(() => {
+    if (activeStudy?.path) {
+      api.loadProjectResults(activeStudy.path, 'pls').then((res) => {
+        if (res && res.results) {
+          setPlsResults(res.results);
+          const viewSlider = document.getElementById('main-view-slider');
+          if (viewSlider) {
+            (viewSlider as HTMLElement).style.display = 'flex';
+          }
+        }
+      }).catch(() => {});
+    }
+  }, [activeStudy?.path]);
+
+  const fmt = (val: any, decimals: number = 4): string => {
+    if (val === undefined || val === null || isNaN(Number(val))) return '—';
+    return Number(val).toFixed(decimals);
+  };
+
+  const { constructNameMap, indicatorNameMap } = useMemo(() => {
+    const cMap: Record<string, string> = {};
+    const iMap: Record<string, string> = {};
+
+    const cleanStem = (name: string) => {
+      if (!name) return '';
+      return name.replace(/[_\-\s.]*\d+$/i, '').trim() || name;
+    };
+
+    const deriveName = (indicatorNames: string[]) => {
+      if (!indicatorNames || indicatorNames.length === 0) return '';
+      const stems = indicatorNames.map(cleanStem).filter(Boolean);
+      if (stems.length === 0) return '';
+      const first = stems[0].toUpperCase();
+      if (stems.every(s => s.toUpperCase() === first)) return first;
+      let prefix = stems[0];
+      for (let i = 1; i < stems.length; i++) {
+        while (!stems[i].toUpperCase().startsWith(prefix.toUpperCase()) && prefix.length > 0) {
+          prefix = prefix.slice(0, -1);
+        }
+      }
+      prefix = prefix.replace(/[_\-\s.]+$/, '').trim();
+      return prefix.length >= 2 ? prefix.toUpperCase() : first;
+    };
+
+    // 1. From canvas state
+    try {
+      const canvasState = getModelCanvasState();
+      if (canvasState && Array.isArray(canvasState.nodes)) {
+        const latentNodes = canvasState.nodes.filter((n: any) => n.isLatent !== false && !n.isText);
+        const indNodes = canvasState.nodes.filter((n: any) => n.isLatent === false && !n.isText);
+
+        indNodes.forEach((ind: any) => {
+          iMap[ind.id] = ind.label;
+        });
+
+        latentNodes.forEach((ln: any) => {
+          const childInds = indNodes.filter((i: any) => i.parentId === ln.id).map((i: any) => i.label);
+          let name = ln.label;
+          if (!name || name.startsWith('node_') || name.toUpperCase().startsWith('LATENT') || name.toUpperCase().startsWith('LV_')) {
+            const derived = deriveName(childInds);
+            if (derived) name = derived;
+          }
+          cMap[ln.id] = name || ln.id;
+        });
+      }
+    } catch (e) {}
+
+    // 2. From plsResults if backend returned them
+    if (plsResults?.construct_names) {
+      Object.entries(plsResults.construct_names).forEach(([cid, cname]) => {
+        if (!cMap[cid] || cMap[cid].startsWith('node_')) {
+          cMap[cid] = String(cname);
+        }
+      });
+    }
+    if (plsResults?.indicator_names) {
+      Object.entries(plsResults.indicator_names).forEach(([iid, iname]) => {
+        if (!iMap[iid]) {
+          iMap[iid] = String(iname);
+        }
+      });
+    }
+
+    return { constructNameMap: cMap, indicatorNameMap: iMap };
+  }, [plsResults]);
+
+  const getConstructName = (cid: string): string => constructNameMap[cid] || cid;
+  const getIndicatorName = (iid: string): string => indicatorNameMap[iid] || iid;
+
+  const resultConstructs: string[] = useMemo(() => {
+    if (!plsResults) return [];
+    const fromLoadings = Object.keys(plsResults.measurement?.outer_loadings || {});
+    if (fromLoadings.length > 0) return fromLoadings;
+    return Object.keys(plsResults.reliability_and_validity?.ave || {});
+  }, [plsResults]);
+
+  const constructPalette: Record<string, string> = useMemo(() => {
+    const colors = ['#6366f1', '#0ea5e9', '#f59e0b', '#10b981', '#a855f7', '#f43f5e', '#14b8a6', '#ec4899', '#8b5cf6'];
+    const map: Record<string, string> = {};
+    resultConstructs.forEach((c, idx) => {
+      map[c] = colors[idx % colors.length];
+    });
+    return map;
+  }, [resultConstructs]);
+
+  const reportTabDetails = useMemo(() => {
+    switch (activeResultTab) {
+      case 'path_coefficients':
+        return {
+          title: 'Path Coefficients',
+          badge: 'β (beta)',
+          subtitle: 'Standardized beta coefficients between endogenous and exogenous latent constructs.',
+        };
+      case 'total_effects':
+        return {
+          title: 'Total & Indirect Effects',
+          badge: 'Direct + Indirect',
+          subtitle: 'Cumulative relationships and mediation decomposition across the structural model.',
+        };
+      case 'outer_loadings':
+        return {
+          title: 'Outer Loadings',
+          badge: 'λ (lambda)',
+          subtitle: 'Bivariate correlations between each indicator and its associated latent construct score.',
+        };
+      case 'outer_weights':
+        return {
+          title: 'Outer Weights',
+          badge: 'w',
+          subtitle: 'Relative contribution weights of indicators to their latent construct scores.',
+        };
+      case 'r_squared':
+        return {
+          title: 'R-Square (R²)',
+          badge: 'R² & Adj R²',
+          subtitle: 'Coefficient of determination measuring variance explained for endogenous constructs.',
+        };
+      case 'f_squared':
+        return {
+          title: 'f-Square Effect Sizes',
+          badge: 'f²',
+          subtitle: 'Cohen\'s f² effect size of omitted predictor on endogenous construct R².',
+        };
+      case 'reliability':
+        return {
+          title: 'Construct Reliability & Validity',
+          badge: 'α, CR, ρA, AVE',
+          subtitle: 'Internal consistency reliability (Cronbach\'s α, CR, rho_A) and convergent validity (AVE).',
+        };
+      case 'discriminant':
+        return {
+          title: 'Discriminant Validity',
+          badge: 'HTMT & Fornell-Larcker',
+          subtitle: 'Assessment of construct distinction via Heterotrait-Monotrait ratio and Fornell-Larcker criterion.',
+        };
+      case 'collinearity':
+        return {
+          title: 'Collinearity Statistics (VIF)',
+          badge: 'VIF',
+          subtitle: 'Variance Inflation Factors evaluating multicollinearity among predictors and indicators.',
+        };
+      case 'construct_scores':
+        return {
+          title: 'Latent Variable Scores',
+          badge: 'Y (standardized)',
+          subtitle: 'Estimated case-level construct scores standardized to zero mean and unit variance.',
+        };
+      case 'bootstrap_significance':
+        return {
+          title: 'Bootstrap Significance Testing',
+          badge: 'p-values, t-stats, 95% CI',
+          subtitle: 'Non-parametric bootstrap distributions, standard errors, t-statistics, p-values, and 95% confidence intervals.',
+        };
+      default:
+        return {
+          title: 'PLS-SEM Results',
+          badge: 'PLS',
+          subtitle: 'Estimation results from the PLS-SEM engine.',
+        };
+    }
+  }, [activeResultTab]);
+
+  const handleCopyCurrentTable = () => {
+    const tableEl = document.querySelector('.scientific-table');
+    if (!tableEl) return;
+    let tsv = '';
+    const rows = tableEl.querySelectorAll('tr');
+    rows.forEach(r => {
+      const cells = r.querySelectorAll('th, td');
+      const line = Array.from(cells).map(c => c.textContent?.trim().replace(/\s+/g, ' ') || '').join('\t');
+      tsv += line + '\n';
+    });
+    navigator.clipboard.writeText(tsv);
+    setValidationSuccessToast('Table copied to clipboard (TSV format)');
+    setTimeout(() => setValidationSuccessToast(null), 2500);
+  };
+
+  const handleExportCurrentTable = () => {
+    const tableEl = document.querySelector('.scientific-table');
+    if (!tableEl) return;
+    let csv = '';
+    const rows = tableEl.querySelectorAll('tr');
+    rows.forEach(r => {
+      const cells = r.querySelectorAll('th, td');
+      const line = Array.from(cells).map(c => {
+        let txt = c.textContent?.trim().replace(/\s+/g, ' ') || '';
+        if (txt.includes(',') || txt.includes('"')) {
+          txt = `"${txt.replace(/"/g, '""')}"`;
+        }
+        return txt;
+      }).join(',');
+      csv += line + '\n';
+    });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${activeResultTab}_results.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportModel = () => {
+    try {
+      const spec = exportModelSpec();
+      const jsonStr = JSON.stringify(spec, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${activeStudy?.name || 'model'}_spec.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      alert('Error exporting model: ' + err?.message);
+    }
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isInput = e.target instanceof HTMLElement && (
+        e.target.tagName === 'INPUT' ||
+        e.target.tagName === 'TEXTAREA' ||
+        e.target.isContentEditable ||
+        (e.target as any).dataset?.editable
+      );
+
+      if ((e.key === 'Backspace' || e.key === 'Delete') && !isInput) {
+        e.preventDefault();
+        if ((window as any).deleteSelectedModelPart) {
+          (window as any).deleteSelectedModelPart();
+        }
+      }
+
+      if ((e.metaKey || e.ctrlKey) && !isInput) {
+        if (e.key.toLowerCase() === 'z') {
+          e.preventDefault();
+          if (e.shiftKey) {
+            (window as any).canvasRedo?.();
+          } else {
+            (window as any).canvasUndo?.();
+          }
+        } else if (e.key.toLowerCase() === 'y') {
+          e.preventDefault();
+          (window as any).canvasRedo?.();
+        }
+      }
+
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        handleSaveModel();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeStudy?.path]);
 
   useEffect(() => {
     // Add global sync method for color pickers
@@ -320,14 +666,188 @@ const ModelEditor = () => {
     };
 
     // Add a tiny delay to ensure DOM is ready
-    const timer = setTimeout(() => {
+    const timer = setTimeout(async () => {
       initModelCanvas();
+
+      if (activeStudy?.path) {
+        try {
+          const modelRes = await api.loadProjectModel(activeStudy.path);
+          if (modelRes && modelRes.diagram_layout) {
+            loadModelCanvasState(modelRes.diagram_layout);
+          }
+        } catch (err) {
+          console.warn('Could not load saved model layout:', err);
+        }
+      }
+
       // Load results script if it exists
       import('../utils/results.js').then((m) => {
         if (m.initResults) m.initResults();
       }).catch(() => {});
 
-    }, 100);
+    if (variableName) {
+      (window as any).dropModelVariable?.(
+        variableName,
+        event.clientX,
+        event.clientY
+      );
+    }
+  };
+
+  const switchView = (view: 'model' | 'results') => {
+    const viewSlider = document.getElementById('main-view-slider');
+    const viewModel = document.getElementById('view-model');
+    const viewResults = document.getElementById('view-results');
+    const sliderBtns = viewSlider?.querySelectorAll('.view-slider__btn');
+    const sliderBg = viewSlider?.querySelector('.view-slider__bg');
+
+    if (!viewModel || !viewResults || !sliderBg || !sliderBtns) return;
+
+    if (view === 'model') {
+      (viewModel as HTMLElement).style.display = 'block';
+      (viewResults as HTMLElement).style.display = 'none';
+      (sliderBg as HTMLElement).style.transform = 'translateX(0)';
+      sliderBtns[0].classList.add('active');
+      sliderBtns[1].classList.remove('active');
+    } else {
+      (viewModel as HTMLElement).style.display = 'none';
+      (viewResults as HTMLElement).style.display = 'block';
+      (sliderBg as HTMLElement).style.transform = 'translateX(100%)';
+      sliderBtns[1].classList.add('active');
+      sliderBtns[0].classList.remove('active');
+    }
+  };
+
+  const handleSaveModel = async () => {
+    if (!activeStudy?.path) {
+      alert('Please open or select an active project study first.');
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+      const spec = exportModelSpec();
+      const layout = getModelCanvasState();
+      const res = await api.saveProjectModel(activeStudy.path, spec, layout);
+
+      if (res.error) {
+        alert('Failed to save model: ' + res.error);
+      } else {
+        setSaveToast('Model saved successfully');
+        setTimeout(() => setSaveToast(null), 2500);
+      }
+    } catch (err: any) {
+      alert('Error saving model: ' + err?.message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleCalculate = async () => {
+    if (!activeStudy?.path) {
+      alert('Please open or select an active project study first.');
+      return;
+    }
+
+    try {
+      setIsCalculating(true);
+      const spec = exportModelSpec();
+      const layout = getModelCanvasState();
+
+      const datasetHeaders = activeDataset?.variables?.map(v => v.name);
+
+      if (
+        activeDataset &&
+        Array.isArray(activeDataset.rows) &&
+        activeDataset.rows.length > 0
+      ) {
+        try {
+          await api.saveProjectDataJson(
+            activeStudy.path,
+            activeDataset.filename || 'dataset',
+            datasetHeaders || [],
+            activeDataset.rows
+          );
+        } catch (err) {
+          console.warn(
+            'Failed auto-saving active dataset before calculate:',
+            err
+          );
+        }
+      }
+
+      const valRes = await api.validateModel(
+        spec,
+        activeStudy.path,
+        datasetHeaders
+      );
+
+      if (!valRes.is_valid) {
+        setValidationModal(valRes);
+        return;
+      }
+
+      await api.saveProjectModel(activeStudy.path, spec, layout);
+
+      const runRes = await api.runPlsModel(
+        activeStudy.path,
+        spec,
+        {
+          columns: datasetHeaders,
+          rows: activeDataset?.rows,
+          dataset_name: activeDataset?.filename,
+        }
+      );
+
+      if (runRes.error) {
+        alert('PLS-SEM calculation failed: ' + runRes.error);
+        return;
+      }
+
+      if (runRes.results) {
+        setPlsResults(runRes.results);
+      }
+
+      setValidationSuccessToast(
+        `PLS-SEM Calculation Complete! Converged in ${
+          runRes.results?.iterations || 0
+        } iterations`
+      );
+
+      setTimeout(() => setValidationSuccessToast(null), 3500);
+
+      const viewSlider = document.getElementById('main-view-slider');
+      if (viewSlider) {
+        (viewSlider as HTMLElement).style.display = 'flex';
+      }
+
+      switchView('results');
+    } catch (err: any) {
+      alert('Error calculating model: ' + err?.message);
+    } finally {
+      setIsCalculating(false);
+    }
+  };
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const viewSlider = document.getElementById('main-view-slider');
+      const sliderBtns = viewSlider?.querySelectorAll('.view-slider__btn');
+
+      if (sliderBtns) {
+        sliderBtns.forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            const target = e.currentTarget as HTMLElement | null;
+            switchView(
+              target?.dataset?.view === 'results' ? 'results' : 'model'
+            );
+          });
+        });
+      }
+    }, 120);
+
+    return () => clearTimeout(timer);
+  }, []);
 
     const handleColorPickerClosed = (e: any) => {
       const { id, color } = e.detail;
@@ -361,8 +881,101 @@ const ModelEditor = () => {
   }, []);
 
   return (
-    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div
+      style={{
+        width: '100%',
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden'
+      }}
+    >
 
+      {/* ═══ TITLE BAR ═══ */}
+      <header className="titlebar window-drag">
+        <div className="titlebar__left no-drag">
+          <div
+            className="titlebar__traffic-light-space"
+            aria-hidden="true"
+          ></div>
+
+          <div
+            className="brand"
+            onClick={() => navigate('/')}
+            role="button"
+            tabIndex={0}
+            title="Go to Getting Started"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') navigate('/');
+            }}
+          >
+            <svg
+              className="brand__logo"
+              viewBox="0 0 48 48"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <rect width={48} height={48} rx={10} fill="#6B4EE6" />
+              <circle cx={16} cy={16} r={4} fill="#FFFFFF" />
+              <circle cx={32} cy={18} r={4} fill="#C7D2FE" />
+              <circle cx={20} cy={32} r={5} fill="#EEF2FF" />
+              <circle cx={34} cy={32} r="3.5" fill="#A5B4FC" />
+              <path
+                d="M16 16L32 18M16 16L20 32M20 32L34 32M32 18L34 32"
+                stroke="#FFFFFF"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeOpacity="0.85"
+              />
+            </svg>
+
+            <span className="brand__name">CSPLS</span>
+          </div>
+        </div>
+
+        <div className="titlebar__center no-drag">
+          <span className="titlebar__version">CSPLS 1.1</span>
+        </div>
+
+        <div className="titlebar__right no-drag">
+          <button
+            className="icon-btn"
+            title="Toggle Theme"
+            type="button"
+          >
+            <span className="material-symbols-outlined">
+              light_mode
+            </span>
+          </button>
+
+          <button
+            className="icon-btn"
+            title="Settings"
+            type="button"
+          >
+            <span className="material-symbols-outlined">
+              settings
+            </span>
+          </button>
+
+          <span className="v-divider" />
+
+          <div
+            className="user-badge"
+            role="button"
+            tabIndex={0}
+          >
+            <div className="user-badge__avatar">
+              <span>MV</span>
+              <span className="user-badge__status" />
+            </div>
+
+            <span className="user-badge__name">
+              M. Vance
+            </span>
+          </div>
+        </div>
+      </header>
   {/* ═══ SUB-HEADER / CONTROL BAR ═══ */}
   <div className="subheader">
     <div className="subheader__breadcrumb">
@@ -440,36 +1053,74 @@ const ModelEditor = () => {
           Results
         </button>
       </div>
-
-      <button 
-        className="subheader__btn subheader__btn--primary" 
+      <button
+        className="subheader__btn subheader__btn--primary"
+        id="calculate-btn"
         type="button"
-        onClick={handleRecalculate}
-        disabled={isRecalculating}
-        style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+        onClick={handleCalculate}
+        disabled={isValidating || isCalculating}
       >
-        <svg 
-          viewBox="0 0 24 24" 
-          fill="none" 
-          stroke="currentColor" 
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
           strokeWidth={2}
-          style={{ width: '14px', height: '14px' }}
-          className={isRecalculating ? 'animate-spin' : ''}
         >
-          {hasCalculated ? (
-            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.59-9.21l5.67-1.35" />
-          ) : (
-            <polygon points="5 3 19 12 5 21 5 3" />
-          )}
+          <polygon points="5 3 19 12 5 21 5 3" />
         </svg>
-        <span>{isRecalculating ? 'Calculating...' : (hasCalculated ? 'Recalculate' : 'Calculate')}</span>
+        {isCalculating
+          ? 'Calculating PLS...'
+          : (isValidating ? 'Validating...' : 'Calculate')}
+      </button>
+
+      <button
+        className="subheader__btn"
+        id="bootstrap-btn"
+        type="button"
+        onClick={() => setIsBootstrapModalOpen(true)}
+        disabled={isValidating || isCalculating}
+        style={{
+          marginLeft: '4px',
+          backgroundColor: '#eef2ff',
+          color: '#4f46e5',
+          borderColor: '#c7d2fe',
+          fontWeight: 600,
+        }}
+        title="Run PLS Bootstrapping with significance testing (p-values, t-values, CIs)"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          style={{
+            width: 15,
+            height: 15,
+            marginRight: 4,
+          }}
+        >
+          <path d="M18 20V10M12 20V4M6 20v-6" />
+        </svg>
+        Bootstrap
+      </button>
       </button>
       <div className="subheader__divider" />
-      <button className="subheader__btn subheader__btn--ghost" type="button">
+      <button
+        className="subheader__btn subheader__btn--ghost"
+        type="button"
+        onClick={handleSaveModel}
+        disabled={isSaving}
+        title="Save Path Model (Cmd+S)"
+      >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" /><polyline points="17 21 17 13 7 13 7 21" /><polyline points="7 3 7 8 15 8" /></svg>
-        Save
+        {isSaving ? 'Saving...' : 'Save'}
       </button>
-      <button className="subheader__btn subheader__btn--ghost" type="button">
+      <button
+        className="subheader__btn subheader__btn--ghost"
+        type="button"
+        onClick={handleExportModel}
+        title="Export Model Spec JSON"
+      >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1={12} y1={15} x2={12} y2={3} /></svg>
         Export
       </button>
@@ -598,9 +1249,19 @@ const ModelEditor = () => {
         )}
       </aside>
       {/* ─── Center Canvas Area ─── */}
-      <main 
+      <main
         className="canvas-area"
-        style={{ flex: 1, height: '100%', minHeight: 0, position: 'relative', overflow: 'hidden' }}
+        style={{
+          flex: 1,
+          height: '100%',
+          minHeight: 0,
+          position: 'relative',
+          overflow: 'hidden'
+        }}
+        onDragEnter={event => {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'copy';
+        }}
         onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }}
         onDrop={handleCanvasDrop}
       >
@@ -819,11 +1480,16 @@ const ModelEditor = () => {
           </div>
           
           <div className="tb-divider" />
-          <button className="tb-btn" type="button" title="Undo" id="btn-undo">
+          <button className="tb-btn" type="button" title="Undo (Cmd+Z / Ctrl+Z)" id="btn-undo">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 16, height: 16}}><path strokeLinecap="round" strokeLinejoin="round" d="M3 7v6h6" /><path strokeLinecap="round" strokeLinejoin="round" d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" /></svg>
           </button>
-          <button className="tb-btn" type="button" title="Redo" id="btn-redo">
+          <button className="tb-btn" type="button" title="Redo (Cmd+Shift+Z / Ctrl+Y)" id="btn-redo">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 16, height: 16}}><path strokeLinecap="round" strokeLinejoin="round" d="M21 7v6h-6" /><path strokeLinecap="round" strokeLinejoin="round" d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13" /></svg>
+          </button>
+          <button className="tb-btn" type="button" title="Delete Selected Part (Delete / Backspace)" id="btn-delete" style={{color: '#ef4444'}}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 16, height: 16}}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
           </button>
         </div>
 
@@ -839,7 +1505,8 @@ const ModelEditor = () => {
           <div className="hud-icon-btn active" id="hud-snap" title="Snap to Grid"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="4" cy="4" r="2" /><circle cx="12" cy="4" r="2" /><circle cx="20" cy="4" r="2" /><circle cx="4" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="20" cy="12" r="2" /><circle cx="4" cy="20" r="2" /><circle cx="12" cy="20" r="2" /><circle cx="20" cy="20" r="2" /></svg></div>
           <div className="hud-divider" />
           <div className="hud-btn" id="hud-reset" title="Reset Default Styles"><span className="material-symbols-outlined" style={{fontSize: '18px'}}>restart_alt</span></div>
-          <div className="hud-btn" id="hud-clear" title="Clear Canvas"><span className="material-symbols-outlined" style={{fontSize: '18px', color: '#ef4444'}}>delete</span></div>
+          <div className="hud-btn" id="hud-delete" title="Delete Selected Part (Delete / Backspace)"><span className="material-symbols-outlined" style={{fontSize: '18px', color: '#ef4444'}}>delete</span></div>
+          <div className="hud-btn" id="hud-clear" title="Clear Entire Canvas"><span className="material-symbols-outlined" style={{fontSize: '18px', color: '#64748b'}}>delete_sweep</span></div>
         </div>
         {/* SVG Engine Engine */}
         <svg id="model-svg" width="100%" height="100%" style={{display: 'block'}} onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }} onDrop={handleCanvasDrop}>
@@ -884,11 +1551,94 @@ const ModelEditor = () => {
             <marker id="arrowhead-selected" markerWidth={10} markerHeight={7} refX={9} refY={3.5} orient="auto">
               <polygon points="0 0, 10 3.5, 0 7" fill="var(--color-accent)" style={{pointerEvents: 'none'}} />
             </marker>
-            <marker id="arrowhead-open" markerWidth={10} markerHeight={7} refX={9} refY={3.5} orient="auto">
-              <polyline points="0 0, 10 3.5, 0 7" fill="none" stroke="var(--color-text-secondary)" strokeWidth="1.5" style={{pointerEvents: 'none'}} />
+            <marker
+              id="arrow-solid"
+              markerWidth={10}
+              markerHeight={10}
+              refX={8}
+              refY={5}
+              orient="auto"
+            >
+              <polygon points="1 2, 9 5, 1 8" fill="#1e293b" />
             </marker>
-            <marker id="arrowhead-open-selected" markerWidth={10} markerHeight={7} refX={9} refY={3.5} orient="auto">
-              <polyline points="0 0, 10 3.5, 0 7" fill="none" stroke="var(--color-accent)" strokeWidth="1.5" style={{pointerEvents: 'none'}} />
+
+            <marker
+              id="arrow-solid-selected"
+              markerWidth={10}
+              markerHeight={10}
+              refX={8}
+              refY={5}
+              orient="auto"
+            >
+              <polygon
+                points="1 2, 9 5, 1 8"
+                fill="var(--color-accent)"
+              />
+            </marker>
+
+            <marker
+              id="arrow-open"
+              markerWidth={10}
+              markerHeight={10}
+              refX={7}
+              refY={5}
+              orient="auto"
+            >
+              <path
+                d="M 2 2 L 8 5 L 2 8"
+                fill="none"
+                stroke="#1e293b"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </marker>
+
+            <marker
+              id="arrow-open-selected"
+              markerWidth={10}
+              markerHeight={10}
+              refX={7}
+              refY={5}
+              orient="auto"
+            >
+              <path
+                d="M 2 2 L 8 5 L 2 8"
+                fill="none"
+                stroke="var(--color-accent)"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </marker>
+
+            <marker
+              id="arrow-diamond"
+              markerWidth={10}
+              markerHeight={10}
+              refX={5}
+              refY={5}
+              orient="auto"
+            >
+              <polygon
+                points="5 1.5, 8.5 5, 5 8.5, 1.5 5"
+                fill="#1e293b"
+              />
+            </marker>
+
+            <marker
+              id="arrow-diamond-selected"
+              markerWidth={10}
+              markerHeight={10}
+              refX={5}
+              refY={5}
+              orient="auto"
+            >
+              <polygon
+                points="5 1.5, 8.5 5, 5 8.5, 1.5 5"
+                fill="var(--color-accent)"
+              />
+            </marker>
             </marker>
           </defs>
           <rect id="bg-rect" width="100%" height="100%" fill="url(#dot-grid)" />
@@ -938,12 +1688,65 @@ const ModelEditor = () => {
               <span>Final results</span>
             </div>
             <div className="tree-section__items">
-              <a href="#" className="tree-item active" onClick={(e) => e.preventDefault()}>
+              <a
+                href="#"
+                className={`tree-item ${
+                  activeResultTab === 'path_coefficients' ? 'active' : ''
+                }`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  setActiveResultTab('path_coefficients');
+                }}
+              >
                 <div className="tree-item__left">
                   <div className="tree-item__dot" />
                   <span>Path coefficients</span>
                 </div>
-                <span className="tree-item__size">7×7</span>
+                {resultConstructs.length > 0 && <span className="tree-item__size">{resultConstructs.length}×{resultConstructs.length}</span>}
+              </a>
+              <a
+                href="#"
+                className={`tree-item ${activeResultTab === 'total_effects' ? 'active' : ''}`}
+                onClick={(e) => { e.preventDefault(); setActiveResultTab('total_effects'); }}
+              >
+                Total & indirect effects
+              </a>
+              <a
+                href="#"
+                className={`tree-item ${activeResultTab === 'outer_loadings' ? 'active' : ''}`}
+                onClick={(e) => { e.preventDefault(); setActiveResultTab('outer_loadings'); }}
+              >
+                Outer loadings
+              </a>
+              <a
+                href="#"
+                className={`tree-item ${activeResultTab === 'outer_weights' ? 'active' : ''}`}
+                onClick={(e) => { e.preventDefault(); setActiveResultTab('outer_weights'); }}
+              >
+                Outer weights
+              </a>
+              <a
+                href="#"
+                className={`tree-item ${activeResultTab === 'construct_scores' ? 'active' : ''}`}
+                onClick={(e) => { e.preventDefault(); setActiveResultTab('construct_scores'); }}
+              >
+                Latent variable scores
+              </a>
+              <a
+                href="#"
+                className={`tree-item ${activeResultTab === 'bootstrap_significance' ? 'active' : ''}`}
+                onClick={(e) => { e.preventDefault(); setActiveResultTab('bootstrap_significance'); }}
+                style={{ position: 'relative' }}
+              >
+                <div className="tree-item__left">
+                  <div className="tree-item__dot" style={{ backgroundColor: '#6366f1' }} />
+                  <span>Bootstrap significance</span>
+                </div>
+                {plsResults?.significance && (
+                  <span className="tree-item__size" style={{ backgroundColor: '#e0e7ff', color: '#4338ca', fontWeight: 600 }}>
+                    p & t
+                  </span>
+                )}
               </a>
               <a href="#" className="tree-item" onClick={(e) => e.preventDefault()}>Total indirect effects</a>
               <a href="#" className="tree-item tree-item--sub" onClick={(e) => e.preventDefault()}>Specific indirect effects</a>
@@ -961,27 +1764,70 @@ const ModelEditor = () => {
               <span>Quality criteria</span>
             </div>
             <div className="tree-section__items">
-              <a href="#" className="tree-item" onClick={(e) => e.preventDefault()}>R-square (R²)</a>
-              <a href="#" className="tree-item" onClick={(e) => e.preventDefault()}>f-square (f²)</a>
-              <a href="#" className="tree-item" onClick={(e) => e.preventDefault()}>Construct reliability and validity</a>
-              <a href="#" className="tree-item" onClick={(e) => e.preventDefault()}>Discriminant validity</a>
-              <a href="#" className="tree-item" onClick={(e) => e.preventDefault()}>Collinearity statistics (VIF)</a>
-              <a href="#" className="tree-item" onClick={(e) => e.preventDefault()}>Model fit</a>
-              <a href="#" className="tree-item" onClick={(e) => e.preventDefault()}>Model selection criteria</a>
-            </div>
-          </div>
-          {/* Algorithm */}
-          <div className="tree-section">
-            <div className="tree-section__header" onClick={(e) => { (window as any).toggleTreeSection?.(e.currentTarget); }}>
-              <svg className="open" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
-              <span>Model and data</span>
-            </div>
-            <div className="tree-section__items">
-              <a href="#" className="tree-item" onClick={(e) => e.preventDefault()}>Inner model</a>
-              <a href="#" className="tree-item" onClick={(e) => e.preventDefault()}>Outer model</a>
-              <a href="#" className="tree-item" onClick={(e) => e.preventDefault()}>Indicator data (original)</a>
-              <a href="#" className="tree-item" onClick={(e) => e.preventDefault()}>Indicator data (standardized)</a>
-              <a href="#" className="tree-item" onClick={(e) => e.preventDefault()}>Indicator data (correlations)</a>
+              <a
+                href="#"
+                className={`tree-item ${
+                  activeResultTab === 'r_squared' ? 'active' : ''
+                }`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  setActiveResultTab('r_squared');
+                }}
+              >
+                R-square (R²)
+              </a>
+
+              <a
+                href="#"
+                className={`tree-item ${
+                  activeResultTab === 'f_squared' ? 'active' : ''
+                }`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  setActiveResultTab('f_squared');
+                }}
+              >
+                f-square (f²)
+              </a>
+
+              <a
+                href="#"
+                className={`tree-item ${
+                  activeResultTab === 'reliability' ? 'active' : ''
+                }`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  setActiveResultTab('reliability');
+                }}
+              >
+                Construct reliability & validity
+              </a>
+
+              <a
+                href="#"
+                className={`tree-item ${
+                  activeResultTab === 'discriminant' ? 'active' : ''
+                }`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  setActiveResultTab('discriminant');
+                }}
+              >
+                Discriminant validity
+              </a>
+
+              <a
+                href="#"
+                className={`tree-item ${
+                  activeResultTab === 'collinearity' ? 'active' : ''
+                }`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  setActiveResultTab('collinearity');
+                }}
+              >
+                Collinearity statistics (VIF)
+              </a>
             </div>
           </div>
         </div>
@@ -994,55 +1840,107 @@ const ModelEditor = () => {
           <div className="report-header__top">
             <div>
               <h1 className="report-header__title">
-                Path Coefficients
-                <span className="report-header__title-sub">β (beta)</span>
+                {reportTabDetails.title}
+                <span className="report-header__title-sub">{reportTabDetails.badge}</span>
               </h1>
-              <p className="report-header__subtitle">Standardized beta coefficients between endogenous and exogenous latent constructs.</p>
+              <p className="report-header__subtitle">{reportTabDetails.subtitle}</p>
             </div>
-            <div className="view-toggle">
-              <div 
-                className={`view-toggle__btn ${resultsViewMode === 'matrix' ? 'active' : ''}`}
-                onClick={() => setResultsViewMode('matrix')}
-                style={{ cursor: 'pointer' }}
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
-                Matrix View
+            {activeResultTab === 'path_coefficients' && (
+              <div className="view-toggle">
+                <div
+                  className={`view-toggle__btn ${
+                    resultViewMode === 'matrix' ? 'active' : ''
+                  }`}
+                  onClick={() => setResultViewMode('matrix')}
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                  </svg>
+                  Matrix View
+                </div>
+
+                <div
+                  className={`view-toggle__btn ${
+                    resultViewMode === 'list' ? 'active' : ''
+                  }`}
+                  onClick={() => setResultViewMode('list')}
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                  </svg>
+                  List View
+                </div>
               </div>
-              <div 
-                className={`view-toggle__btn ${resultsViewMode === 'list' ? 'active' : ''}`}
-                onClick={() => setResultsViewMode('list')}
-                style={{ cursor: 'pointer' }}
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>
-                List View ({filteredPaths.length} paths)
+            )}
               </div>
-            </div>
+            )}
           </div>
           <div className="report-filters">
             <div className="report-filters__left">
-              <label className="report-filter-label" style={{ cursor: 'pointer' }}>
-                <input 
-                  type="checkbox" 
-                  checked={highlightSignificant} 
-                  onChange={e => setHighlightSignificant(e.target.checked)} 
-                />
-                <span className="report-filter-label__text">Highlight Significant (p &lt; 0.05)</span>
-              </label>
-              <label className="report-filter-label" style={{ cursor: 'pointer' }}>
-                <input 
-                  type="checkbox" 
-                  checked={showTStats} 
-                  onChange={e => setShowTStats(e.target.checked)} 
-                />
-                <span className="report-filter-label__text-muted">Show t-statistics</span>
-              </label>
+              {plsResults && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '16px',
+                    fontSize: '13px',
+                    color: '#475569'
+                  }}
+                >
+                  <span>
+                    Converged:{' '}
+                    <strong style={{ color: '#16a34a' }}>
+                      {plsResults.converged ? 'Yes' : 'No'}
+                    </strong>
+                  </span>
+
+                  <span>
+                    Iterations:{' '}
+                    <strong>{plsResults.iterations}</strong>
+                  </span>
+
+                  <span>
+                    Sample Size (N):{' '}
+                    <strong>{plsResults.n_samples}</strong>
+                  </span>
+                </div>
+              )}
             </div>
+
             <div className="report-filters__right">
-              <button className="report-action-btn" type="button" onClick={handleCopyTable}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
+              <button
+                className="report-action-btn"
+                type="button"
+                onClick={handleCopyCurrentTable}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                </svg>
                 Copy Table
               </button>
-              <button className="report-action-btn" type="button" onClick={handleExportCSV}>Export CSV</button>
+
+              <button
+                className="report-action-btn"
+                type="button"
+                onClick={handleExportCurrentTable}
+              >
+                Export CSV
+              </button>
             </div>
           </div>
         </div>
@@ -1101,6 +1999,519 @@ const ModelEditor = () => {
                             )}
                           </td>
                         );
+        {/* Dynamic Table Area */}
+        <div className="table-container">
+          <div className="scientific-table-wrap">
+            {!plsResults ? (
+              <div style={{ padding: '60px 20px', textAlign: 'center', color: '#64748b' }}>
+                <svg style={{ width: 48, height: 48, margin: '0 auto 16px', color: '#94a3b8' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+                  <path d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <h3 style={{ margin: '0 0 8px', fontSize: '16px', fontWeight: 600, color: '#334155' }}>No Results Calculated Yet</h3>
+                <p style={{ margin: 0, fontSize: '13px' }}>Return to the model canvas and click <strong>Calculate</strong> to run the PLS-SEM algorithm on your data.</p>
+              </div>
+            ) : activeResultTab === 'path_coefficients' ? (
+              resultViewMode === 'matrix' ? (
+                <table className="scientific-table">
+                  <thead>
+                    <tr>
+                      <th>Source \ Target</th>
+                      {resultConstructs.map(c => (
+                        <th key={c}>{getConstructName(c)}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {resultConstructs.map(sourceC => (
+                      <tr key={sourceC}>
+                        <td>
+                          <div className="construct-label">
+                            <div className="construct-dot" style={{ background: constructPalette[sourceC] || '#6366f1' }} />
+                            <span className="construct-name">{getConstructName(sourceC)}</span>
+                          </div>
+                        </td>
+                        {resultConstructs.map(targetC => {
+                          const val = plsResults.structural?.path_coefficients?.[targetC]?.[sourceC];
+                          if (val !== undefined && val !== null) {
+                            return (
+                              <td key={targetC} className="cell-sig">
+                                <div className="cell-value">{fmt(val, 4)}</div>
+                              </td>
+                            );
+                          }
+                          return <td key={targetC} className="cell-empty">—</td>;
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <table className="scientific-table">
+                  <thead>
+                    <tr>
+                      <th>Predictor (From)</th>
+                      <th>Target (To)</th>
+                      <th>Path Coefficient (β)</th>
+                      <th>f² Effect Size</th>
+                      <th>Inner VIF</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(plsResults.structural?.path_coefficients || {}).flatMap(([target, preds]: [string, any]) =>
+                      Object.entries(preds || {}).map(([pred, val]: [string, any]) => {
+                        const f2 = plsResults.structural?.f_squared?.[target]?.[pred];
+                        const vif = plsResults.structural?.inner_vif?.[target]?.[pred];
+                        return (
+                          <tr key={`${pred}->${target}`}>
+                            <td>
+                              <div className="construct-label">
+                                <div className="construct-dot" style={{ background: constructPalette[pred] || '#6366f1' }} />
+                                <span className="construct-name">{getConstructName(pred)}</span>
+                              </div>
+                            </td>
+                            <td>
+                              <div className="construct-label">
+                                <div className="construct-dot" style={{ background: constructPalette[target] || '#0ea5e9' }} />
+                                <span className="construct-name">{getConstructName(target)}</span>
+                              </div>
+                            </td>
+                            <td className="cell-sig">
+                              <div className="cell-value">{fmt(val, 4)}</div>
+                            </td>
+                            <td>{f2 !== undefined ? fmt(f2, 4) : '—'}</td>
+                            <td>{vif !== undefined ? fmt(vif, 4) : '1.0000'}</td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              )
+            ) : activeResultTab === 'total_effects' ? (
+              <table className="scientific-table">
+                <thead>
+                  <tr>
+                    <th>Source (From)</th>
+                    <th>Target (To)</th>
+                    <th>Direct Effect</th>
+                    <th>Indirect Effect</th>
+                    <th>Total Effect</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(plsResults.structural?.effects || []).map((eff: any, idx: number) => (
+                    <tr key={idx}>
+                      <td>
+                        <div className="construct-label">
+                          <div className="construct-dot" style={{ background: constructPalette[eff.from] || '#6366f1' }} />
+                          <span className="construct-name">{getConstructName(eff.from)}</span>
+                        </div>
+                      </td>
+                      <td>
+                        <div className="construct-label">
+                          <div className="construct-dot" style={{ background: constructPalette[eff.to] || '#0ea5e9' }} />
+                          <span className="construct-name">{getConstructName(eff.to)}</span>
+                        </div>
+                      </td>
+                      <td>{fmt(eff.direct, 4)}</td>
+                      <td>{fmt(eff.indirect, 4)}</td>
+                      <td className="cell-sig">
+                        <div className="cell-value">{fmt(eff.total, 4)}</div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : activeResultTab === 'outer_loadings' ? (
+              <table className="scientific-table">
+                <thead>
+                  <tr>
+                    <th>Construct</th>
+                    <th>Indicator</th>
+                    <th>Outer Loading (λ)</th>
+                    <th>Indicator Reliability (λ²)</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(plsResults.measurement?.outer_loadings || {}).flatMap(([cid, loads]: [string, any]) =>
+                    Object.entries(loads || {}).map(([iid, val]: [string, any]) => {
+                      const loadNum = Number(val);
+                      const rel = plsResults.measurement?.indicator_reliability?.[cid]?.[iid] ?? (loadNum * loadNum);
+                      const isHigh = loadNum >= 0.708;
+                      return (
+                        <tr key={`${cid}-${iid}`}>
+                          <td>
+                            <div className="construct-label">
+                              <div className="construct-dot" style={{ background: constructPalette[cid] || '#6366f1' }} />
+                              <span className="construct-name">{getConstructName(cid)}</span>
+                            </div>
+                          </td>
+                          <td><strong>{getIndicatorName(iid)}</strong></td>
+                          <td className={isHigh ? 'cell-sig' : 'cell-ns'}>
+                            <div className="cell-value">{fmt(loadNum, 4)}</div>
+                          </td>
+                          <td>{fmt(rel, 4)}</td>
+                          <td>
+                            <span style={{
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                              fontSize: '11px',
+                              fontWeight: 600,
+                              backgroundColor: isHigh ? '#dcfce7' : (loadNum >= 0.6 ? '#fef3c7' : '#fee2e2'),
+                              color: isHigh ? '#166534' : (loadNum >= 0.6 ? '#92400e' : '#991b1b')
+                            }}>
+                              {isHigh ? 'Established (λ ≥ 0.708)' : (loadNum >= 0.6 ? 'Acceptable' : 'Low (< 0.60)')}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            ) : activeResultTab === 'outer_weights' ? (
+              <table className="scientific-table">
+                <thead>
+                  <tr>
+                    <th>Construct</th>
+                    <th>Indicator</th>
+                    <th>Outer Weight (w)</th>
+                    <th>Outer VIF</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(plsResults.measurement?.outer_weights || {}).flatMap(([cid, weights]: [string, any]) =>
+                    Object.entries(weights || {}).map(([iid, val]: [string, any]) => {
+                      const vif = plsResults.measurement?.outer_vif?.[cid]?.[iid];
+                      return (
+                        <tr key={`${cid}-${iid}`}>
+                          <td>
+                            <div className="construct-label">
+                              <div className="construct-dot" style={{ background: constructPalette[cid] || '#6366f1' }} />
+                              <span className="construct-name">{getConstructName(cid)}</span>
+                            </div>
+                          </td>
+                          <td><strong>{getIndicatorName(iid)}</strong></td>
+                          <td className="cell-sig">
+                            <div className="cell-value">{fmt(val, 4)}</div>
+                          </td>
+                          <td>{vif !== undefined ? fmt(vif, 4) : '1.0000'}</td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            ) : activeResultTab === 'r_squared' ? (
+              <table className="scientific-table">
+                <thead>
+                  <tr>
+                    <th>Endogenous Construct</th>
+                    <th>R-Square (R²)</th>
+                    <th>R-Square Adjusted</th>
+                    <th>Variance Explained</th>
+                    <th>Explanatory Power</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(plsResults.structural?.r_squared || {}).map(([cid, val]: [string, any]) => {
+                    const r2 = Number(val);
+                    const r2Adj = Number(plsResults.structural?.r_squared_adj?.[cid] ?? r2);
+                    const power = r2 >= 0.67 ? 'Substantial' : (r2 >= 0.33 ? 'Moderate' : (r2 >= 0.19 ? 'Weak' : 'Very weak'));
+                    return (
+                      <tr key={cid}>
+                        <td>
+                          <div className="construct-label">
+                            <div className="construct-dot" style={{ background: constructPalette[cid] || '#6366f1' }} />
+                            <span className="construct-name">{getConstructName(cid)}</span>
+                          </div>
+                        </td>
+                        <td className="cell-sig">
+                          <div className="cell-value">{fmt(r2, 4)}</div>
+                        </td>
+                        <td>{fmt(r2Adj, 4)}</td>
+                        <td>{(r2 * 100).toFixed(2)}%</td>
+                        <td>
+                          <span style={{
+                            padding: '2px 8px',
+                            borderRadius: '4px',
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            backgroundColor: r2 >= 0.33 ? '#dcfce7' : '#fef3c7',
+                            color: r2 >= 0.33 ? '#166534' : '#92400e'
+                          }}>
+                            {power}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            ) : activeResultTab === 'f_squared' ? (
+              <table className="scientific-table">
+                <thead>
+                  <tr>
+                    <th>Predictor (From)</th>
+                    <th>Target (To)</th>
+                    <th>f² Value</th>
+                    <th>Effect Size Interpretation</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(plsResults.structural?.f_squared || {}).flatMap(([target, preds]: [string, any]) =>
+                    Object.entries(preds || {}).map(([pred, val]: [string, any]) => {
+                      const f2 = Number(val);
+                      const interp = f2 >= 0.35 ? 'Large effect (≥ 0.35)' : (f2 >= 0.15 ? 'Medium effect (≥ 0.15)' : (f2 >= 0.02 ? 'Small effect (≥ 0.02)' : 'Negligible (< 0.02)'));
+                      return (
+                        <tr key={`${pred}->${target}`}>
+                          <td>
+                            <div className="construct-label">
+                              <div className="construct-dot" style={{ background: constructPalette[pred] || '#6366f1' }} />
+                              <span className="construct-name">{getConstructName(pred)}</span>
+                            </div>
+                          </td>
+                          <td>
+                            <div className="construct-label">
+                              <div className="construct-dot" style={{ background: constructPalette[target] || '#0ea5e9' }} />
+                              <span className="construct-name">{getConstructName(target)}</span>
+                            </div>
+                          </td>
+                          <td className="cell-sig">
+                            <div className="cell-value">{fmt(f2, 4)}</div>
+                          </td>
+                          <td>
+                            <span style={{
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                              fontSize: '11px',
+                              fontWeight: 600,
+                              backgroundColor: f2 >= 0.15 ? '#dcfce7' : (f2 >= 0.02 ? '#fef3c7' : '#f1f5f9'),
+                              color: f2 >= 0.15 ? '#166534' : (f2 >= 0.02 ? '#92400e' : '#475569')
+                            }}>
+                              {interp}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            ) : activeResultTab === 'reliability' ? (
+              <table className="scientific-table">
+                <thead>
+                  <tr>
+                    <th>Construct</th>
+                    <th>Cronbach's Alpha (α)</th>
+                    <th>Composite Reliability (CR)</th>
+                    <th>rho_A (ρA)</th>
+                    <th>AVE</th>
+                    <th>Evaluation</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {resultConstructs.map(cid => {
+                    const rv = plsResults.reliability_and_validity || {};
+                    const alpha = Number(rv.cronbachs_alpha?.[cid] ?? 0);
+                    const cr = Number(rv.composite_reliability?.[cid] ?? 0);
+                    const rhoA = Number(rv.rho_a?.[cid] ?? 0);
+                    const ave = Number(rv.ave?.[cid] ?? 0);
+                    const isGood = cr >= 0.7 && ave >= 0.5;
+                    return (
+                      <tr key={cid}>
+                        <td>
+                          <div className="construct-label">
+                            <div className="construct-dot" style={{ background: constructPalette[cid] || '#6366f1' }} />
+                            <span className="construct-name">{getConstructName(cid)}</span>
+                          </div>
+                        </td>
+                        <td className={alpha >= 0.7 ? 'cell-sig' : 'cell-ns'}>{fmt(alpha, 4)}</td>
+                        <td className={cr >= 0.7 ? 'cell-sig' : 'cell-ns'}>{fmt(cr, 4)}</td>
+                        <td>{fmt(rhoA, 4)}</td>
+                        <td className={ave >= 0.5 ? 'cell-sig' : 'cell-ns'}>{fmt(ave, 4)}</td>
+                        <td>
+                          <span style={{
+                            padding: '2px 8px',
+                            borderRadius: '4px',
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            backgroundColor: isGood ? '#dcfce7' : '#fee2e2',
+                            color: isGood ? '#166534' : '#991b1b'
+                          }}>
+                            {isGood ? 'Valid & Reliable (CR ≥ 0.7, AVE ≥ 0.5)' : 'Review Model'}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            ) : activeResultTab === 'discriminant' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
+                <div>
+                  <h4 style={{ margin: '0 0 8px', fontSize: '14px', fontWeight: 600, color: '#1e293b' }}>
+                    Heterotrait-Monotrait Ratio (HTMT)
+                    <span style={{ marginLeft: '8px', fontSize: '11px', fontWeight: 400, color: '#64748b' }}>(Threshold &lt; 0.85 / 0.90)</span>
+                  </h4>
+                  <table className="scientific-table">
+                    <thead>
+                      <tr>
+                        <th>Construct</th>
+                        {resultConstructs.map(c => <th key={c}>{getConstructName(c)}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {resultConstructs.map(c1 => (
+                        <tr key={c1}>
+                          <td>
+                            <div className="construct-label">
+                              <div className="construct-dot" style={{ background: constructPalette[c1] || '#6366f1' }} />
+                              <span className="construct-name">{getConstructName(c1)}</span>
+                            </div>
+                          </td>
+                          {resultConstructs.map(c2 => {
+                            if (c1 === c2) return <td key={c2} className="cell-empty">—</td>;
+                            const htmtVal = plsResults.reliability_and_validity?.htmt?.[c1]?.[c2];
+                            if (htmtVal !== undefined) {
+                              const num = Number(htmtVal);
+                              const ok = num < 0.85;
+                              return (
+                                <td key={c2} className={ok ? 'cell-sig' : 'cell-ns'}>
+                                  <div className="cell-value">{fmt(num, 4)}</div>
+                                </td>
+                              );
+                            }
+                            return <td key={c2} className="cell-empty">—</td>;
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div>
+                  <h4 style={{ margin: '0 0 8px', fontSize: '14px', fontWeight: 600, color: '#1e293b' }}>
+                    Fornell-Larcker Criterion
+                    <span style={{ marginLeft: '8px', fontSize: '11px', fontWeight: 400, color: '#64748b' }}>(Diagonal: √AVE, Off-diagonal: construct correlations)</span>
+                  </h4>
+                  <table className="scientific-table">
+                    <thead>
+                      <tr>
+                        <th>Construct</th>
+                        {resultConstructs.map(c => <th key={c}>{getConstructName(c)}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {resultConstructs.map(c1 => (
+                        <tr key={c1}>
+                          <td>
+                            <div className="construct-label">
+                              <div className="construct-dot" style={{ background: constructPalette[c1] || '#6366f1' }} />
+                              <span className="construct-name">{getConstructName(c1)}</span>
+                            </div>
+                          </td>
+                          {resultConstructs.map(c2 => {
+                            const flVal = plsResults.reliability_and_validity?.fornell_larcker?.[c1]?.[c2];
+                            if (flVal !== undefined) {
+                              const isDiag = c1 === c2;
+                              return (
+                                <td key={c2} style={isDiag ? { backgroundColor: '#f1f5f9', fontWeight: 700 } : {}}>
+                                  <div>{fmt(flVal, 4)}</div>
+                                </td>
+                              );
+                            }
+                            return <td key={c2} className="cell-empty">—</td>;
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : activeResultTab === 'collinearity' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
+                <div>
+                  <h4 style={{ margin: '0 0 8px', fontSize: '14px', fontWeight: 600, color: '#1e293b' }}>Inner Model VIF (Predictors of Endogenous Constructs)</h4>
+                  <table className="scientific-table">
+                    <thead>
+                      <tr>
+                        <th>Target Construct</th>
+                        <th>Predictor Construct</th>
+                        <th>Inner VIF</th>
+                        <th>Collinearity Evaluation</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.entries(plsResults.structural?.inner_vif || {}).flatMap(([target, preds]: [string, any]) =>
+                        Object.entries(preds || {}).map(([pred, val]: [string, any]) => {
+                          const vif = Number(val);
+                          const ok = vif < 3.3;
+                          return (
+                            <tr key={`${pred}->${target}`}>
+                              <td><strong>{getConstructName(target)}</strong></td>
+                              <td>{getConstructName(pred)}</td>
+                              <td className={ok ? 'cell-sig' : 'cell-ns'}>{fmt(vif, 4)}</td>
+                              <td>
+                                <span style={{
+                                  padding: '2px 8px',
+                                  borderRadius: '4px',
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  backgroundColor: ok ? '#dcfce7' : '#fee2e2',
+                                  color: ok ? '#166534' : '#991b1b'
+                                }}>
+                                  {ok ? 'No Collinearity Issue (VIF < 3.3)' : 'Potential Multicollinearity (VIF ≥ 3.3)'}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div>
+                  <h4 style={{ margin: '0 0 8px', fontSize: '14px', fontWeight: 600, color: '#1e293b' }}>Outer Model VIF (Indicators)</h4>
+                  <table className="scientific-table">
+                    <thead>
+                      <tr>
+                        <th>Construct</th>
+                        <th>Indicator</th>
+                        <th>Outer VIF</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.entries(plsResults.measurement?.outer_vif || {}).flatMap(([cid, vifs]: [string, any]) =>
+                        Object.entries(vifs || {}).map(([iid, val]: [string, any]) => (
+                          <tr key={`${cid}-${iid}`}>
+                            <td>{getConstructName(cid)}</td>
+                            <td><strong>{getIndicatorName(iid)}</strong></td>
+                            <td>{fmt(val, 4)}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : activeResultTab === 'construct_scores' ? (
+              <table className="scientific-table">
+                <thead>
+                  <tr>
+                    <th>Observation #</th>
+                    {resultConstructs.map(c => <th key={c}>{getConstructName(c)}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {Array.from({ length: Math.min(25, (plsResults.construct_scores?.[resultConstructs[0]] || []).length) }).map((_, rIdx) => (
+                    <tr key={rIdx}>
+                      <td><strong>Case #{rIdx + 1}</strong></td>
+                      {resultConstructs.map(c => {
+                        const val = plsResults.construct_scores?.[c]?.[rIdx];
+                        return <td key={c}>{fmt(val, 4)}</td>;
                       })}
                     </tr>
                   ))}
@@ -1115,6 +2526,161 @@ const ModelEditor = () => {
                 <div style={{ fontFamily: 'var(--font-sans)' }}>Based on 5000 bootstrap subsamples</div>
               </div>
             </div>
+            ) : activeResultTab === 'bootstrap_significance' ? (
+              !plsResults.significance ? (
+                <div style={{ padding: '60px 20px', textAlign: 'center', color: '#64748b' }}>
+                  <svg style={{ width: 48, height: 48, margin: '0 auto 16px', color: '#94a3b8' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+                    <path d="M18 20V10M12 20V4M6 20v-6" />
+                  </svg>
+                  <h3 style={{ margin: '0 0 8px', fontSize: '16px', fontWeight: 600, color: '#334155' }}>No Bootstrapping Run Yet</h3>
+                  <p style={{ margin: 0, fontSize: '13px' }}>Click the <strong>Bootstrap</strong> button in the top bar to run multi-core significance testing for standard errors, t-statistics, and p-values.</p>
+                </div>
+              ) : (
+                <div>
+                  {/* Summary Bar */}
+                  <div style={{
+                    display: 'flex',
+                    gap: '20px',
+                    padding: '14px 18px',
+                    backgroundColor: '#f8fafc',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '8px',
+                    marginBottom: '20px',
+                    alignItems: 'center',
+                    fontSize: '13px',
+                    color: '#334155',
+                  }}>
+                    <span>Bootstrap Samples: <strong>{plsResults.significance.n_boot?.toLocaleString()}</strong></span>
+                    <span>Test: <strong>Two-Tailed (α = 0.05)</strong></span>
+                    <span>Confidence Interval: <strong>95% Percentile</strong></span>
+                    <span style={{ marginLeft: 'auto', fontSize: '12px', color: '#64748b' }}>
+                      Significance: *** p &lt; 0.001, ** p &lt; 0.01, * p &lt; 0.05, ns not significant
+                    </span>
+                  </div>
+
+                  {/* Path Coefficients Significance Table */}
+                  <h4 style={{ margin: '0 0 10px', fontSize: '14px', fontWeight: 600, color: '#1e293b' }}>
+                    Structural Path Significance
+                  </h4>
+                  <table className="scientific-table" style={{ marginBottom: '32px' }}>
+                    <thead>
+                      <tr>
+                        <th>Path (Predictor → Target)</th>
+                        <th>Original (β)</th>
+                        <th>Sample Mean</th>
+                        <th>Std Error (SE)</th>
+                        <th>t-Statistic</th>
+                        <th>p-Value</th>
+                        <th>95% Confidence Interval</th>
+                        <th>Significance</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(plsResults.significance.paths || []).map((p: any, idx: number) => {
+                        const isSig = p.p_value < 0.05;
+                        return (
+                          <tr key={idx}>
+                            <td>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span className="construct-name">{p.from_name || getConstructName(p.from)}</span>
+                                <span style={{ color: '#94a3b8' }}>→</span>
+                                <span className="construct-name">{p.to_name || getConstructName(p.to)}</span>
+                              </div>
+                            </td>
+                            <td className="cell-sig">
+                              <div className="cell-value">{fmt(p.original, 4)}</div>
+                            </td>
+                            <td>{fmt(p.mean, 4)}</td>
+                            <td>{fmt(p.se, 4)}</td>
+                            <td><strong>{fmt(p.t_stat, 3)}</strong></td>
+                            <td style={{ color: isSig ? '#15803d' : '#b45309', fontWeight: 600 }}>
+                              {p.p_value < 0.0001 ? '< 0.0001' : fmt(p.p_value, 4)}
+                            </td>
+                            <td>[{fmt(p.ci_low, 4)}, {fmt(p.ci_high, 4)}]</td>
+                            <td>
+                              <span style={{
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                fontSize: '12px',
+                                fontWeight: 600,
+                                backgroundColor: isSig ? '#dcfce7' : '#f1f5f9',
+                                color: isSig ? '#166534' : '#64748b',
+                              }}>
+                                {p.significance}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+
+                  {/* Outer Loadings Significance Table */}
+                  <h4 style={{ margin: '0 0 10px', fontSize: '14px', fontWeight: 600, color: '#1e293b' }}>
+                    Outer Loadings Significance
+                  </h4>
+                  <table className="scientific-table">
+                    <thead>
+                      <tr>
+                        <th>Construct</th>
+                        <th>Indicator</th>
+                        <th>Outer Loading (λ)</th>
+                        <th>Sample Mean</th>
+                        <th>Std Error (SE)</th>
+                        <th>t-Statistic</th>
+                        <th>p-Value</th>
+                        <th>95% Confidence Interval</th>
+                        <th>Sig.</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(plsResults.significance.loadings || []).map((l: any, idx: number) => {
+                        const isSig = l.p_value < 0.05;
+                        return (
+                          <tr key={idx}>
+                            <td>{l.construct_name || getConstructName(l.construct)}</td>
+                            <td><strong>{l.indicator_name || getIndicatorName(l.indicator)}</strong></td>
+                            <td className="cell-sig">
+                              <div className="cell-value">{fmt(l.original, 4)}</div>
+                            </td>
+                            <td>{fmt(l.mean, 4)}</td>
+                            <td>{fmt(l.se, 4)}</td>
+                            <td>{fmt(l.t_stat, 3)}</td>
+                            <td style={{ color: isSig ? '#15803d' : '#b45309', fontWeight: 600 }}>
+                              {l.p_value < 0.0001 ? '< 0.0001' : fmt(l.p_value, 4)}
+                            </td>
+                            <td>[{fmt(l.ci_low, 4)}, {fmt(l.ci_high, 4)}]</td>
+                            <td>
+                              <span style={{
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                fontSize: '11px',
+                                fontWeight: 600,
+                                backgroundColor: isSig ? '#dcfce7' : '#f1f5f9',
+                                color: isSig ? '#166534' : '#64748b',
+                              }}>
+                                {l.significance}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            ) : null}
+
+            {plsResults && (
+              <div className="sig-legend">
+                <span style={{color: 'var(--color-text-secondary)', fontWeight: 500}}>Status:</span>
+                <div className="sig-legend__item"><span style={{color: '#10b981'}}>✓</span> Converged: {plsResults.converged ? 'Yes' : 'No'}</div>
+                <div className="sig-legend__item"><span style={{color: '#6366f1'}}>ℹ</span> Iterations: {plsResults.iterations}</div>
+                <div className="sig-legend__item"><span style={{color: '#0ea5e9'}}>N:</span> {plsResults.n_samples} cases</div>
+                <span style={{flex: 1}} />
+                <div style={{fontFamily: 'var(--font-sans)', fontSize: '12px', color: '#64748b'}}>PLS-SEM Engine · Path Weighting Scheme</div>
+              </div>
+            )}
           </div>
         ) : (
           <div className="table-container">
@@ -1189,12 +2755,184 @@ const ModelEditor = () => {
   {datasetToImport && (
     <DataManagerModal
       dataset={datasetToImport}
-      onImport={(validatedDataset) => {
-        setActiveDataset(validatedDataset);
-        setDatasetToImport(null);
-      }}
+      onImport={handleImportComplete}
       onCancel={() => setDatasetToImport(null)}
     />
+  )}
+
+  <BootstrapModal
+    isOpen={isBootstrapModalOpen}
+    projectPath={activeStudy?.path || ''}
+    spec={exportModelSpec()}
+    datasetHeaders={activeDataset?.variables?.map(v => v.name)}
+    datasetRows={activeDataset?.rows}
+    datasetName={activeDataset?.filename}
+    onComplete={(results) => {
+      setPlsResults(results);
+      setActiveResultTab('bootstrap_significance');
+      const viewSlider = document.getElementById('main-view-slider');
+      if (viewSlider) {
+        (viewSlider as HTMLElement).style.display = 'flex';
+      }
+      switchView('results');
+      setValidationSuccessToast('Bootstrapping complete! Results updated.');
+      setTimeout(() => setValidationSuccessToast(null), 3500);
+    }}
+    onClose={() => setIsBootstrapModalOpen(false)}
+  />
+
+  {/* ─── Validation Error Modal ─── */}
+  {validationModal && (
+    <div style={{
+      position: 'fixed',
+      inset: 0,
+      backgroundColor: 'rgba(15, 23, 42, 0.65)',
+      backdropFilter: 'blur(4px)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 9999,
+    }}>
+      <div style={{
+        backgroundColor: '#ffffff',
+        borderRadius: '12px',
+        width: '480px',
+        maxWidth: '90vw',
+        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+        overflow: 'hidden',
+        border: '1px solid #e2e8f0',
+      }}>
+        <div style={{
+          padding: '18px 20px',
+          borderBottom: '1px solid #f1f5f9',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          backgroundColor: '#fff1f2',
+        }}>
+          <div style={{
+            width: '36px',
+            height: '36px',
+            borderRadius: '8px',
+            backgroundColor: '#ffe4e6',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#e11d48',
+            flexShrink: 0,
+          }}>
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+          </div>
+          <div>
+            <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: '#9f1239' }}>Model Validation Issues</h3>
+            <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#be123c' }}>Please fix the following issues before running analysis:</p>
+          </div>
+        </div>
+        
+        <div style={{ padding: '16px 20px', maxHeight: '340px', overflowY: 'auto' }}>
+          {validationModal.errors && validationModal.errors.length > 0 && (
+            <div style={{ marginBottom: '14px' }}>
+              <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#e11d48', marginBottom: '8px', letterSpacing: '0.05em' }}>
+                Errors ({validationModal.errors.length})
+              </div>
+              <ul style={{ margin: 0, paddingLeft: '18px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {validationModal.errors.map((err, idx) => (
+                  <li key={idx} style={{ fontSize: '13px', color: '#334155', lineHeight: '1.4' }}>
+                    {err}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {validationModal.warnings && validationModal.warnings.length > 0 && (
+            <div>
+              <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#d97706', marginBottom: '8px', letterSpacing: '0.05em' }}>
+                Warnings ({validationModal.warnings.length})
+              </div>
+              <ul style={{ margin: 0, paddingLeft: '18px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {validationModal.warnings.map((warn, idx) => (
+                  <li key={idx} style={{ fontSize: '13px', color: '#64748b', lineHeight: '1.4' }}>
+                    {warn}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+
+        <div style={{
+          padding: '12px 20px',
+          backgroundColor: '#f8fafc',
+          borderTop: '1px solid #f1f5f9',
+          display: 'flex',
+          justifyContent: 'flex-end',
+        }}>
+          <button
+            type="button"
+            onClick={() => setValidationModal(null)}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#0f172a',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '6px',
+              fontSize: '13px',
+              fontWeight: 500,
+              cursor: 'pointer',
+            }}
+          >
+            Back to Canvas
+          </button>
+        </div>
+      </div>
+    </div>
+  )}
+
+  {/* ─── Toast Notifications ─── */}
+  {saveToast && (
+    <div style={{
+      position: 'fixed',
+      bottom: '24px',
+      right: '24px',
+      backgroundColor: '#0f172a',
+      color: '#ffffff',
+      padding: '10px 18px',
+      borderRadius: '8px',
+      fontSize: '13px',
+      fontWeight: 500,
+      boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      zIndex: 9999,
+    }}>
+      <span style={{ color: '#10b981' }}>✓</span> {saveToast}
+    </div>
+  )}
+  {validationSuccessToast && (
+    <div style={{
+      position: 'fixed',
+      bottom: '24px',
+      right: '24px',
+      backgroundColor: '#065f46',
+      color: '#ffffff',
+      padding: '10px 18px',
+      borderRadius: '8px',
+      fontSize: '13px',
+      fontWeight: 500,
+      boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      zIndex: 9999,
+    }}>
+      <span style={{ color: '#34d399' }}>✓</span> {validationSuccessToast}
+    </div>
   )}
 
     </div>

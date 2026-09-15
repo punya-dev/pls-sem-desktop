@@ -3,70 +3,286 @@ import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
 import WorkspaceModal from '../components/WorkspaceModal';
 import InputDialog from '../components/InputDialog';
+import { api } from '../utils/api';
 
 const GetStarted = () => {
   const navigate = useNavigate();
-  const { workspaces, addWorkspace, setActiveWorkspace, archivedWorkspaces, archiveWorkspace, renameWorkspace, deleteWorkspace, requestDelete, openTab } = useStore();
+const {
+  workspaces,
+  addWorkspace,
+  removeWorkspace,
+  setActiveWorkspace,
+  archivedWorkspaces,
+  archiveWorkspace,
+  renameWorkspace,
+  requestDelete,
+  deleteWorkspace,
+  openTab,
+} = useStore();
   const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [inputDialogConfig, setInputDialogConfig] = useState<{isOpen: boolean; title: string; placeholder: string; submitLabel: string; onSubmit: (val: string) => void}>({
     isOpen: false, title: '', placeholder: '', submitLabel: '', onSubmit: () => {}
   });
 
+
+ 
+    const handleOpenWorkspace = async () => {
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: 'Open Workspace Folder'
+      });
+      if (selected && typeof selected === 'string') {
+        const res = await api.openWorkspace(selected);
+        if (res.error) {
+          alert(res.error);
+          return;
+        }
+        const wsName = res.workspace?.name || selected.replace(/[/\\]+$/, '').split(/[/\\]/).filter(Boolean).pop() || 'Workspace';
+        const existing = workspaces.find(w => w.path === selected);
+        const wsId = existing ? existing.id : selected;
+        if (!existing) {
+          addWorkspace({
+            id: wsId,
+            name: wsName,
+            path: selected
+          });
+        }
+        setActiveWorkspace(wsId);
+        navigate('/workspace');
+      }
+    } catch (err) {
+      console.warn('Tauri open dialog error:', err);
+      const fallback = window.prompt('Enter workspace directory path:');
+      if (fallback) {
+        const res = await api.openWorkspace(fallback);
+        if (res.error) {
+          alert(res.error);
+          return;
+        }
+        const wsName = res.workspace?.name || fallback.replace(/[/\\]+$/, '').split(/[/\\]/).filter(Boolean).pop() || 'Workspace';
+        const existing = workspaces.find(w => w.path === fallback);
+        const wsId = existing ? existing.id : fallback;
+        if (!existing) {
+          addWorkspace({
+            id: wsId,
+            name: wsName,
+            path: fallback
+          });
+        }
+        setActiveWorkspace(wsId);
+        navigate('/workspace');
+      }
+    }
+  };
+
+
+
   return (
     <>
-      <div className="app-body">
-        
-        <aside className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`} id="sidebar">
+      <header className="titlebar window-drag" id="titlebar">
+
+    
+    <div className="titlebar__left no-drag">
+      
+      <div className="titlebar__traffic-light-space" aria-hidden="true"></div>
+
+      
+      <div
+        className="brand"
+        onClick={() => navigate('/')}
+        role="button"
+        tabIndex={0}
+        title="Getting Started"
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') navigate('/'); }}
+      >
+        <svg className="brand__logo" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="CSPLS Logo">
+          <rect width="48" height="48" rx="10" fill="#6B4EE6"/>
+          <circle cx="16" cy="16" r="4" fill="#FFFFFF"/>
+          <circle cx="32" cy="18" r="4" fill="#C7D2FE"/>
+          <circle cx="20" cy="32" r="5" fill="#EEF2FF"/>
+          <circle cx="34" cy="32" r="3.5" fill="#A5B4FC"/>
+          <path d="M16 16L32 18M16 16L20 32M20 32L34 32M32 18L34 32" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeOpacity="0.85"/>
+        </svg>
+        <span className="brand__name">CSPLS</span>
+      </div>
+    </div>
+
+    
+    <div className="titlebar__center no-drag">
+      <span className="titlebar__version">CSPLS 1.1</span>
+    </div>
+
+    
+    <div className="titlebar__right no-drag">
+      <button className="icon-btn" id="theme-toggle-btn" title="Toggle Theme" type="button">
+        <span className="material-symbols-outlined">light_mode</span>
+      </button>
+      <button className="icon-btn" title="Settings" type="button">
+        <span className="material-symbols-outlined">settings</span>
+      </button>
+
+      <span className="v-divider"></span>
+
+      <div className="user-badge" role="button" tabIndex={0}>
+        <div className="user-badge__avatar">
+          <span>MV</span>
+          <span className="user-badge__status"></span>
+        </div>
+        <span className="user-badge__name">M. Vance</span>
+      </div>
+    </div>
+  </header>
+
+
+  
+  <div className="app-body">
+
+    
+    <aside className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`} id="sidebar">
+
 
           
-          <div className="sidebar__top">
-            <div className="sidebar-ws-container">
-              
-              <div className="sidebar-header" style={{'paddingBottom': '10px', 'borderBottom': 'none'}}>
-                <span className="sidebar-header__label">Workspaces</span>
-                <div className="sidebar-header__actions">
-                  <button className="icon-btn icon-btn--sm" title="Search workspaces" type="button" onClick={() => setInputDialogConfig({isOpen: true, title: 'Search Workspaces', placeholder: 'Enter workspace name...', submitLabel: 'Search', onSubmit: () => {}})}>
-                    <span className="material-symbols-outlined">search</span>
-                  </button>
-                  <button className="sidebar-create-folder-btn" title="Create Workspace" type="button" onClick={() => setIsWorkspaceModalOpen(true)}>
-                    <svg fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
-                      <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path>
-                      <line x1="12" x2="12" y1="10" y2="16"></line>
-                      <line x1="9" x2="15" y1="13" y2="13"></line>
-                    </svg>
-                  </button>
-                  <button className="icon-btn icon-btn--sm" id="sidebar-collapse-btn" title="Collapse sidebar" type="button" onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}>
-                    <span className="material-symbols-outlined">left_panel_close</span>
-                  </button>
-                </div>
-              </div>
+<div className="sidebar__top">
+  <div className="sidebar-ws-container">
 
-              <div id="sidebar-ws-list" style={{'display': 'flex', 'flexDirection': 'column', 'gap': '2px'}}>
-                {workspaces.map(ws => (
-                  <button 
-                    key={ws.id} 
-                    className="sidebar-item" 
-                    type="button" 
-                    onClick={() => {
-                      setActiveWorkspace(ws.id);
-                      openTab({ type: 'workspace', title: ws.name, workspaceId: ws.id });
-                    }}
+    <div
+      className="sidebar-header"
+      style={{ paddingBottom: '10px', borderBottom: 'none' }}
+    >
+      <span className="sidebar-header__label">Workspaces</span>
+
+      <div className="sidebar-header__actions">
+        <button
+          className="icon-btn icon-btn--sm"
+          title="Search workspaces"
+          type="button"
+          onClick={() =>
+            setInputDialogConfig({
+              isOpen: true,
+              title: 'Search Workspaces',
+              placeholder: 'Enter workspace name...',
+              submitLabel: 'Search',
+              onSubmit: () => {},
+            })
+          }
+        >
+          <span className="material-symbols-outlined">search</span>
+        </button>
+
+        <button
+          className="icon-btn icon-btn--sm"
+          title="Open Workspace Folder"
+          type="button"
+          onClick={handleOpenWorkspace}
+        >
+          <span className="material-symbols-outlined">folder_open</span>
+        </button>
+
+        <button
+          className="sidebar-create-folder-btn"
+          title="Create Workspace"
+          type="button"
+          onClick={() => setIsWorkspaceModalOpen(true)}
+        >
+          <svg
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="2"
+            viewBox="0 0 24 24"
+          >
+            <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
+            <line x1="12" x2="12" y1="10" y2="16" />
+            <line x1="9" x2="15" y1="13" y2="13" />
+          </svg>
+        </button>
+
+        <button
+          className="icon-btn icon-btn--sm"
+          id="sidebar-collapse-btn"
+          title="Collapse sidebar"
+          type="button"
+          onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+        >
+          <span className="material-symbols-outlined">
+            left_panel_close
+          </span>
+        </button>
+      </div>
+    </div>
+
+    <div
+      id="sidebar-ws-list"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '2px',
+      }}
+    >
+      {workspaces.map(ws => (
+        <button
+          key={ws.id}
+          className="sidebar-item"
+          type="button"
+          onClick={async () => {
+            if (ws.path) {
+              const res = await api.openWorkspace(ws.path);
+
+              if (res.error) {
+                alert(res.error);
+                return;
+              }
+            }
+
+            setActiveWorkspace(ws.id);
+
+            openTab({
+              type: 'workspace',
+              title: ws.name,
+              workspaceId: ws.id,
+            });
+          }}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   useStore.getState().openContextMenu(e.clientX, e.clientY, [
                     {
-                      id: 'delete',
+                      id: 'remove-from-sidebar',
+                      label: 'Remove from Sidebar',
+                      icon: 'close',
+                      action: () => {
+                        removeWorkspace(ws.id);
+                      }
+                    },
+                    {
+                      id: 'delete-workspace',
                       label: 'Delete Workspace',
                       icon: 'delete',
                       danger: true,
-                      action: () => {
-                        requestDelete({
-                          title: 'Delete Workspace',
-                          itemName: ws.name,
-                          message: 'Are you sure? This workspace and all its contents will be permanently deleted and cannot be recovered.',
-                          onConfirm: () => deleteWorkspace(ws.id),
-                        });
+action: () => {
+  requestDelete({
+    title: 'Delete Workspace',
+    itemName: ws.name,
+    message:
+      'Are you sure? This workspace and all its contents will be permanently deleted and cannot be recovered.',
+    onConfirm: async () => {
+      if (ws.path) {
+        const res = await api.deleteWorkspace(ws.path);
+
+        if (res.error) {
+          alert('Failed to delete workspace files: ' + res.error);
+          return;
+        }
+      }
+
+      deleteWorkspace(ws.id);
+    },
+  });
+}
                       }
                     }
                   ]);
@@ -126,13 +342,18 @@ const GetStarted = () => {
             <h1 className="page-header__title">Get Started</h1>
             <p className="page-header__subtitle">Welcome to CSPLS. Set up your workspace or explore guided sample models to begin.</p>
           </div>
-          <div className="page-header__actions">
+          <div className="page-header__actions" style={{ display: 'flex', gap: '8px' }}>
+            <button className="btn btn-primary" type="button" onClick={handleOpenWorkspace}>
+              <span className="material-symbols-outlined">folder_open</span>
+              <span>Open Workspace</span>
+            </button>
             <button className="btn btn-primary" type="button" onClick={() => setIsWorkspaceModalOpen(true)}>
               <span className="material-symbols-outlined">add</span>
               <span>Create Workspace</span>
               <kbd className="kbd">⌘W</kbd>
             </button>
           </div>
+
         </div>
 
         

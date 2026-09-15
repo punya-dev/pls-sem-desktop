@@ -7,6 +7,7 @@ import InputDialog from '../components/InputDialog';
 import { DataManagerModal } from '../components/DataManagerModal';
 import { parseDatasetFile } from '../utils/dataset-parser';
 import type { ParsedDataset } from '../utils/dataset-parser';
+import { api } from '../utils/api';
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -65,10 +66,19 @@ const Dashboard = () => {
     }
   };
 
-  const handleImportComplete = (dataset: ParsedDataset) => {
+  const handleImportComplete = async (dataset: ParsedDataset) => {
     if (!importingStudyId) return;
     setStudyDataset(importingStudyId, dataset);
     touchStudy(importingStudyId);
+    const study = studies.find(s => s.id === importingStudyId);
+    if (study?.path) {
+      try {
+        const headers = dataset.variables.map(v => v.name);
+        await api.saveProjectDataJson(study.path, dataset.filename, headers, dataset.rows);
+      } catch (err) {
+        console.warn('Failed to save dataset to project in Dashboard:', err);
+      }
+    }
     setDatasetToImport(null);
     setImportingStudyId(null);
   };
@@ -248,7 +258,207 @@ const Dashboard = () => {
               </div>
             </div>
 
-            <div style={{flex: '1', display: 'flex', flexDirection: 'column'}}>
+{showTrash ? (
+  <div className="studies-list">
+    {trash.length ? trash.map(item => (
+      <div className="study-entry archive-entry" key={item.id}>
+        <div className="study-row trash-row">
+          <div className="study-row__left">
+            <span className="material-symbols-outlined study-folder">
+              {item.kind === 'dataset'
+                ? 'dataset'
+                : item.kind === 'model'
+                  ? 'account_tree'
+                  : 'folder'}
+            </span>
+            <span className="study-row__name">{item.name}</span>
+            {trashPath(item) && (
+              <span className="trash-path">{trashPath(item)}</span>
+            )}
+            <span className="study-row__count">{item.kind}</span>
+          </div>
+
+          <div className="study-row__meta trash-row__meta">
+            <span className="study-row__time">
+              {trashDate(item.deletedAt)}
+            </span>
+
+            <button
+              className="archive-restore-btn trash-action trash-action--restore"
+              data-tooltip={`Deleted on ${item.deletedAt}`}
+              type="button"
+              onClick={() => restoreTrashItem(item.id)}
+            >
+              Restore
+            </button>
+
+            <button
+              className="archive-restore-btn trash-action trash-action--danger"
+              type="button"
+              onClick={() => {
+                if (window.confirm(`Permanently delete ${item.name}? This cannot be undone.`)) {
+                  permanentlyDeleteTrashItem(item.id);
+                }
+              }}
+            >
+              Delete forever
+            </button>
+          </div>
+        </div>
+      </div>
+    )) : (
+      <div
+        className="empty-state"
+        style={{padding: '32px 16px', textAlign: 'center'}}
+      >
+        Trash is empty.
+      </div>
+    )}
+  </div>
+) : showArchive ? (
+  <div className="studies-list">
+    {archivedWorkspaces.length ? archivedWorkspaces.map(workspace => {
+      const isExpanded = expandedArchivedWorkspaces.has(workspace.id);
+      const archivedStudies = studies.filter(
+        study => study.workspaceId === workspace.id
+      );
+
+      return (
+        <div className="study-entry archive-entry" key={workspace.id}>
+          <div
+            className="study-row"
+            onClick={() =>
+              setExpandedArchivedWorkspaces(previous => {
+                const next = new Set(previous);
+
+                if (next.has(workspace.id)) {
+                  next.delete(workspace.id);
+                } else {
+                  next.add(workspace.id);
+                }
+
+                return next;
+              })
+            }
+          >
+            <div className="study-row__left">
+              <span className="material-symbols-outlined study-folder">
+                inventory_2
+              </span>
+              <span className="study-row__name">{workspace.name}</span>
+              <span className="study-row__count">Archived</span>
+            </div>
+
+            <div className="study-row__meta">
+              <button
+                className="archive-restore-btn"
+                type="button"
+                onClick={event => {
+                  event.stopPropagation();
+                  restoreWorkspace(workspace.id);
+                }}
+              >
+                Restore
+              </button>
+
+              <span
+                className="study-row__chevron"
+                style={{
+                  transform: isExpanded
+                    ? 'rotate(90deg)'
+                    : 'rotate(0deg)'
+                }}
+              >
+                <span className="material-symbols-outlined study-chevron"></span>
+              </span>
+            </div>
+          </div>
+
+          {isExpanded && (
+            <div className="study-children archive-children">
+              {archivedStudies.length ? (
+                archivedStudies.map(study => (
+                  <div key={study.id}>
+                    <div className="file-row archive-readonly">
+                      <div className="file-row__left">
+                        <span className="material-symbols-outlined">
+                          folder
+                        </span>
+                        <span>{study.name}</span>
+                        <span className="file-badge file-badge--default">
+                          Study
+                        </span>
+                      </div>
+
+                      <div className="file-row__meta">
+                        <span className="file-row__time">
+                          {study.lastModified}
+                        </span>
+                      </div>
+                    </div>
+
+                    {datasetsByStudy[study.id] && (
+                      <div className="file-row archive-readonly archive-file">
+                        <div className="file-row__left">
+                          <span className="material-symbols-outlined">
+                            dataset
+                          </span>
+                          <span>
+                            {datasetsByStudy[study.id].filename}
+                          </span>
+                          <span className="file-badge file-badge--default">
+                            {datasetsByStudy[study.id].rows.length} rows
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {models
+                      .filter(model => model.studyId === study.id)
+                      .map(model => (
+                        <div
+                          className="file-row archive-readonly archive-file"
+                          key={model.id}
+                        >
+                          <div className="file-row__left">
+                            <span className="material-symbols-outlined">
+                              account_tree
+                            </span>
+                            <span>{model.name}</span>
+                            <span className="file-badge file-badge--default">
+                              {model.type}
+                            </span>
+                          </div>
+
+                          <div className="file-row__meta">
+                            <span className="file-row__time">
+                              {model.lastModified}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                ))
+              ) : (
+                <div className="archive-empty">
+                  No studies in this workspace.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    }) : (
+      <div
+        className="empty-state"
+        style={{padding: '32px 16px', textAlign: 'center'}}
+      >
+        No archived workspaces.
+      </div>
+    )}
+  </div>
+) : (
+  <div style={{flex: '1', display: 'flex', flexDirection: 'column'}}>
               <div className="studies-header">
                 <div className="studies-header__left" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                   {isStudySearchOpen ? <div className="inline-search-wrap"><input autoFocus className="studies-inline-search" value={studyQuery} onChange={event => setStudyQuery(event.target.value)} onBlur={() => { if (!studyQuery) setIsStudySearchOpen(false); }} placeholder="Filter studies…" />{studyQuery && <button className="inline-search-clear" type="button" aria-label="Clear study search" onMouseDown={event => event.preventDefault()} onClick={() => setStudyQuery('')}>×</button>}</div> : <span style={{ color: 'var(--color-text-secondary)' }}>Studies</span>}
@@ -331,7 +541,7 @@ const Dashboard = () => {
                         <div className="study-row__meta">
                           <span className="study-row__time">{study.lastModified}</span>
                           <span className="study-row__chevron">
-                            <span className="material-symbols-outlined study-chevron" style={{transform: isExpanded || isEmpty ? 'rotate(0deg)' : 'rotate(-90deg)'}}>
+                            <span className="material-symbols-outlined study-chevron" style={{transform: isExpanded || isEmpty ? 'rotate(90deg)' : 'rotate(90deg)'}}>
                               {isExpanded && !isEmpty ? 'expand_more' : 'chevron_right'}
                             </span>
                           </span>
@@ -346,7 +556,76 @@ const Dashboard = () => {
                         ) : (
                           <>
                             {studyDataset && (
-                              <div className="file-row file-row--muted" onClick={() => { setImportingStudyId(study.id); setDatasetToImport(studyDataset); }} onContextMenu={e => { e.preventDefault(); e.stopPropagation(); useStore.getState().openContextMenu(e.clientX, e.clientY, [{ id: 'rename', label: 'Rename Dataset', icon: 'edit', action: () => rename('Rename Dataset', studyDataset.filename, name => { setStudyDataset(study.id, { ...studyDataset, filename: name }); touchStudy(study.id); }) }, { id: 'delete', label: 'Delete Dataset', icon: 'delete', danger: true, action: () => { requestDelete({ title: 'Delete Dataset', itemName: studyDataset.filename, message: 'Are you sure? This dataset will be permanently deleted and cannot be recovered.', onConfirm: () => { deleteDataset(study.id); touchStudy(study.id); } }); } }]); }}>
+<div
+  className="file-row file-row--muted"
+  onClick={() => {
+    setImportingStudyId(study.id);
+    setDatasetToImport(studyDataset);
+  }}
+  onContextMenu={e => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    useStore.getState().openContextMenu(
+      e.clientX,
+      e.clientY,
+      [
+        {
+          id: 'rename',
+          label: 'Rename Dataset',
+          icon: 'edit',
+          action: () =>
+            rename(
+              'Rename Dataset',
+              studyDataset.filename,
+              name => {
+                const updated = {
+                  ...studyDataset,
+                  filename: name
+                };
+
+                setStudyDataset(study.id, updated);
+                touchStudy(study.id);
+
+                if (study.path) {
+                  const headers = updated.variables.map(v => v.name);
+
+                  api.saveProjectDataJson(
+                    study.path,
+                    name,
+                    headers,
+                    updated.rows
+                  ).catch(console.warn);
+                }
+              }
+            )
+        },
+        {
+          id: 'delete',
+          label: 'Delete Dataset',
+          icon: 'delete',
+          danger: true,
+          action: () => {
+            requestDelete({
+              title: 'Delete Dataset',
+              itemName: studyDataset.filename,
+              message:
+                'Are you sure? This dataset will be permanently deleted and cannot be recovered.',
+              onConfirm: () => {
+                trashDataset(study.id);
+                touchStudy(study.id);
+
+                if (study.path) {
+                  api.deleteProjectData(study.path).catch(console.warn);
+                }
+              }
+            });
+          }
+        }
+      ]
+    );
+  }}
+>
                                 <div className="file-row__left"><span className="material-symbols-outlined">dataset</span><span>{studyDataset.filename}</span><span className="file-badge file-badge--default">{studyDataset.rows.length} rows</span><span className="file-badge file-badge--default">Dataset</span></div>
                                 <div className="file-row__meta"><span className="file-row__time">{study.lastModified}</span><span style={{width: '16px'}}></span></div>
                               </div>

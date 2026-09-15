@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import type { ParsedDataset, ParsedVariable } from '../utils/dataset-parser';
+import { processData } from '../utils/dataset-parser';
 import { EditableCell } from './EditableCell';
 
 interface DataManagerModalProps {
@@ -9,11 +10,72 @@ interface DataManagerModalProps {
 }
 
 export const DataManagerModal: React.FC<DataManagerModalProps> = ({ dataset: initialDataset, onImport, onCancel }) => {
-  const [dataset, setDataset] = useState<ParsedDataset>(initialDataset);
+  const rawDatasetRef = useRef<ParsedDataset>(initialDataset);
+
+  // Auto-detect if -99 exists in data
+  const detectedMarker = useMemo(() => {
+    for (const row of initialDataset.rows || []) {
+      for (const val of row || []) {
+        if (val === -99 || val === '-99') return '-99';
+      }
+    }
+    return '';
+  }, [initialDataset]);
+
+  const [missingMarker, setMissingMarker] = useState(detectedMarker);
+  const [treatment, setTreatment] = useState<'none' | 'listwise' | 'mean'>('mean');
+  const [dataset, setDataset] = useState<ParsedDataset>(() => {
+    if (detectedMarker || true) {
+      const headers = initialDataset.variables.map(v => v.name);
+      return processData(initialDataset.filename, headers, initialDataset.rows, {
+        missingValueMarker: detectedMarker,
+        treatment: 'mean',
+      });
+    }
+    return initialDataset;
+  });
   const [activeTab, setActiveTab] = useState<'variables' | 'data'>('variables');
-  const [delimiter, setDelimiter] = useState('Comma (,)');
-  const [decimal, setDecimal] = useState('Period (1,000.23)');
-  const [encoding, setEncoding] = useState('UTF-8');
+  const [sortCol, setSortCol] = useState<number | null>(null);
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+
+  const applyMissingSettings = (marker: string, treat: 'none' | 'listwise' | 'mean') => {
+    const raw = rawDatasetRef.current;
+    const headers = raw.variables.map(v => v.name);
+    const reprocessed = processData(dataset.filename, headers, raw.rows, {
+      missingValueMarker: marker,
+      treatment: treat
+    });
+
+    const currentVarsMap = new Map(dataset.variables.map(v => [v.name, v]));
+    const mergedVars = reprocessed.variables.map(v => {
+      const existing = currentVarsMap.get(v.name);
+      if (existing) {
+        return {
+          ...v,
+          selected: existing.selected,
+          scaleType: v.scaleType, // Freshly re-inferred scale type (Nominal, Ordinal, Metric) from treated data
+          name: existing.name
+        };
+      }
+      return v;
+    });
+
+    setDataset({
+      ...reprocessed,
+      filename: dataset.filename,
+      variables: mergedVars
+    });
+  };
+
+  const handleMissingMarkerChange = (val: string) => {
+    setMissingMarker(val);
+    applyMissingSettings(val, treatment);
+  };
+
+  const handleTreatmentChange = (val: 'none' | 'listwise' | 'mean') => {
+    setTreatment(val);
+    applyMissingSettings(missingMarker, val);
+  };
 
   const toggleVariableSelection = (colIdx: number) => {
     const newVars = [...dataset.variables];
@@ -44,6 +106,33 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({ dataset: ini
   const updateFileName = (e: React.ChangeEvent<HTMLInputElement>) => {
     setDataset({ ...dataset, filename: e.target.value });
   };
+
+  const handleSort = (colIdx: number) => {
+    if (sortCol === colIdx) {
+      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortCol(colIdx);
+      setSortDirection('asc');
+    }
+  };
+
+  const sortedRows = useMemo(() => {
+    if (sortCol === null) return dataset.rows;
+    return [...dataset.rows].sort((a, b) => {
+      const valA = a[sortCol];
+      const valB = b[sortCol];
+      if (valA === null || valA === undefined || valA === '') return 1;
+      if (valB === null || valB === undefined || valB === '') return -1;
+      const numA = Number(valA);
+      const numB = Number(valB);
+      if (!isNaN(numA) && !isNaN(numB)) {
+        return sortDirection === 'asc' ? numA - numB : numB - numA;
+      }
+      return sortDirection === 'asc'
+        ? String(valA).localeCompare(String(valB))
+        : String(valB).localeCompare(String(valA));
+    });
+  }, [dataset.rows, sortCol, sortDirection]);
 
   const selectedVarsCount = dataset.variables.filter(v => v.selected).length;
 
@@ -77,64 +166,53 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({ dataset: ini
           </button>
         </div>
 
-        {/* 2. PARSING CONTROL STRIP */}
-        <div className="dataset-import-controls flex shrink-0 flex-wrap items-center gap-2.5 border-b border-slate-200 bg-slate-50/90 px-5 py-2.5 text-xs">
-          <label className="inline-flex items-center rounded-md border border-slate-200 bg-white py-1 pl-2.5 pr-2 shadow-sm transition-colors hover:border-slate-300 focus-within:border-indigo-600 focus-within:ring-1 focus-within:ring-indigo-600">
-            <span className="mr-1.5 text-[11px] font-medium text-slate-400">Delimiter</span>
-            <select value={delimiter} onChange={e => setDelimiter(e.target.value)} className="cursor-pointer appearance-none border-0 bg-transparent p-0 pr-4 font-mono text-xs font-medium text-slate-800 outline-none focus:ring-0">
-              <option>Comma (,)</option>
-              <option>Semicolon (;)</option>
-              <option>Tab (\t)</option>
-              <option>Pipe (|)</option>
-            </select>
-          </label>
-          
-          <label className="inline-flex items-center rounded-md border border-slate-200 bg-white py-1 pl-2.5 pr-2 shadow-sm transition-colors hover:border-slate-300 focus-within:border-indigo-600 focus-within:ring-1 focus-within:ring-indigo-600">
-            <span className="mr-1.5 text-[11px] font-medium text-slate-400">Decimal</span>
-            <select value={decimal} onChange={e => setDecimal(e.target.value)} className="cursor-pointer appearance-none border-0 bg-transparent p-0 pr-4 text-xs font-medium text-slate-800 outline-none focus:ring-0">
-              <option>Period (1,000.23)</option>
-              <option>Comma (1.000,23)</option>
-            </select>
-          </label>
-          
-          <label className="inline-flex items-center rounded-md border border-slate-200 bg-white py-1 pl-2.5 pr-2 shadow-sm transition-colors hover:border-slate-300 focus-within:border-indigo-600 focus-within:ring-1 focus-within:ring-indigo-600">
-            <span className="mr-1.5 text-[11px] font-medium text-slate-400">Encoding</span>
-            <select value={encoding} onChange={e => setEncoding(e.target.value)} className="cursor-pointer appearance-none border-0 bg-transparent p-0 pr-4 font-mono text-xs font-medium text-slate-800 outline-none focus:ring-0">
-              <option>UTF-8</option>
-              <option>UTF-16</option>
-              <option>ISO-8859-1</option>
-            </select>
-          </label>
-          
-          <div className="inline-flex items-center rounded-md border border-slate-200 bg-white px-2.5 py-1 shadow-sm">
-            <span className="mr-1.5 text-[11px] font-medium text-slate-400">Missing</span>
-            <div className="flex items-center gap-1.5">
-              <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[11px] font-mono border border-slate-200">-99</span>
-              <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[11px] font-mono border border-slate-200">NA</span>
-            </div>
-          </div>
-        </div>
-
-        {/* 3. MAIN WORKBENCH BODY */}
+        {/* 2. MAIN WORKBENCH BODY */}
         <div className="dataset-import-workbench flex-1 flex flex-col min-h-0 bg-white">
-          <div className="dataset-import-tabs flex shrink-0 items-center border-b border-slate-200 px-5 pb-2 pt-3">
+          <div className="dataset-import-tabs flex shrink-0 items-center justify-between border-b border-slate-200 px-5 py-2.5">
             <div className="flex items-center space-x-1 rounded-lg border border-slate-200/80 bg-slate-100/90 p-0.5 text-xs">
-            <button 
-              className={`flex items-center space-x-1.5 rounded-md px-3 py-1.5 font-medium transition-colors ${activeTab === 'variables' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
-              onClick={() => setActiveTab('variables')}
-            >
-              <svg className={`w-4 h-4 ${activeTab === 'variables' ? 'text-indigo-500' : 'text-slate-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
-              <span>Variable Definitions</span>
-              <span className={`px-1.5 py-0.5 rounded-full text-[11px] font-semibold ${activeTab === 'variables' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-500'}`}>{dataset.variables.length}</span>
-            </button>
-            <button 
-              className={`flex items-center space-x-1.5 rounded-md px-3 py-1.5 font-medium transition-colors ${activeTab === 'data' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
-              onClick={() => setActiveTab('data')}
-            >
-              <svg className={`w-4 h-4 ${activeTab === 'data' ? 'text-indigo-500' : 'text-slate-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 10h18M3 14h18M9 4v16M15 4v16"></path></svg>
-              <span>Data Preview</span>
-              <span className={`px-1.5 py-0.5 rounded-full text-[11px] font-semibold ${activeTab === 'data' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-500'}`}>{dataset.rows.length}&times;{dataset.variables.length}</span>
-            </button>
+              <button 
+                className={`flex items-center space-x-1.5 rounded-md px-3 py-1.5 font-medium transition-colors ${activeTab === 'variables' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                onClick={() => setActiveTab('variables')}
+              >
+                <svg className={`w-4 h-4 ${activeTab === 'variables' ? 'text-indigo-500' : 'text-slate-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                <span>Variable Definitions</span>
+                <span className={`px-1.5 py-0.5 rounded-full text-[11px] font-semibold ${activeTab === 'variables' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-500'}`}>{dataset.variables.length}</span>
+              </button>
+              <button 
+                className={`flex items-center space-x-1.5 rounded-md px-3 py-1.5 font-medium transition-colors ${activeTab === 'data' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                onClick={() => setActiveTab('data')}
+              >
+                <svg className={`w-4 h-4 ${activeTab === 'data' ? 'text-indigo-500' : 'text-slate-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 10h18M3 14h18M9 4v16M15 4v16"></path></svg>
+                <span>Data Preview</span>
+                <span className={`px-1.5 py-0.5 rounded-full text-[11px] font-semibold ${activeTab === 'data' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-500'}`}>{dataset.rows.length}&times;{dataset.variables.length}</span>
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2.5 text-xs">
+              <div className="inline-flex items-center rounded-md border border-slate-200 bg-white px-2.5 py-1 shadow-sm">
+                <span className="mr-1.5 text-[11px] font-medium text-slate-400">Missing Denoted As</span>
+                <input
+                  type="text"
+                  placeholder="e.g. -99, empty by default"
+                  value={missingMarker}
+                  onChange={e => handleMissingMarkerChange(e.target.value)}
+                  className="w-36 h-6 px-1.5 text-xs font-mono border border-slate-200 rounded bg-slate-50 focus:bg-white focus:border-indigo-600 focus:outline-none"
+                  title="Values matching this marker will be converted to normal blank / NA"
+                />
+              </div>
+
+              <label className="inline-flex items-center rounded-md border border-slate-200 bg-white py-1 pl-2.5 pr-2 shadow-sm transition-colors hover:border-slate-300 focus-within:border-indigo-600 focus-within:ring-1 focus-within:ring-indigo-600">
+                <span className="mr-1.5 text-[11px] font-medium text-slate-400">Treatment</span>
+                <select
+                  value={treatment}
+                  onChange={e => handleTreatmentChange(e.target.value as 'none' | 'listwise' | 'mean')}
+                  className="cursor-pointer appearance-none border-0 bg-transparent p-0 pr-4 text-xs font-medium text-slate-800 outline-none focus:ring-0"
+                >
+                  <option value="none">None (Keep as blank/NA)</option>
+                  <option value="listwise">Listwise Deletion</option>
+                  <option value="mean">Mean Imputation</option>
+                </select>
+              </label>
             </div>
           </div>
 
@@ -223,17 +301,29 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({ dataset: ini
                   <tr>
                     <th className="w-16 px-4 py-2.5 text-center bg-slate-100/80 border-r border-slate-200 font-sans text-slate-400">Row #</th>
                     {dataset.variables.map((v, i) => v.selected && (
-                      <th key={i} className="px-4 py-2.5 border-r border-slate-100">{v.name}</th>
+                      <th 
+                        key={i} 
+                        onClick={() => handleSort(i)}
+                        className="px-4 py-2.5 border-r border-slate-100 cursor-pointer select-none hover:bg-slate-100/80 transition-colors"
+                        title="Click to sort by this column"
+                      >
+                        <div className="flex items-center justify-between gap-1">
+                          <span>{v.name}</span>
+                          <span className="text-[10px] text-slate-400">
+                            {sortCol === i ? (sortDirection === 'asc' ? '▲' : '▼') : '↕'}
+                          </span>
+                        </div>
+                      </th>
                     ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-slate-700 bg-white">
-                  {dataset.rows.slice(0, 100).map((row, rIdx) => (
+                  {sortedRows.slice(0, 100).map((row, rIdx) => (
                     <tr key={rIdx} className={`hover:bg-slate-50 transition-colors ${rIdx % 2 !== 0 ? 'bg-slate-50/40' : ''}`}>
                       <td className="px-4 py-2 text-center bg-slate-50/50 border-r border-slate-100 font-sans text-slate-400 text-xs">{rIdx + 1}</td>
                       {dataset.variables.map((v, cIdx) => v.selected && (
                         <td key={cIdx} className={`px-4 py-2 border-r border-slate-100 ${row[cIdx] == null || row[cIdx] === '' ? 'text-amber-600 bg-amber-50/50 font-semibold' : ''}`}>
-                          {row[cIdx] == null || row[cIdx] === '' ? 'NaN' : String(row[cIdx])}
+                          {row[cIdx] == null || row[cIdx] === '' ? 'NA' : String(row[cIdx])}
                         </td>
                       ))}
                     </tr>
@@ -241,7 +331,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({ dataset: ini
                 </tbody>
               </table>
               <div className="p-4 bg-white text-center text-xs text-slate-400 font-sans sticky bottom-0 border-t border-slate-100">
-                Showing first {Math.min(100, dataset.rows.length)} of {dataset.rows.length} observations
+                Showing first {Math.min(100, sortedRows.length)} of {sortedRows.length} observations {sortCol !== null ? `(Sorted by ${dataset.variables[sortCol]?.name || ''} ${sortDirection.toUpperCase()})` : ''}
               </div>
             </div>
           )}
