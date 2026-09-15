@@ -359,8 +359,13 @@ const Dashboard = () => {
 <div
   className="file-row file-row--muted"
   onClick={() => {
-    setImportingStudyId(study.id);
-    setDatasetToImport(studyDataset);
+    setActiveStudy(study.id);
+    openTab({
+      type: 'dataset',
+      title: studyDataset.filename,
+      studyId: study.id,
+      workspaceId: activeWorkspaceId,
+    });
   }}
   onContextMenu={e => {
     e.preventDefault();
@@ -370,6 +375,29 @@ const Dashboard = () => {
       e.clientX,
       e.clientY,
       [
+        {
+          id: 'open-tab',
+          label: 'Open in Tab',
+          icon: 'tab',
+          action: () => {
+            setActiveStudy(study.id);
+            openTab({
+              type: 'dataset',
+              title: studyDataset.filename,
+              studyId: study.id,
+              workspaceId: activeWorkspaceId,
+            });
+          }
+        },
+        {
+          id: 'quick-edit',
+          label: 'Edit Settings...',
+          icon: 'tune',
+          action: () => {
+            setImportingStudyId(study.id);
+            setDatasetToImport(studyDataset);
+          }
+        },
         {
           id: 'rename',
           label: 'Rename Dataset',

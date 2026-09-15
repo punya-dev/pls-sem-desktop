@@ -68,6 +68,45 @@ export const TabBar: React.FC = () => {
     ws.name.toLowerCase().includes(searchQuery.toLowerCase().trim())
   );
 
+  // Track collapsed state per workspace group
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const [groupContextMenu, setGroupContextMenu] = useState<{
+    wsId: string;
+    wsName: string;
+    tabIds: string[];
+    x: number;
+    y: number;
+  } | null>(null);
+
+  // Close group context menu on click outside
+  useEffect(() => {
+    if (!groupContextMenu) return;
+    const handleClose = () => setGroupContextMenu(null);
+    window.addEventListener('mousedown', handleClose);
+    return () => window.removeEventListener('mousedown', handleClose);
+  }, [groupContextMenu]);
+
+  // Auto-expand group if active tab belongs to it
+  useEffect(() => {
+    if (!activeTabId) return;
+    const activeTab = tabs.find((t) => t.id === activeTabId);
+    if (activeTab?.workspaceId && collapsedGroups[activeTab.workspaceId]) {
+      setCollapsedGroups((prev) => ({ ...prev, [activeTab.workspaceId!]: false }));
+    }
+  }, [activeTabId, tabs, collapsedGroups]);
+
+  const toggleGroupCollapse = (wsId: string) => {
+    setCollapsedGroups((prev) => ({
+      ...prev,
+      [wsId]: !prev[wsId],
+    }));
+  };
+
+  const closeGroup = (tabIds: string[]) => {
+    tabIds.forEach((id) => closeTab(id));
+    setGroupContextMenu(null);
+  };
+
   const getTabIcon = (tab: AppTab) => {
     switch (tab.type) {
       case 'get-started':
@@ -78,45 +117,183 @@ export const TabBar: React.FC = () => {
         return 'polyline';
       case 'archive':
         return 'inventory_2';
+      case 'dataset':
+        return 'dataset';
       default:
         return null;
     }
+  };
+
+  // Color palette for workspace tab groups
+  const GROUP_PALETTE = [
+    { color: '#6B4EE6', bg: 'rgba(107, 78, 230, 0.08)', border: 'rgba(107, 78, 230, 0.28)', text: '#5936d9' },
+    { color: '#0284C7', bg: 'rgba(2, 132, 199, 0.08)', border: 'rgba(2, 132, 199, 0.28)', text: '#0369a1' },
+    { color: '#059669', bg: 'rgba(5, 150, 105, 0.08)', border: 'rgba(5, 150, 105, 0.28)', text: '#047857' },
+    { color: '#D97706', bg: 'rgba(217, 119, 6, 0.08)', border: 'rgba(217, 119, 6, 0.28)', text: '#b45309' },
+    { color: '#E11D48', bg: 'rgba(225, 29, 72, 0.08)', border: 'rgba(225, 29, 72, 0.28)', text: '#be123c' },
+    { color: '#4F46E5', bg: 'rgba(79, 70, 229, 0.08)', border: 'rgba(79, 70, 229, 0.28)', text: '#4338ca' },
+    { color: '#0D9488', bg: 'rgba(13, 148, 136, 0.08)', border: 'rgba(13, 148, 136, 0.28)', text: '#0f766e' },
+  ];
+
+  const getWorkspaceColor = (workspaceId: string) => {
+    let hash = 0;
+    for (let i = 0; i < workspaceId.length; i++) {
+      hash = (hash << 5) - hash + workspaceId.charCodeAt(i);
+      hash |= 0;
+    }
+    const index = Math.abs(hash) % GROUP_PALETTE.length;
+    return GROUP_PALETTE[index];
+  };
+
+  // Partition tabs into standalone tabs and workspace groups
+  type TabStripItem =
+    | { kind: 'standalone'; tab: AppTab }
+    | {
+        kind: 'group';
+        workspaceId: string;
+        workspaceName: string;
+        color: (typeof GROUP_PALETTE)[0];
+        tabs: AppTab[];
+      };
+
+  const stripItems: TabStripItem[] = [];
+  const seenWorkspaces = new Set<string>();
+
+  for (const tab of tabs) {
+    if (!tab.workspaceId) {
+      stripItems.push({ kind: 'standalone', tab });
+    } else {
+      if (seenWorkspaces.has(tab.workspaceId)) {
+        continue;
+      }
+      seenWorkspaces.add(tab.workspaceId);
+      const wsTabs = tabs.filter((t) => t.workspaceId === tab.workspaceId);
+      const ws = workspaces.find((w) => w.id === tab.workspaceId);
+      const wsName = ws?.name || tab.title || 'Workspace';
+      const color = getWorkspaceColor(tab.workspaceId);
+      stripItems.push({
+        kind: 'group',
+        workspaceId: tab.workspaceId,
+        workspaceName: wsName,
+        color,
+        tabs: wsTabs,
+      });
+    }
+  }
+
+  const renderSingleTab = (tab: AppTab, isInsideGroup = false) => {
+    const isActive = tab.id === activeTabId;
+    const iconName = getTabIcon(tab);
+    const label =
+      tab.type === 'get-started'
+        ? 'Home'
+        : tab.type === 'workspace' && isInsideGroup
+        ? 'Overview'
+        : tab.title;
+
+    return (
+      <div
+        key={tab.id}
+        className={`tab-item ${isActive ? 'tab-item--active' : ''}`}
+        onClick={() => setActiveTab(tab.id)}
+        onAuxClick={(e) => {
+          if (e.button === 1) {
+            e.preventDefault();
+            closeTab(tab.id);
+          }
+        }}
+        title={tab.type === 'get-started' ? 'Home' : tab.title}
+      >
+        {iconName && <span className="material-symbols-outlined tab-icon">{iconName}</span>}
+        <span className="tab-label">{label}</span>
+        <button
+          className="tab-close-btn"
+          type="button"
+          title="Close Tab (Cmd+W)"
+          onClick={(e) => {
+            e.stopPropagation();
+            closeTab(tab.id);
+          }}
+        >
+          <span className="material-symbols-outlined">close</span>
+        </button>
+      </div>
+    );
   };
 
   return (
     <>
       <div className="tabbar-root no-drag">
         <div className="tabstrip" ref={scrollRef}>
-          {tabs.map((tab) => {
-            const isActive = tab.id === activeTabId;
-            const iconName = getTabIcon(tab);
+          {stripItems.map((item) => {
+            if (item.kind === 'standalone') {
+              return renderSingleTab(item.tab, false);
+            }
+
+            const isCollapsed = !!collapsedGroups[item.workspaceId];
+            const hasActiveTab = item.tabs.some((t) => t.id === activeTabId);
 
             return (
               <div
-                key={tab.id}
-                className={`tab-item ${isActive ? 'tab-item--active' : ''}`}
-                onClick={() => setActiveTab(tab.id)}
-                onAuxClick={(e) => {
-                  if (e.button === 1) {
-                    e.preventDefault();
-                    closeTab(tab.id);
-                  }
-                }}
-                title={tab.type === 'get-started' ? 'Home' : tab.title}
+                key={`group-${item.workspaceId}`}
+                className={`tab-group ${isCollapsed ? 'tab-group--collapsed' : ''} ${
+                  hasActiveTab ? 'tab-group--has-active' : ''
+                }`}
+                style={
+                  {
+                    '--group-color': item.color.color,
+                    '--group-bg': item.color.bg,
+                    '--group-border': item.color.border,
+                    '--group-text': item.color.text,
+                  } as React.CSSProperties
+                }
               >
-                {iconName && <span className="material-symbols-outlined tab-icon">{iconName}</span>}
-                <span className="tab-label">{tab.type === 'get-started' ? 'Home' : tab.title}</span>
                 <button
-                  className="tab-close-btn"
                   type="button"
-                  title="Close Tab (Cmd+W)"
-                  onClick={(e) => {
+                  className="tab-group-pill"
+                  onClick={() => toggleGroupCollapse(item.workspaceId)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
                     e.stopPropagation();
-                    closeTab(tab.id);
+                    setGroupContextMenu({
+                      wsId: item.workspaceId,
+                      wsName: item.workspaceName,
+                      tabIds: item.tabs.map((t) => t.id),
+                      x: e.clientX,
+                      y: e.clientY,
+                    });
                   }}
+                  title={`${item.workspaceName} (${item.tabs.length} tabs) • Click to ${
+                    isCollapsed ? 'expand' : 'collapse'
+                  } • Right-click for options`}
                 >
-                  <span className="material-symbols-outlined">close</span>
+                  <span
+                    className="tab-group-dot"
+                    style={{ backgroundColor: item.color.color }}
+                  />
+                  <span className="tab-group-title">{item.workspaceName}</span>
+                  {isCollapsed ? (
+                    <span
+                      className="tab-group-count"
+                      style={{
+                        backgroundColor: item.color.color,
+                        color: '#ffffff',
+                      }}
+                    >
+                      {item.tabs.length}
+                    </span>
+                  ) : (
+                    <span className="material-symbols-outlined tab-group-chevron">
+                      expand_more
+                    </span>
+                  )}
                 </button>
+
+                {!isCollapsed && (
+                  <div className="tab-group-tabs">
+                    {item.tabs.map((t) => renderSingleTab(t, true))}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -245,6 +422,47 @@ export const TabBar: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Tab Group Context Menu */}
+      {groupContextMenu && (
+        <div
+          className="tab-group-menu no-drag"
+          style={{
+            position: 'fixed',
+            left: `${Math.min(groupContextMenu.x, window.innerWidth - 200)}px`,
+            top: `${groupContextMenu.y + 4}px`,
+            zIndex: 9999,
+          }}
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <div className="tab-group-menu__header">
+            <span>{groupContextMenu.wsName}</span>
+          </div>
+          <button
+            type="button"
+            className="tab-group-menu__item"
+            onClick={() => {
+              toggleGroupCollapse(groupContextMenu.wsId);
+              setGroupContextMenu(null);
+            }}
+          >
+            <span className="material-symbols-outlined">
+              {collapsedGroups[groupContextMenu.wsId] ? 'unfold_more' : 'unfold_less'}
+            </span>
+            <span>{collapsedGroups[groupContextMenu.wsId] ? 'Expand Group' : 'Collapse Group'}</span>
+          </button>
+          <div className="tab-group-menu__divider" />
+          <button
+            type="button"
+            className="tab-group-menu__item tab-group-menu__item--danger"
+            onClick={() => closeGroup(groupContextMenu.tabIds)}
+          >
+            <span className="material-symbols-outlined">close</span>
+            <span>Close Group ({groupContextMenu.tabIds.length} tabs)</span>
+          </button>
+        </div>
+      )}
 
       <WorkspaceModal
         isOpen={isWorkspaceModalOpen}
