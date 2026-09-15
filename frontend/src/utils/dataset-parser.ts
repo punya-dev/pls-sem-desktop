@@ -27,34 +27,132 @@ function guessCategory(name: string): string {
   return 'General';
 }
 
-export function processData(filename: string, headers: string[], rows: any[][]): ParsedDataset {
+export interface ProcessOptions {
+  missingValueMarker?: string; // e.g. "-99"
+  treatment?: 'none' | 'listwise' | 'mean';
+}
+
+function isMissingValue(val: any, markers: string[]): boolean {
+  if (val === null || val === undefined || val === '') return true;
+  const str = String(val).trim();
+  if (str === '' || str.toLowerCase() === 'na' || str.toLowerCase() === 'nan' || str.toLowerCase() === 'null') {
+    return true;
+  }
+  for (const m of markers) {
+    if (str === m) return true;
+    const numVal = Number(val);
+    const numM = Number(m);
+    if (!isNaN(numVal) && !isNaN(numM) && numVal === numM) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function processData(
+  filename: string,
+  headers: string[],
+  rawRows: any[][],
+  options?: ProcessOptions
+): ParsedDataset {
+  const markerList = (options?.missingValueMarker || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+
+  // Step 1: Replace all designated missing values with null
+  let processedRows: any[][] = rawRows.map(row => {
+    return headers.map((_, colIdx) => {
+      const cell = row ? row[colIdx] : null;
+      if (isMissingValue(cell, markerList)) {
+        return null;
+      }
+      return cell;
+    });
+  });
+
+  // Step 2: Apply Treatment
+  if (options?.treatment === 'listwise') {
+    processedRows = processedRows.filter(row => {
+      return !row.some(val => val === null || val === undefined);
+    });
+  } else if (options?.treatment === 'mean') {
+    // Compute mean for each numeric column
+    const colMeans: (number | null)[] = headers.map((_, colIdx) => {
+      let sum = 0;
+      let count = 0;
+      let allNumeric = true;
+
+      for (let r = 0; r < processedRows.length; r++) {
+        const val = processedRows[r][colIdx];
+        if (val === null || val === undefined) continue;
+        const num = Number(val);
+        if (isNaN(num)) {
+          allNumeric = false;
+          break;
+        }
+        sum += num;
+        count++;
+      }
+
+      if (allNumeric && count > 0) {
+        return sum / count;
+      }
+      return null;
+    });
+
+    // Impute missing values with column mean
+    processedRows = processedRows.map(row => {
+      return row.map((val, colIdx) => {
+        if ((val === null || val === undefined) && colMeans[colIdx] !== null) {
+          return Math.round(colMeans[colIdx]! * 10000) / 10000;
+        }
+        return val;
+      });
+    });
+  }
+
+  // Step 3: Compute Variable Statistics
   const variables: ParsedVariable[] = headers.map((header, colIdx) => {
     let missingCount = 0;
     let min = Infinity;
     let max = -Infinity;
     let isString = false;
-    let uniqueValues = new Set();
+    const uniqueValues = new Set<any>();
     
-    for (let r = 0; r < rows.length; r++) {
-      const val = rows[r] ? rows[r][colIdx] : null;
+    for (let r = 0; r < processedRows.length; r++) {
+      const val = processedRows[r] ? processedRows[r][colIdx] : null;
       if (val === null || val === undefined || val === '') {
         missingCount++;
         continue;
       }
-      uniqueValues.add(val);
       
       const numVal = Number(val);
-      if (isNaN(numVal)) {
+      if (isNaN(numVal) || (typeof val === 'string' && val.trim() === '')) {
         isString = true;
+        uniqueValues.add(String(val).trim());
       } else {
+        uniqueValues.add(numVal);
         if (numVal < min) min = numVal;
         if (numVal > max) max = numVal;
       }
     }
     
     let scaleType: 'Metric' | 'Ordinal' | 'Categorical' = 'Metric';
-    if (isString) scaleType = 'Categorical';
-    else if (uniqueValues.size <= 7) scaleType = 'Ordinal';
+    if (isString) {
+      scaleType = 'Categorical'; // Nominal (text / categorical)
+    } else if (uniqueValues.size === 0) {
+      scaleType = 'Metric';
+    } else if (uniqueValues.size <= 2) {
+      scaleType = 'Categorical'; // Nominal (binary, e.g. 0/1, yes/no)
+    } else {
+      const allIntegers = Array.from(uniqueValues).every(v => Number.isInteger(Number(v)));
+      if (allIntegers && uniqueValues.size <= 7) {
+        scaleType = 'Ordinal'; // Ordinal (Likert scale items, e.g. 1-5 or 1-7)
+      } else {
+        scaleType = 'Metric'; // Metric (continuous interval/ratio)
+      }
+    }
     
     return {
       name: header || `Var_${colIdx+1}`,
@@ -71,7 +169,7 @@ export function processData(filename: string, headers: string[], rows: any[][]):
   return {
     filename,
     variables,
-    rows
+    rows: processedRows
   };
 }
 

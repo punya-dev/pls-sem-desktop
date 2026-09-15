@@ -28,6 +28,52 @@ export interface ProjectResponse {
   error?: string;
 }
 
+export interface ConstructSpec {
+  id: string;
+  name: string;
+  type: 'reflective' | 'formative';
+  indicators: string[];
+}
+
+export interface IndicatorSpec {
+  id: string;
+  column: string;
+}
+
+export interface PathSpec {
+  from: string;
+  to: string;
+}
+
+export interface ModelSpec {
+  constructs: ConstructSpec[];
+  indicators: IndicatorSpec[];
+  paths: PathSpec[];
+}
+
+export interface ValidationResponse {
+  is_valid: boolean;
+  errors: string[];
+  warnings: string[];
+  exogenous_constructs: string[];
+  endogenous_constructs: string[];
+  isolated_constructs: string[];
+  error?: string;
+}
+
+export interface SaveModelResponse {
+  status?: string;
+  validation?: ValidationResponse;
+  error?: string;
+}
+
+export interface LoadModelResponse {
+  spec?: ModelSpec | null;
+  diagram_layout?: any | null;
+  updated_at?: string | null;
+  error?: string;
+}
+
 export const api = {
   async createWorkspace(folderPath: string, name: string): Promise<WorkspaceResponse> {
     try {
@@ -131,11 +177,20 @@ export const api = {
     }
   },
 
-  async saveProjectData(path: string, file: File): Promise<{ status?: string; row_count?: number; dataset_name?: string; error?: string }> {
+  async saveProjectData(
+    path: string,
+    file: File,
+    missingValue?: string,
+    treatment?: string
+  ): Promise<{ status?: string; row_count?: number; dataset_name?: string; error?: string }> {
     try {
       const formData = new FormData();
       formData.append('file', file);
-      const res = await fetch(`${API_BASE}/project/save-data?path=${encodeURIComponent(path)}`, {
+      let url = `${API_BASE}/project/save-data?path=${encodeURIComponent(path)}`;
+      if (missingValue) url += `&missing_value=${encodeURIComponent(missingValue)}`;
+      if (treatment && treatment !== 'none') url += `&treatment=${encodeURIComponent(treatment)}`;
+
+      const res = await fetch(url, {
         method: 'POST',
         body: formData,
       });
@@ -149,7 +204,9 @@ export const api = {
     path: string,
     datasetName: string,
     columns: string[],
-    rows: any[][]
+    rows: any[][],
+    missingValue?: string,
+    treatment?: string
   ): Promise<{ status?: string; row_count?: number; dataset_name?: string; error?: string }> {
     try {
       const res = await fetch(`${API_BASE}/project/save-data-json`, {
@@ -159,12 +216,29 @@ export const api = {
           path,
           dataset_name: datasetName,
           columns,
-          rows
+          rows,
+          missing_value: missingValue,
+          treatment: treatment && treatment !== 'none' ? treatment : undefined
         })
       });
       return await res.json();
     } catch (err: any) {
       return { error: err?.message || 'Failed to save project data' };
+    }
+  },
+
+  async treatMissing(
+    path: string,
+    method: 'listwise' | 'mean',
+    missingValue?: string
+  ): Promise<{ status?: string; method?: string; original_row_count?: number; cleaned_row_count?: number; rows_dropped?: number; error?: string }> {
+    try {
+      let url = `${API_BASE}/project/treat-missing?path=${encodeURIComponent(path)}&method=${method}`;
+      if (missingValue) url += `&missing_value=${encodeURIComponent(missingValue)}`;
+      const res = await fetch(url, { method: 'POST' });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to treat missing values' };
     }
   },
 
@@ -187,4 +261,66 @@ export const api = {
       return { error: err?.message || 'Failed to delete project data' };
     }
   },
+
+  async validateModel(
+    spec: ModelSpec,
+    projectPath?: string,
+    datasetColumns?: string[]
+  ): Promise<ValidationResponse> {
+    try {
+      const res = await fetch(`${API_BASE}/model/validate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          spec,
+          project_path: projectPath,
+          dataset_columns: datasetColumns,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return {
+        is_valid: false,
+        errors: [err?.message || 'Failed to connect to backend server'],
+        warnings: [],
+        exogenous_constructs: [],
+        endogenous_constructs: [],
+        isolated_constructs: [],
+        error: err?.message,
+      };
+    }
+  },
+
+  async saveProjectModel(
+    projectPath: string,
+    spec: ModelSpec,
+    diagramLayout?: any
+  ): Promise<SaveModelResponse> {
+    try {
+      const res = await fetch(`${API_BASE}/project/save-model`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_path: projectPath,
+          spec,
+          diagram_layout: diagramLayout,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to save model' };
+    }
+  },
+
+  async loadProjectModel(projectPath: string): Promise<LoadModelResponse> {
+    try {
+      const res = await fetch(
+        `${API_BASE}/project/load-model?path=${encodeURIComponent(projectPath)}`
+      );
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to load model' };
+    }
+  },
 };
+

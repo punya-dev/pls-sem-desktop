@@ -607,7 +607,7 @@ export function initModelCanvas() {
       count++;
     }
 
-    const node = { id: generateId(), label: finalLabel, x, y, isLatent: true };
+    const node = { id: generateId(), label: finalLabel, x, y, isLatent: true, type: 'reflective' };
     nodes.push(node);
     emptyHint.style.display = 'none';
     render();
@@ -971,11 +971,14 @@ export function initModelCanvas() {
         indText.setAttribute('font-family', node.fontFamily || 'var(--font-mono)');
         g.appendChild(indText);
         
-        // Path from parent latent to this indicator
+        // Path between parent latent and this indicator
         if (node.parentId) {
           const parent = nodes.find(n => n.id === node.parentId);
           if (parent) {
-            const { x1, y1, x2, y2 } = getEdgeCoordinates(parent, node, true);
+            const isFormative = parent.type === 'formative';
+            const { x1, y1, x2, y2 } = isFormative
+              ? getEdgeCoordinates(node, parent, true)
+              : getEdgeCoordinates(parent, node, true);
             const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
             path.setAttribute('d', `M ${x1} ${y1} L ${x2} ${y2}`);
             path.setAttribute('stroke', '#64748b');
@@ -1615,6 +1618,9 @@ export function initModelCanvas() {
     <div class="ctx-item" id="ctx-rename" style="padding: 6px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
       <span class="material-symbols-outlined" style="font-size: 16px;">edit</span> Rename
     </div>
+    <div class="ctx-item" id="ctx-toggle-mode" style="padding: 6px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
+      <span class="material-symbols-outlined" style="font-size: 16px;">swap_horiz</span> Switch Mode
+    </div>
     <div class="ctx-item" id="ctx-delete" style="padding: 6px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px; color: #ef4444;">
       <span class="material-symbols-outlined" style="font-size: 16px;">delete</span> Delete
     </div>
@@ -1686,6 +1692,21 @@ export function initModelCanvas() {
     hideContextMenu();
   });
 
+  const ctxToggleMode = contextMenu.querySelector('#ctx-toggle-mode');
+  if (ctxToggleMode) {
+    ctxToggleMode.addEventListener('click', () => {
+      if (ctxTargetId) {
+        const node = nodes.find(n => n.id === ctxTargetId);
+        if (node && node.isLatent !== false && !node.isText) {
+          node.type = node.type === 'formative' ? 'reflective' : 'formative';
+          render();
+          pushHistory();
+        }
+      }
+      hideContextMenu();
+    });
+  }
+
   window.addEventListener('click', hideContextMenu);
 
   function showContextMenu(e, id) {
@@ -1702,8 +1723,22 @@ export function initModelCanvas() {
     
     // Check if it's an edge (no duplicate or rename)
     const isEdge = edges.some(edge => edge.id === id);
+    const targetNode = nodes.find(n => n.id === id);
+    const isLatent = !isEdge && targetNode && targetNode.isLatent !== false && !targetNode.isText;
+
     contextMenu.querySelector('#ctx-duplicate').style.display = isEdge ? 'none' : 'flex';
     contextMenu.querySelector('#ctx-rename').style.display = isEdge ? 'none' : 'flex';
+
+    if (ctxToggleMode) {
+      if (isLatent) {
+        ctxToggleMode.style.display = 'flex';
+        const currentMode = targetNode.type === 'formative' ? 'Formative' : 'Reflective';
+        const nextMode = targetNode.type === 'formative' ? 'Reflective' : 'Formative';
+        ctxToggleMode.innerHTML = `<span class="material-symbols-outlined" style="font-size: 16px;">swap_horiz</span> Make ${nextMode} <span style="font-size:10px; opacity:0.6; margin-left:auto;">(${currentMode})</span>`;
+      } else {
+        ctxToggleMode.style.display = 'none';
+      }
+    }
     
     // Position menu
     let x = e.clientX;
@@ -1780,4 +1815,110 @@ export function initModelCanvas() {
     }
   });
 
+  function exportModelSpec() {
+    const latentNodes = nodes.filter(n => n.isLatent !== false && !n.isText);
+    const indicatorNodes = nodes.filter(n => n.isLatent === false && !n.isText);
+
+    const constructs = latentNodes.map(ln => {
+      const indicators = indicatorNodes
+        .filter(ind => ind.parentId === ln.id)
+        .map(ind => ind.id);
+      return {
+        id: ln.id,
+        name: ln.label,
+        type: ln.type === 'formative' ? 'formative' : 'reflective',
+        indicators
+      };
+    });
+
+    const indicators = indicatorNodes.map(ind => ({
+      id: ind.id,
+      column: ind.label
+    }));
+
+    const latentIds = new Set(latentNodes.map(ln => ln.id));
+    const paths = edges
+      .filter(e => latentIds.has(e.sourceId) && latentIds.has(e.targetId))
+      .map(e => ({
+        from: e.sourceId,
+        to: e.targetId
+      }));
+
+    return {
+      constructs,
+      indicators,
+      paths
+    };
+  }
+
+  function getModelCanvasState() {
+    return {
+      nodes: JSON.parse(JSON.stringify(nodes)),
+      edges: JSON.parse(JSON.stringify(edges)),
+      transform: { ...transform }
+    };
+  }
+
+  function loadModelCanvasState(state) {
+    if (!state) return;
+    if (state.nodes && Array.isArray(state.nodes)) {
+      nodes = JSON.parse(JSON.stringify(state.nodes));
+    }
+    if (state.edges && Array.isArray(state.edges)) {
+      edges = JSON.parse(JSON.stringify(state.edges));
+    }
+    if (state.transform) {
+      transform = { ...state.transform };
+      applyTransform();
+    }
+    selectedIds.clear();
+    if (emptyHint) {
+      emptyHint.style.display = nodes.length === 0 ? 'block' : 'none';
+    }
+    render();
+    pushHistory();
+  }
+
+  function toggleMeasurementMode(nodeId) {
+    const id = nodeId || Array.from(selectedIds)[0];
+    if (!id) return;
+    const node = nodes.find(n => n.id === id);
+    if (node && node.isLatent !== false && !node.isText) {
+      node.type = node.type === 'formative' ? 'reflective' : 'formative';
+      render();
+      pushHistory();
+    }
+  }
+
+  window.exportModelSpec = exportModelSpec;
+  window.getModelCanvasState = getModelCanvasState;
+  window.loadModelCanvasState = loadModelCanvasState;
+  window.toggleMeasurementMode = toggleMeasurementMode;
 }
+
+export function exportModelSpec() {
+  if (typeof window !== 'undefined' && window.exportModelSpec) {
+    return window.exportModelSpec();
+  }
+  return { constructs: [], indicators: [], paths: [] };
+}
+
+export function getModelCanvasState() {
+  if (typeof window !== 'undefined' && window.getModelCanvasState) {
+    return window.getModelCanvasState();
+  }
+  return null;
+}
+
+export function loadModelCanvasState(state) {
+  if (typeof window !== 'undefined' && window.loadModelCanvasState) {
+    window.loadModelCanvasState(state);
+  }
+}
+
+export function toggleMeasurementMode(nodeId) {
+  if (typeof window !== 'undefined' && window.toggleMeasurementMode) {
+    window.toggleMeasurementMode(nodeId);
+  }
+}
+

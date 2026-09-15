@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { open } from '@tauri-apps/plugin-dialog'
 import { readFile } from '@tauri-apps/plugin-fs'
@@ -40,6 +40,42 @@ function ProjectWorkspace() {
   const [error, setError] = useState<string | null>(null)
   const [treating, setTreating] = useState(false)
 
+  // Missing values & Treatment options
+  const [missingMarker, setMissingMarker] = useState<string>('')
+  const [treatment, setTreatment] = useState<'none' | 'listwise' | 'mean'>('none')
+
+  // Sorting state for data table
+  const [sortCol, setSortCol] = useState<number | null>(null)
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
+
+  const sortedRows = useMemo(() => {
+    if (!data) return []
+    if (sortCol === null) return data.rows
+    return [...data.rows].sort((a, b) => {
+      const valA = a[sortCol]
+      const valB = b[sortCol]
+      if (valA === null || valA === undefined || valA === '') return 1
+      if (valB === null || valB === undefined || valB === '') return -1
+      const numA = Number(valA)
+      const numB = Number(valB)
+      if (!isNaN(numA) && !isNaN(numB)) {
+        return sortDirection === 'asc' ? numA - numB : numB - numA
+      }
+      return sortDirection === 'asc'
+        ? String(valA).localeCompare(String(valB))
+        : String(valB).localeCompare(String(valA))
+    })
+  }, [data, sortCol, sortDirection])
+
+  function handleSort(colIdx: number) {
+    if (sortCol === colIdx) {
+      setSortDirection(prev => (prev === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortCol(colIdx)
+      setSortDirection('asc')
+    }
+  }
+
   if (!projectPath) {
     return <p>No project loaded.</p>
   }
@@ -60,10 +96,15 @@ function ProjectWorkspace() {
       const formData = new FormData()
       formData.append('file', blob, fileName)
 
-      const saveRes = await fetch(
-        `http://127.0.0.1:8721/project/save-data?path=${encodeURIComponent(projectPath!)}`,
-        { method: 'POST', body: formData }
-      )
+      let url = `http://127.0.0.1:8721/project/save-data?path=${encodeURIComponent(projectPath!)}`
+      if (missingMarker.trim()) {
+        url += `&missing_value=${encodeURIComponent(missingMarker.trim())}`
+      }
+      if (treatment !== 'none') {
+        url += `&treatment=${encodeURIComponent(treatment)}`
+      }
+
+      const saveRes = await fetch(url, { method: 'POST', body: formData })
       const saveData = await saveRes.json()
       if (saveData.error) {
         setError(saveData.error)
@@ -107,74 +148,173 @@ function ProjectWorkspace() {
   }
 
   async function handleTreatMissing(method: 'listwise' | 'mean') {
-  setError(null)
-  setTreating(true)
-  try {
-    const res = await fetch(
-      `http://127.0.0.1:8721/project/treat-missing?path=${encodeURIComponent(projectPath!)}&method=${method}`,
-      { method: 'POST' }
-    )
-    const result = await res.json()
-    if (result.error) {
-      setError(result.error)
-      return
+    setError(null)
+    setTreating(true)
+    try {
+      let url = `http://127.0.0.1:8721/project/treat-missing?path=${encodeURIComponent(projectPath!)}&method=${method}`
+      if (missingMarker.trim()) {
+        url += `&missing_value=${encodeURIComponent(missingMarker.trim())}`
+      }
+      const res = await fetch(url, { method: 'POST' })
+      const result = await res.json()
+      if (result.error) {
+        setError(result.error)
+        return
+      }
+
+      alert(
+        `${result.method} applied: ${result.original_row_count} → ${result.cleaned_row_count} rows (${result.rows_dropped} dropped)`
+      )
+
+      // refresh both data preview and diagnostics to reflect the change
+      await loadData()
+      await runDiagnostics()
+    } catch (err) {
+      setError('Failed to apply treatment')
+    } finally {
+      setTreating(false)
     }
-
-    alert(
-      `${result.method} applied: ${result.original_row_count} → ${result.cleaned_row_count} rows (${result.rows_dropped} dropped)`
-    )
-
-    // refresh both data preview and diagnostics to reflect the change
-    await loadData()
-    await runDiagnostics()
-  } catch (err) {
-    setError('Failed to apply treatment')
-  } finally {
-    setTreating(false)
   }
-}
 
   return (
     <div style={{ padding: 20 }}>
       <p>Project open: {projectPath}</p>
       <button onClick={() => navigate('/')}>← Back to Projects</button>
 
-      <div style={{ marginTop: 20 }}>
-        <button onClick={handleImport} disabled={loading}>
-          {loading ? 'Importing...' : 'Import Data File'}
-        </button>
-        <button onClick={loadData} style={{ marginLeft: 10 }}>
-          Reload Saved Data
-        </button>
-        <button onClick={runDiagnostics} style={{ marginLeft: 10 }}>
-          Run Diagnostics
-        </button>
+      {/* Missing Value & Treatment Configuration Strip */}
+      <div style={{ marginTop: 20, padding: 15, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+        <h4 style={{ margin: '0 0 10px 0', fontSize: 14 }}>Import / Missing Value Settings</h4>
+        <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 500, color: '#475569', display: 'block', marginBottom: 4 }}>
+              Missing Values Denoted As:
+            </label>
+            <input
+              type="text"
+              value={missingMarker}
+              onChange={(e) => setMissingMarker(e.target.value)}
+              placeholder="e.g. -99, 999 (blank by default)"
+              style={{
+                padding: '6px 10px',
+                border: '1px solid #cbd5e1',
+                borderRadius: 6,
+                fontSize: 13,
+                width: 220,
+              }}
+            />
+            <span style={{ fontSize: 11, color: '#94a3b8', display: 'block', marginTop: 2 }}>
+              Replaces matching values with NA / blank
+            </span>
+          </div>
+
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 500, color: '#475569', display: 'block', marginBottom: 4 }}>
+              Missing Value Treatment:
+            </label>
+            <select
+              value={treatment}
+              onChange={(e) => setTreatment(e.target.value as 'none' | 'listwise' | 'mean')}
+              style={{
+                padding: '6px 10px',
+                border: '1px solid #cbd5e1',
+                borderRadius: 6,
+                fontSize: 13,
+                background: 'white',
+              }}
+            >
+              <option value="none">None (Keep as blank/NA)</option>
+              <option value="listwise">Listwise Deletion (Drop rows with missing)</option>
+              <option value="mean">Mean Imputation (Replace with column average)</option>
+            </select>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 15, display: 'flex', gap: 10 }}>
+          <button onClick={handleImport} disabled={loading} style={{ fontWeight: 600, padding: '6px 14px' }}>
+            {loading ? 'Importing...' : 'Import Data File'}
+          </button>
+          <button onClick={loadData}>Reload Saved Data</button>
+          <button onClick={runDiagnostics}>Run Diagnostics</button>
+        </div>
       </div>
 
-      {error && <p style={{ color: 'red' }}>{error}</p>}
+      {error && <p style={{ color: 'red', marginTop: 10 }}>{error}</p>}
 
       {data && (
         <div style={{ marginTop: 20, overflowX: 'auto' }}>
-          <p>{data.rows.length} rows loaded</p>
-          <table border={1} cellPadding={4}>
-            <thead>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <p style={{ margin: 0, fontWeight: 600 }}>
+              {data.rows.length} rows &times; {data.columns.length} columns loaded
+              {sortCol !== null && (
+                <span style={{ marginLeft: 8, fontSize: 12, color: '#6366f1', fontWeight: 500 }}>
+                  (Sorted by {data.columns[sortCol]} {sortDirection.toUpperCase()})
+                </span>
+              )}
+            </p>
+            {sortCol !== null && (
+              <button
+                onClick={() => setSortCol(null)}
+                style={{ fontSize: 11, padding: '2px 8px', color: '#64748b' }}
+              >
+                Clear Sort
+              </button>
+            )}
+          </div>
+          <table border={1} cellPadding={6} style={{ borderCollapse: 'collapse', width: '100%', borderColor: '#cbd5e1' }}>
+            <thead style={{ background: '#f1f5f9' }}>
               <tr>
-                {data.columns.map((col) => (
-                  <th key={col}>{col}</th>
+                <th style={{ width: 50, textAlign: 'center', fontSize: 12 }}>#</th>
+                {data.columns.map((col, idx) => (
+                  <th
+                    key={col}
+                    onClick={() => handleSort(idx)}
+                    style={{
+                      cursor: 'pointer',
+                      userSelect: 'none',
+                      padding: '8px 12px',
+                      background: sortCol === idx ? '#e2e8f0' : undefined,
+                      textAlign: 'left',
+                      fontSize: 12,
+                    }}
+                    title="Click to sort by this column"
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
+                      <span>{col}</span>
+                      <span style={{ fontSize: 10, color: '#64748b' }}>
+                        {sortCol === idx ? (sortDirection === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </div>
+                  </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {data.rows.slice(0, 20).map((row, i) => (
-                <tr key={i}>
-                  {row.map((val, j) => (
-                    <td key={j}>{val === null ? '—' : String(val)}</td>
-                  ))}
+              {sortedRows.slice(0, 50).map((row, i) => (
+                <tr key={i} style={{ background: i % 2 === 1 ? '#f8fafc' : 'white' }}>
+                  <td style={{ textAlign: 'center', fontSize: 11, color: '#94a3b8' }}>{i + 1}</td>
+                  {row.map((val, j) => {
+                    const isMissing = val === null || val === undefined || val === ''
+                    return (
+                      <td
+                        key={j}
+                        style={{
+                          fontSize: 12,
+                          color: isMissing ? '#d97706' : '#1e293b',
+                          background: isMissing ? '#fef3c7' : undefined,
+                          fontWeight: isMissing ? 600 : 400,
+                        }}
+                      >
+                        {isMissing ? 'NA' : String(val)}
+                      </td>
+                    )
+                  })}
                 </tr>
               ))}
             </tbody>
           </table>
-          {data.rows.length > 20 && <p>Showing first 20 of {data.rows.length} rows</p>}
+          <p style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>
+            Showing first {Math.min(50, sortedRows.length)} of {sortedRows.length} rows. Click any column header to sort.
+          </p>
         </div>
       )}
 

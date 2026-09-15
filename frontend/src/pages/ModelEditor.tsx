@@ -1,11 +1,12 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
-import { initModelCanvas } from '../utils/model-canvas';
+import { initModelCanvas, exportModelSpec, getModelCanvasState, loadModelCanvasState } from '../utils/model-canvas';
 import { DataManagerModal } from '../components/DataManagerModal';
 import type { ParsedDataset } from '../utils/dataset-parser';
 import { parseDatasetFile, processData } from '../utils/dataset-parser';
-import { api } from '../utils/api';
+import { api, type ValidationResponse } from '../utils/api';
+
 import { Upload } from 'lucide-react';
 import '../model-canvas.css';
 import '../results.css';
@@ -37,6 +38,13 @@ const ModelEditor = () => {
   const [activeFill, setActiveFill] = useState<string>('#ffffff');
   const [activeBorder, setActiveBorder] = useState<string>('#cbd5e1');
   const [activeText, setActiveText] = useState<string>('#1e293b');
+
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveToast, setSaveToast] = useState<string | null>(null);
+  const [isValidating, setIsValidating] = useState(false);
+  const [validationModal, setValidationModal] = useState<ValidationResponse | null>(null);
+  const [validationSuccessToast, setValidationSuccessToast] = useState<string | null>(null);
+
 
   useEffect(() => {
     if (activeStudyId && datasetsByStudy[activeStudyId]) {
@@ -107,15 +115,138 @@ const ModelEditor = () => {
   };
 
   const handleVariableDragStart = (event: React.DragEvent<HTMLDivElement>, variableName: string) => {
-    event.dataTransfer.setData('text/plain', variableName);
-    event.dataTransfer.effectAllowed = 'copy';
+    try {
+      event.dataTransfer.setData('text/plain', variableName);
+      event.dataTransfer.setData('text', variableName);
+      event.dataTransfer.effectAllowed = 'copy';
+    } catch (e) {}
+    (window as any).__draggedVariable = variableName;
   };
 
-  const handleCanvasDrop = (event: React.DragEvent<SVGSVGElement>) => {
+  const handleCanvasDrop = (event: React.DragEvent<any>) => {
     event.preventDefault();
-    const variableName = event.dataTransfer.getData('text/plain');
-    (window as any).dropModelVariable?.(variableName, event.clientX, event.clientY);
+    event.stopPropagation();
+    let variableName = '';
+    try {
+      variableName = event.dataTransfer?.getData('text/plain') || event.dataTransfer?.getData('text') || '';
+    } catch (e) {}
+    if (!variableName) {
+      variableName = (window as any).__draggedVariable || '';
+    }
+    (window as any).__draggedVariable = null;
+    if (variableName) {
+      (window as any).dropModelVariable?.(variableName, event.clientX, event.clientY);
+    }
   };
+
+
+  const switchView = (view: 'model' | 'results') => {
+    const viewSlider = document.getElementById('main-view-slider');
+    const viewModel = document.getElementById('view-model');
+    const viewResults = document.getElementById('view-results');
+    const sliderBtns = viewSlider?.querySelectorAll('.view-slider__btn');
+    const sliderBg = viewSlider?.querySelector('.view-slider__bg');
+    if (!viewModel || !viewResults || !sliderBg || !sliderBtns) return;
+    if (view === 'model') {
+      (viewModel as HTMLElement).style.display = 'block';
+      (viewResults as HTMLElement).style.display = 'none';
+      (sliderBg as HTMLElement).style.transform = 'translateX(0)';
+      sliderBtns[0].classList.add('active');
+      sliderBtns[1].classList.remove('active');
+    } else {
+      (viewModel as HTMLElement).style.display = 'none';
+      (viewResults as HTMLElement).style.display = 'block';
+      (sliderBg as HTMLElement).style.transform = 'translateX(100%)';
+      sliderBtns[1].classList.add('active');
+      sliderBtns[0].classList.remove('active');
+    }
+  };
+
+  const handleSaveModel = async () => {
+    if (!activeStudy?.path) {
+      alert('Please open or select an active project study first.');
+      return;
+    }
+    try {
+      setIsSaving(true);
+      const spec = exportModelSpec();
+      const layout = getModelCanvasState();
+      const res = await api.saveProjectModel(activeStudy.path, spec, layout);
+      if (res.error) {
+        alert('Failed to save model: ' + res.error);
+      } else {
+        setSaveToast('Model saved successfully');
+        setTimeout(() => setSaveToast(null), 2500);
+      }
+    } catch (err: any) {
+      alert('Error saving model: ' + err?.message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleCalculate = async () => {
+    if (!activeStudy?.path) {
+      alert('Please open or select an active project study first.');
+      return;
+    }
+    try {
+      setIsValidating(true);
+      const spec = exportModelSpec();
+      const layout = getModelCanvasState();
+
+      // Validate model spec with backend
+      const valRes = await api.validateModel(spec, activeStudy.path);
+      if (!valRes.is_valid) {
+        setValidationModal(valRes);
+        return;
+      }
+
+      // Auto-save model
+      await api.saveProjectModel(activeStudy.path, spec, layout);
+
+      setValidationSuccessToast(`Model valid! Exogenous: ${valRes.exogenous_constructs.length}, Endogenous: ${valRes.endogenous_constructs.length}`);
+      setTimeout(() => setValidationSuccessToast(null), 3000);
+
+      // Show view slider and switch to results
+      const viewSlider = document.getElementById('main-view-slider');
+      if (viewSlider) {
+        (viewSlider as HTMLElement).style.display = 'flex';
+      }
+      switchView('results');
+    } catch (err: any) {
+      alert('Error validating model: ' + err?.message);
+    } finally {
+      setIsValidating(false);
+    }
+  };
+
+  const handleExportModel = () => {
+    try {
+      const spec = exportModelSpec();
+      const jsonStr = JSON.stringify(spec, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${activeStudy?.name || 'model'}_spec.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      alert('Error exporting model: ' + err?.message);
+    }
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        handleSaveModel();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeStudy?.path]);
 
   useEffect(() => {
     // Add global sync method for color pickers
@@ -126,61 +257,37 @@ const ModelEditor = () => {
     };
 
     // Add a tiny delay to ensure DOM is ready
-    const timer = setTimeout(() => {
+    const timer = setTimeout(async () => {
       initModelCanvas();
+
+      if (activeStudy?.path) {
+        try {
+          const modelRes = await api.loadProjectModel(activeStudy.path);
+          if (modelRes && modelRes.diagram_layout) {
+            loadModelCanvasState(modelRes.diagram_layout);
+          }
+        } catch (err) {
+          console.warn('Could not load saved model layout:', err);
+        }
+      }
+
       // Load results script if it exists
       import('../utils/results.js').then((m) => {
         if (m.initResults) m.initResults();
       }).catch(() => {});
 
-      // Add view toggle logic
-      const calculateBtn = document.getElementById('calculate-btn');
       const viewSlider = document.getElementById('main-view-slider');
-      const viewModel = document.getElementById('view-model');
-      const viewResults = document.getElementById('view-results');
       const sliderBtns = viewSlider?.querySelectorAll('.view-slider__btn');
-      const sliderBg = viewSlider?.querySelector('.view-slider__bg');
-
-      let currentView = 'model';
-
-      function switchView(view: string) {
-        if (!viewModel || !viewResults || !sliderBg || !sliderBtns) return;
-        if (view === 'model') {
-          (viewModel as HTMLElement).style.display = 'block';
-          (viewResults as HTMLElement).style.display = 'none';
-          (sliderBg as HTMLElement).style.transform = 'translateX(0)';
-          sliderBtns[0].classList.add('active');
-          sliderBtns[1].classList.remove('active');
-        } else {
-          (viewModel as HTMLElement).style.display = 'none';
-          (viewResults as HTMLElement).style.display = 'block';
-          (sliderBg as HTMLElement).style.transform = 'translateX(100%)';
-          sliderBtns[1].classList.add('active');
-          sliderBtns[0].classList.remove('active');
-        }
-        currentView = view;
-      }
-
-      if (calculateBtn && viewSlider) {
-        calculateBtn.addEventListener('click', () => {
-          calculateBtn.innerHTML = `
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.59-9.21l5.67-1.35"/></svg>
-            Recalculate
-          `;
-          (viewSlider as HTMLElement).style.display = 'flex';
-          switchView('results');
-        });
-      }
-
       if (sliderBtns) {
         sliderBtns.forEach(btn => {
           btn.addEventListener('click', (e) => {
             const target = e.currentTarget as HTMLElement | null;
-            switchView(target?.dataset?.view || 'model');
+            switchView(target?.dataset?.view === 'results' ? 'results' : 'model');
           });
         });
       }
-    }, 100);
+    }, 120);
+
 
     const handleColorPickerClosed = (e: any) => {
       const { id, color } = e.detail;
@@ -283,16 +390,33 @@ const ModelEditor = () => {
           Results
         </button>
       </div>
-      <button className="subheader__btn subheader__btn--primary" id="calculate-btn" type="button">
+      <button
+        className="subheader__btn subheader__btn--primary"
+        id="calculate-btn"
+        type="button"
+        onClick={handleCalculate}
+        disabled={isValidating}
+      >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><polygon points="5 3 19 12 5 21 5 3" /></svg>
-        Calculate
+        {isValidating ? 'Validating...' : 'Calculate'}
       </button>
       <div className="subheader__divider" />
-      <button className="subheader__btn subheader__btn--ghost" type="button">
+      <button
+        className="subheader__btn subheader__btn--ghost"
+        type="button"
+        onClick={handleSaveModel}
+        disabled={isSaving}
+        title="Save Path Model (Cmd+S)"
+      >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" /><polyline points="17 21 17 13 7 13 7 21" /><polyline points="7 3 7 8 15 8" /></svg>
-        Save
+        {isSaving ? 'Saving...' : 'Save'}
       </button>
-      <button className="subheader__btn subheader__btn--ghost" type="button">
+      <button
+        className="subheader__btn subheader__btn--ghost"
+        type="button"
+        onClick={handleExportModel}
+        title="Export Model Spec JSON"
+      >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1={12} y1={15} x2={12} y2={3} /></svg>
         Export
       </button>
@@ -400,7 +524,12 @@ const ModelEditor = () => {
         )}
       </aside>
       {/* ─── Center Canvas Area ─── */}
-      <main className="canvas-area">
+      <main
+        className="canvas-area"
+        onDragEnter={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }}
+        onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }}
+        onDrop={handleCanvasDrop}
+      >
         {/* Toolbar Pill */}
         <div className="canvas-toolbar">
           <div className="tb-btn active" title="Select (V)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" /><path d="M13 13l6 6" /></svg></div>
@@ -650,11 +779,23 @@ const ModelEditor = () => {
             <marker id="arrowhead-selected" markerWidth={10} markerHeight={7} refX={9} refY="3.5" orient="auto">
               <polygon points="0 0, 10 3.5, 0 7" fill="var(--color-accent)" style={{pointerEvents: 'none'}} />
             </marker>
-            <marker id="arrowhead-open" markerWidth={10} markerHeight={7} refX={9} refY="3.5" orient="auto">
-              <polyline points="0 0, 10 3.5, 0 7" fill="none" stroke="var(--color-text-secondary)" strokeWidth="1.5" style={{pointerEvents: 'none'}} />
+            <marker id="arrow-solid" markerWidth={10} markerHeight={10} refX={8} refY={5} orient="auto">
+              <polygon points="1 2, 9 5, 1 8" fill="#1e293b" />
             </marker>
-            <marker id="arrowhead-open-selected" markerWidth={10} markerHeight={7} refX={9} refY="3.5" orient="auto">
-              <polyline points="0 0, 10 3.5, 0 7" fill="none" stroke="var(--color-accent)" strokeWidth="1.5" style={{pointerEvents: 'none'}} />
+            <marker id="arrow-solid-selected" markerWidth={10} markerHeight={10} refX={8} refY={5} orient="auto">
+              <polygon points="1 2, 9 5, 1 8" fill="var(--color-accent)" />
+            </marker>
+            <marker id="arrow-open" markerWidth={10} markerHeight={10} refX={7} refY={5} orient="auto">
+              <path d="M 2 2 L 8 5 L 2 8" fill="none" stroke="#1e293b" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </marker>
+            <marker id="arrow-open-selected" markerWidth={10} markerHeight={10} refX={7} refY={5} orient="auto">
+              <path d="M 2 2 L 8 5 L 2 8" fill="none" stroke="var(--color-accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </marker>
+            <marker id="arrow-diamond" markerWidth={10} markerHeight={10} refX={5} refY={5} orient="auto">
+              <polygon points="5 1.5, 8.5 5, 5 8.5, 1.5 5" fill="#1e293b" />
+            </marker>
+            <marker id="arrow-diamond-selected" markerWidth={10} markerHeight={10} refX={5} refY={5} orient="auto">
+              <polygon points="5 1.5, 8.5 5, 5 8.5, 1.5 5" fill="var(--color-accent)" />
             </marker>
           </defs>
           <rect id="bg-rect" width="100%" height="100%" fill="url(#dot-grid)" />
@@ -995,6 +1136,160 @@ const ModelEditor = () => {
       }}
       onCancel={() => setDatasetToImport(null)}
     />
+  )}
+
+  {/* ─── Validation Error Modal ─── */}
+  {validationModal && (
+    <div style={{
+      position: 'fixed',
+      inset: 0,
+      backgroundColor: 'rgba(15, 23, 42, 0.65)',
+      backdropFilter: 'blur(4px)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 9999,
+    }}>
+      <div style={{
+        backgroundColor: '#ffffff',
+        borderRadius: '12px',
+        width: '480px',
+        maxWidth: '90vw',
+        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+        overflow: 'hidden',
+        border: '1px solid #e2e8f0',
+      }}>
+        <div style={{
+          padding: '18px 20px',
+          borderBottom: '1px solid #f1f5f9',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          backgroundColor: '#fff1f2',
+        }}>
+          <div style={{
+            width: '36px',
+            height: '36px',
+            borderRadius: '8px',
+            backgroundColor: '#ffe4e6',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#e11d48',
+            flexShrink: 0,
+          }}>
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+          </div>
+          <div>
+            <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: '#9f1239' }}>Model Validation Issues</h3>
+            <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#be123c' }}>Please fix the following issues before running analysis:</p>
+          </div>
+        </div>
+        
+        <div style={{ padding: '16px 20px', maxHeight: '340px', overflowY: 'auto' }}>
+          {validationModal.errors && validationModal.errors.length > 0 && (
+            <div style={{ marginBottom: '14px' }}>
+              <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#e11d48', marginBottom: '8px', letterSpacing: '0.05em' }}>
+                Errors ({validationModal.errors.length})
+              </div>
+              <ul style={{ margin: 0, paddingLeft: '18px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {validationModal.errors.map((err, idx) => (
+                  <li key={idx} style={{ fontSize: '13px', color: '#334155', lineHeight: '1.4' }}>
+                    {err}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {validationModal.warnings && validationModal.warnings.length > 0 && (
+            <div>
+              <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#d97706', marginBottom: '8px', letterSpacing: '0.05em' }}>
+                Warnings ({validationModal.warnings.length})
+              </div>
+              <ul style={{ margin: 0, paddingLeft: '18px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {validationModal.warnings.map((warn, idx) => (
+                  <li key={idx} style={{ fontSize: '13px', color: '#64748b', lineHeight: '1.4' }}>
+                    {warn}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+
+        <div style={{
+          padding: '12px 20px',
+          backgroundColor: '#f8fafc',
+          borderTop: '1px solid #f1f5f9',
+          display: 'flex',
+          justifyContent: 'flex-end',
+        }}>
+          <button
+            type="button"
+            onClick={() => setValidationModal(null)}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#0f172a',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '6px',
+              fontSize: '13px',
+              fontWeight: 500,
+              cursor: 'pointer',
+            }}
+          >
+            Back to Canvas
+          </button>
+        </div>
+      </div>
+    </div>
+  )}
+
+  {/* ─── Toast Notifications ─── */}
+  {saveToast && (
+    <div style={{
+      position: 'fixed',
+      bottom: '24px',
+      right: '24px',
+      backgroundColor: '#0f172a',
+      color: '#ffffff',
+      padding: '10px 18px',
+      borderRadius: '8px',
+      fontSize: '13px',
+      fontWeight: 500,
+      boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      zIndex: 9999,
+    }}>
+      <span style={{ color: '#10b981' }}>✓</span> {saveToast}
+    </div>
+  )}
+  {validationSuccessToast && (
+    <div style={{
+      position: 'fixed',
+      bottom: '24px',
+      right: '24px',
+      backgroundColor: '#065f46',
+      color: '#ffffff',
+      padding: '10px 18px',
+      borderRadius: '8px',
+      fontSize: '13px',
+      fontWeight: 500,
+      boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      zIndex: 9999,
+    }}>
+      <span style={{ color: '#34d399' }}>✓</span> {validationSuccessToast}
+    </div>
   )}
 
     </div>

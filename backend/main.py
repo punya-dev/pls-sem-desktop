@@ -10,6 +10,9 @@ import project_io
 import os
 import workspace_io
 import settings_io
+from model_spec import ModelSpec, ValidateModelRequest, SaveModelRequest
+from model_validator import validate_model_spec, ValidationResult
+
 
 
 app = FastAPI()
@@ -28,15 +31,56 @@ class SaveDataJsonRequest(BaseModel):
     columns: List[str]
     rows: List[List[Any]]
     dtypes: Optional[List[str]] = None
+    missing_value: Optional[str] = None
+    treatment: Optional[str] = None
 
 
-def read_uploaded_file(filename: str, contents: bytes) -> pd.DataFrame:
+def read_uploaded_file(filename: str, contents: bytes, missing_values: Optional[List[str]] = None) -> pd.DataFrame:
+    na_vals = ["", "NA", "N/A", "nan", "NaN", "null", "NULL", "None"]
+    if missing_values:
+        for mv in missing_values:
+            mv_str = str(mv).strip()
+            if mv_str and mv_str not in na_vals:
+                na_vals.append(mv_str)
+
     if filename.endswith(".csv"):
-        return pd.read_csv(io.BytesIO(contents), sep=None, engine='python')
+        df = pd.read_csv(io.BytesIO(contents), sep=None, engine='python', na_values=na_vals, keep_default_na=True)
     elif filename.endswith((".xls", ".xlsx")):
-        return pd.read_excel(io.BytesIO(contents))
+        df = pd.read_excel(io.BytesIO(contents), na_values=na_vals, keep_default_na=True)
     else:
         raise ValueError("Unsupported file type")
+
+    if missing_values:
+        for mv in missing_values:
+            mv_str = str(mv).strip()
+            if not mv_str:
+                continue
+            df = df.replace(mv_str, np.nan)
+            try:
+                val_num = float(mv_str)
+                df = df.replace(val_num, np.nan)
+                if val_num.is_integer():
+                    df = df.replace(int(val_num), np.nan)
+            except ValueError:
+                pass
+
+    return df
+
+
+def apply_missing_treatment(df: pd.DataFrame, treatment: Optional[str]) -> pd.DataFrame:
+    if treatment == "listwise":
+        return df.dropna()
+    elif treatment == "mean":
+        cleaned_df = df.copy()
+        for col in cleaned_df.columns:
+            converted = pd.to_numeric(cleaned_df[col], errors='coerce')
+            if converted.notnull().sum() > 0 and converted.isna().sum() < len(converted):
+                cleaned_df[col] = converted
+        numeric_cols = cleaned_df.select_dtypes(include=[np.number]).columns
+        cleaned_df[numeric_cols] = cleaned_df[numeric_cols].fillna(cleaned_df[numeric_cols].mean())
+        return cleaned_df
+    return df
+
 
 @app.get("/health")
 def health():
@@ -48,10 +92,16 @@ def root():
 
 
 @app.post("/data/import")
-async def import_data(file: UploadFile = File(...)):
+async def import_data(
+    file: UploadFile = File(...),
+    missing_value: Optional[str] = None,
+    treatment: Optional[str] = None,
+):
     contents = await file.read()
     try:
-        df = read_uploaded_file(file.filename, contents)
+        mv_list = [v.strip() for v in missing_value.split(",") if v.strip()] if missing_value else None
+        df = read_uploaded_file(file.filename, contents, missing_values=mv_list)
+        df = apply_missing_treatment(df, treatment)
     except ValueError as e:
         return {"error": str(e)}
 
@@ -106,7 +156,7 @@ def project_diagnostics(path: str):
 
 
 @app.post("/project/treat-missing")
-def project_treat_missing(path: str, method: str = "listwise"):
+def project_treat_missing(path: str, method: str = "listwise", missing_value: Optional[str] = None):
     data = project_io.load_data(path)
     if data is None:
         return {"error": "No data found in this project"}
@@ -114,17 +164,21 @@ def project_treat_missing(path: str, method: str = "listwise"):
     df = pd.DataFrame(data["rows"], columns=data["columns"])
     original_rows = len(df)
 
-    if method == "listwise":
-        cleaned_df = df.dropna()
-    elif method == "mean":
-        cleaned_df = df.copy()
-        numeric_cols = cleaned_df.select_dtypes(include=[np.number]).columns
-        cleaned_df[numeric_cols] = cleaned_df[numeric_cols].fillna(cleaned_df[numeric_cols].mean())
-    else:
-        return {"error": f"Unknown method: {method}"}
+    if missing_value:
+        mv_list = [v.strip() for v in missing_value.split(",") if v.strip()]
+        for mv in mv_list:
+            df = df.replace(mv, np.nan)
+            try:
+                num = float(mv)
+                df = df.replace(num, np.nan)
+                if num.is_integer():
+                    df = df.replace(int(num), np.nan)
+            except ValueError:
+                pass
 
+    cleaned_df = apply_missing_treatment(df, method)
     cleaned_clean = cleaned_df.astype(object).where(pd.notnull(cleaned_df), None)
-    project_io.save_data(path, cleaned_clean.values.tolist(), list(cleaned_df.columns),list(cleaned_df.dtypes.astype(str)))
+    project_io.save_data(path, cleaned_clean.values.tolist(), list(cleaned_df.columns), list(cleaned_df.dtypes.astype(str)), dataset_name=data.get("dataset_name"))
 
     return {
         "status": "updated",
@@ -144,11 +198,18 @@ def open_project(path: str):
 
 
 @app.post("/project/save-data")
-async def save_project_data(path: str, file: UploadFile = File(...)):
+async def save_project_data(
+    path: str,
+    file: UploadFile = File(...),
+    missing_value: Optional[str] = None,
+    treatment: Optional[str] = None,
+):
     contents = await file.read()
-    df = read_uploaded_file(file.filename, contents)
-    df_clean = df.astype(object).where(pd.notnull(df), None)
+    mv_list = [v.strip() for v in missing_value.split(",") if v.strip()] if missing_value else None
+    df = read_uploaded_file(file.filename, contents, missing_values=mv_list)
+    df = apply_missing_treatment(df, treatment)
 
+    df_clean = df.astype(object).where(pd.notnull(df), None)
     project_io.save_data(path, df_clean.values.tolist(), list(df.columns), list(df.dtypes.astype(str)), dataset_name=file.filename)
     return {"status": "saved", "row_count": len(df), "dataset_name": file.filename}
 
@@ -156,11 +217,27 @@ async def save_project_data(path: str, file: UploadFile = File(...)):
 @app.post("/project/save-data-json")
 def save_project_data_json(req: SaveDataJsonRequest):
     try:
+        df = pd.DataFrame(req.rows, columns=req.columns)
+        if req.missing_value:
+            mv_list = [v.strip() for v in req.missing_value.split(",") if v.strip()]
+            for mv in mv_list:
+                df = df.replace(mv, np.nan)
+                try:
+                    num = float(mv)
+                    df = df.replace(num, np.nan)
+                    if num.is_integer():
+                        df = df.replace(int(num), np.nan)
+                except ValueError:
+                    pass
+        if req.treatment:
+            df = apply_missing_treatment(df, req.treatment)
+
+        df_clean = df.astype(object).where(pd.notnull(df), None)
         dtypes = req.dtypes
         if not dtypes:
-            dtypes = ["TEXT" for _ in req.columns]
-        project_io.save_data(req.path, req.rows, req.columns, dtypes, dataset_name=req.dataset_name)
-        return {"status": "saved", "row_count": len(req.rows), "dataset_name": req.dataset_name}
+            dtypes = list(df.dtypes.astype(str))
+        project_io.save_data(req.path, df_clean.values.tolist(), list(df.columns), dtypes, dataset_name=req.dataset_name)
+        return {"status": "saved", "row_count": len(df), "dataset_name": req.dataset_name}
     except Exception as e:
         return {"error": str(e)}
 
@@ -261,4 +338,53 @@ def delete_workspace(folder_path: str):
         return res
     except Exception as e:
         return {"error": str(e)}
+
+
+@app.post("/model/validate")
+def validate_model(req: ValidateModelRequest):
+    dataset_cols = req.dataset_columns
+    if dataset_cols is None and req.project_path:
+        project_data = project_io.load_data(req.project_path)
+        if project_data and "columns" in project_data:
+            dataset_cols = project_data["columns"]
+
+    result = validate_model_spec(req.spec, dataset_columns=dataset_cols)
+    return result.model_dump()
+
+
+@app.post("/project/save-model")
+def save_project_model(req: SaveModelRequest):
+    if not os.path.exists(req.project_path):
+        return {"error": "Project file does not exist"}
+
+    project_data = project_io.load_data(req.project_path)
+    dataset_cols = project_data["columns"] if (project_data and "columns" in project_data) else None
+
+    validation = validate_model_spec(req.spec, dataset_columns=dataset_cols)
+
+    try:
+        project_io.save_model_spec(
+            req.project_path,
+            req.spec.model_dump(by_alias=True),
+            diagram_layout=req.diagram_layout,
+        )
+        return {
+            "status": "saved",
+            "validation": validation.model_dump(),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/project/load-model")
+def load_project_model(path: str):
+    if not os.path.exists(path):
+        return {"error": "Project file does not exist"}
+
+    model_data = project_io.load_model_spec(path)
+    if model_data is None or model_data.get("spec") is None:
+        return {"spec": None, "diagram_layout": None, "updated_at": None}
+
+    return model_data
+
 
