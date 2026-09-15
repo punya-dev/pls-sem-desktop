@@ -14,7 +14,7 @@ Implements Wold's Lohmöller Partial Least Squares Path Modeling algorithm:
 """
 
 import math
-from typing import Dict, List, Optional, Tuple, Any, Union
+from typing import Dict, List, Optional, Tuple, Any, Union, Callable
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -634,95 +634,28 @@ class PLSAlgorithm:
         model_spec: Any,
         n_boot: int = 500,
         seed: Optional[int] = 42,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
+        cancel_event: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """
-        Runs non-parametric bootstrapping to compute standard errors, t-values, and p-values
-        for path coefficients, outer loadings, and outer weights.
+        Runs parallel non-parametric bootstrapping across CPU cores to compute standard errors,
+        t-values, p-values, and confidence intervals for path coefficients, outer loadings, and outer weights.
         """
-        if seed is not None:
-            np.random.seed(seed)
+        from engine.pls.bootstrap import ParallelBootstrapper
 
-        base_res = self.fit(data, model_spec)
-        constructs, _, paths = self._parse_spec(model_spec)
-        construct_ids = list(constructs.keys())
-        n_samples = len(data)
-
-        # Collect distributions
-        boot_paths: Dict[Tuple[str, str], List[float]] = {p: [] for p in paths}
-        boot_loadings: Dict[Tuple[str, str], List[float]] = {}
-        boot_weights: Dict[Tuple[str, str], List[float]] = {}
-
-        for cid, cinfo in constructs.items():
-            for iid in cinfo["indicators"]:
-                boot_loadings[(cid, iid)] = []
-                boot_weights[(cid, iid)] = []
-
-        for b in range(n_boot):
-            # Resample with replacement
-            indices = np.random.choice(n_samples, size=n_samples, replace=True)
-            resampled_data = data.iloc[indices].reset_index(drop=True)
-            try:
-                b_res = self.fit(resampled_data, model_spec)
-                for (from_c, to_c) in paths:
-                    val = b_res["structural"]["path_coefficients"].get(to_c, {}).get(from_c, 0.0)
-                    boot_paths[(from_c, to_c)].append(val)
-
-                for (cid, iid) in boot_loadings.keys():
-                    l_val = b_res["measurement"]["outer_loadings"].get(cid, {}).get(iid, 0.0)
-                    w_val = b_res["measurement"]["outer_weights"].get(cid, {}).get(iid, 0.0)
-                    boot_loadings[(cid, iid)].append(l_val)
-                    boot_weights[(cid, iid)].append(w_val)
-            except Exception:
-                continue
-
-        def _stats(original_val: float, sample_dist: List[float]):
-            if not sample_dist:
-                return {"original": original_val, "mean": original_val, "se": 0.0, "t_stat": 0.0, "p_value": 1.0, "ci_low": original_val, "ci_high": original_val}
-            se = float(np.std(sample_dist, ddof=1))
-            t_stat = float(original_val / se) if se > 1e-9 else 0.0
-            p_val = float(2.0 * (1.0 - stats.norm.cdf(abs(t_stat))))
-            ci_low = float(np.percentile(sample_dist, 2.5))
-            ci_high = float(np.percentile(sample_dist, 97.5))
-            return {
-                "original": original_val,
-                "mean": float(np.mean(sample_dist)),
-                "se": se,
-                "t_stat": t_stat,
-                "p_value": p_val,
-                "ci_low": ci_low,
-                "ci_high": ci_high,
-            }
-
-        path_significance = []
-        for (from_c, to_c), dist in boot_paths.items():
-            orig = base_res["structural"]["path_coefficients"].get(to_c, {}).get(from_c, 0.0)
-            st = _stats(orig, dist)
-            st["from"] = from_c
-            st["to"] = to_c
-            path_significance.append(st)
-
-        loading_significance = []
-        for (cid, iid), dist in boot_loadings.items():
-            orig = base_res["measurement"]["outer_loadings"].get(cid, {}).get(iid, 0.0)
-            st = _stats(orig, dist)
-            st["construct"] = cid
-            st["indicator"] = iid
-            loading_significance.append(st)
-
-        weight_significance = []
-        for (cid, iid), dist in boot_weights.items():
-            orig = base_res["measurement"]["outer_weights"].get(cid, {}).get(iid, 0.0)
-            st = _stats(orig, dist)
-            st["construct"] = cid
-            st["indicator"] = iid
-            weight_significance.append(st)
-
-        return {
-            "n_boot": n_boot,
-            "paths": path_significance,
-            "loadings": loading_significance,
-            "weights": weight_significance,
-        }
+        booter = ParallelBootstrapper()
+        return booter.run(
+            data=data,
+            model_spec=model_spec,
+            n_boot=n_boot,
+            seed=seed,
+            scheme=self.scheme,
+            max_iter=self.max_iter,
+            tol=self.tol,
+            sign_alignment=self.sign_alignment,
+            progress_callback=progress_callback,
+            cancel_event=cancel_event,
+        )
 
 
 def run_pls(

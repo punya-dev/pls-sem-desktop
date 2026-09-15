@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
 import { initModelCanvas, exportModelSpec, getModelCanvasState, loadModelCanvasState } from '../utils/model-canvas';
 import { DataManagerModal } from '../components/DataManagerModal';
+import { BootstrapModal } from '../components/BootstrapModal';
 import type { ParsedDataset } from '../utils/dataset-parser';
 import { parseDatasetFile, processData } from '../utils/dataset-parser';
 import { api, type ValidationResponse } from '../utils/api';
@@ -22,6 +23,7 @@ const ModelEditor = () => {
   const [datasetToImport, setDatasetToImport] = useState<ParsedDataset | null>(null);
   const [activeDataset, setActiveDataset] = useState<ParsedDataset | null>(() => activeStudyId ? datasetsByStudy[activeStudyId] ?? null : null);
   const [isImporting, setIsImporting] = useState(false);
+  const [isBootstrapModalOpen, setIsBootstrapModalOpen] = useState(false);
   const [variableFilter, setVariableFilter] = useState('');
   const [areCategoriesCollapsed, setAreCategoriesCollapsed] = useState(false);
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
@@ -430,7 +432,13 @@ const ModelEditor = () => {
         return {
           title: 'Latent Variable Scores',
           badge: 'Y (standardized)',
-          subtitle: 'Calculated standardized construct scores for observations in the active dataset.',
+          subtitle: 'Estimated case-level construct scores standardized to zero mean and unit variance.',
+        };
+      case 'bootstrap_significance':
+        return {
+          title: 'Bootstrap Significance Testing',
+          badge: 'p-values, t-stats, 95% CI',
+          subtitle: 'Non-parametric bootstrap distributions, standard errors, t-statistics, p-values, and 95% confidence intervals.',
         };
       default:
         return {
@@ -687,6 +695,26 @@ const ModelEditor = () => {
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><polygon points="5 3 19 12 5 21 5 3" /></svg>
         {isCalculating ? 'Calculating PLS...' : (isValidating ? 'Validating...' : 'Calculate')}
+      </button>
+      <button
+        className="subheader__btn"
+        id="bootstrap-btn"
+        type="button"
+        onClick={() => setIsBootstrapModalOpen(true)}
+        disabled={isValidating || isCalculating}
+        style={{
+          marginLeft: '4px',
+          backgroundColor: '#eef2ff',
+          color: '#4f46e5',
+          borderColor: '#c7d2fe',
+          fontWeight: 600,
+        }}
+        title="Run PLS Bootstrapping with significance testing (p-values, t-values, CIs)"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 15, height: 15, marginRight: 4 }}>
+          <path d="M18 20V10M12 20V4M6 20v-6" />
+        </svg>
+        Bootstrap
       </button>
       <div className="subheader__divider" />
       <button
@@ -1160,6 +1188,22 @@ const ModelEditor = () => {
                 onClick={(e) => { e.preventDefault(); setActiveResultTab('construct_scores'); }}
               >
                 Latent variable scores
+              </a>
+              <a
+                href="#"
+                className={`tree-item ${activeResultTab === 'bootstrap_significance' ? 'active' : ''}`}
+                onClick={(e) => { e.preventDefault(); setActiveResultTab('bootstrap_significance'); }}
+                style={{ position: 'relative' }}
+              >
+                <div className="tree-item__left">
+                  <div className="tree-item__dot" style={{ backgroundColor: '#6366f1' }} />
+                  <span>Bootstrap significance</span>
+                </div>
+                {plsResults?.significance && (
+                  <span className="tree-item__size" style={{ backgroundColor: '#e0e7ff', color: '#4338ca', fontWeight: 600 }}>
+                    p & t
+                  </span>
+                )}
               </a>
             </div>
           </div>
@@ -1778,6 +1822,149 @@ const ModelEditor = () => {
                   ))}
                 </tbody>
               </table>
+            ) : activeResultTab === 'bootstrap_significance' ? (
+              !plsResults.significance ? (
+                <div style={{ padding: '60px 20px', textAlign: 'center', color: '#64748b' }}>
+                  <svg style={{ width: 48, height: 48, margin: '0 auto 16px', color: '#94a3b8' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+                    <path d="M18 20V10M12 20V4M6 20v-6" />
+                  </svg>
+                  <h3 style={{ margin: '0 0 8px', fontSize: '16px', fontWeight: 600, color: '#334155' }}>No Bootstrapping Run Yet</h3>
+                  <p style={{ margin: 0, fontSize: '13px' }}>Click the <strong>Bootstrap</strong> button in the top bar to run multi-core significance testing for standard errors, t-statistics, and p-values.</p>
+                </div>
+              ) : (
+                <div>
+                  {/* Summary Bar */}
+                  <div style={{
+                    display: 'flex',
+                    gap: '20px',
+                    padding: '14px 18px',
+                    backgroundColor: '#f8fafc',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '8px',
+                    marginBottom: '20px',
+                    alignItems: 'center',
+                    fontSize: '13px',
+                    color: '#334155',
+                  }}>
+                    <span>Bootstrap Samples: <strong>{plsResults.significance.n_boot?.toLocaleString()}</strong></span>
+                    <span>Test: <strong>Two-Tailed (α = 0.05)</strong></span>
+                    <span>Confidence Interval: <strong>95% Percentile</strong></span>
+                    <span style={{ marginLeft: 'auto', fontSize: '12px', color: '#64748b' }}>
+                      Significance: *** p &lt; 0.001, ** p &lt; 0.01, * p &lt; 0.05, ns not significant
+                    </span>
+                  </div>
+
+                  {/* Path Coefficients Significance Table */}
+                  <h4 style={{ margin: '0 0 10px', fontSize: '14px', fontWeight: 600, color: '#1e293b' }}>
+                    Structural Path Significance
+                  </h4>
+                  <table className="scientific-table" style={{ marginBottom: '32px' }}>
+                    <thead>
+                      <tr>
+                        <th>Path (Predictor → Target)</th>
+                        <th>Original (β)</th>
+                        <th>Sample Mean</th>
+                        <th>Std Error (SE)</th>
+                        <th>t-Statistic</th>
+                        <th>p-Value</th>
+                        <th>95% Confidence Interval</th>
+                        <th>Significance</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(plsResults.significance.paths || []).map((p: any, idx: number) => {
+                        const isSig = p.p_value < 0.05;
+                        return (
+                          <tr key={idx}>
+                            <td>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span className="construct-name">{p.from_name || getConstructName(p.from)}</span>
+                                <span style={{ color: '#94a3b8' }}>→</span>
+                                <span className="construct-name">{p.to_name || getConstructName(p.to)}</span>
+                              </div>
+                            </td>
+                            <td className="cell-sig">
+                              <div className="cell-value">{fmt(p.original, 4)}</div>
+                            </td>
+                            <td>{fmt(p.mean, 4)}</td>
+                            <td>{fmt(p.se, 4)}</td>
+                            <td><strong>{fmt(p.t_stat, 3)}</strong></td>
+                            <td style={{ color: isSig ? '#15803d' : '#b45309', fontWeight: 600 }}>
+                              {p.p_value < 0.0001 ? '< 0.0001' : fmt(p.p_value, 4)}
+                            </td>
+                            <td>[{fmt(p.ci_low, 4)}, {fmt(p.ci_high, 4)}]</td>
+                            <td>
+                              <span style={{
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                fontSize: '12px',
+                                fontWeight: 600,
+                                backgroundColor: isSig ? '#dcfce7' : '#f1f5f9',
+                                color: isSig ? '#166534' : '#64748b',
+                              }}>
+                                {p.significance}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+
+                  {/* Outer Loadings Significance Table */}
+                  <h4 style={{ margin: '0 0 10px', fontSize: '14px', fontWeight: 600, color: '#1e293b' }}>
+                    Outer Loadings Significance
+                  </h4>
+                  <table className="scientific-table">
+                    <thead>
+                      <tr>
+                        <th>Construct</th>
+                        <th>Indicator</th>
+                        <th>Outer Loading (λ)</th>
+                        <th>Sample Mean</th>
+                        <th>Std Error (SE)</th>
+                        <th>t-Statistic</th>
+                        <th>p-Value</th>
+                        <th>95% Confidence Interval</th>
+                        <th>Sig.</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(plsResults.significance.loadings || []).map((l: any, idx: number) => {
+                        const isSig = l.p_value < 0.05;
+                        return (
+                          <tr key={idx}>
+                            <td>{l.construct_name || getConstructName(l.construct)}</td>
+                            <td><strong>{l.indicator_name || getIndicatorName(l.indicator)}</strong></td>
+                            <td className="cell-sig">
+                              <div className="cell-value">{fmt(l.original, 4)}</div>
+                            </td>
+                            <td>{fmt(l.mean, 4)}</td>
+                            <td>{fmt(l.se, 4)}</td>
+                            <td>{fmt(l.t_stat, 3)}</td>
+                            <td style={{ color: isSig ? '#15803d' : '#b45309', fontWeight: 600 }}>
+                              {l.p_value < 0.0001 ? '< 0.0001' : fmt(l.p_value, 4)}
+                            </td>
+                            <td>[{fmt(l.ci_low, 4)}, {fmt(l.ci_high, 4)}]</td>
+                            <td>
+                              <span style={{
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                fontSize: '11px',
+                                fontWeight: 600,
+                                backgroundColor: isSig ? '#dcfce7' : '#f1f5f9',
+                                color: isSig ? '#166534' : '#64748b',
+                              }}>
+                                {l.significance}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )
             ) : null}
 
             {plsResults && (
@@ -1802,6 +1989,27 @@ const ModelEditor = () => {
       onCancel={() => setDatasetToImport(null)}
     />
   )}
+
+  <BootstrapModal
+    isOpen={isBootstrapModalOpen}
+    projectPath={activeStudy?.path || ''}
+    spec={exportModelSpec()}
+    datasetHeaders={activeDataset?.variables?.map(v => v.name)}
+    datasetRows={activeDataset?.rows}
+    datasetName={activeDataset?.filename}
+    onComplete={(results) => {
+      setPlsResults(results);
+      setActiveResultTab('bootstrap_significance');
+      const viewSlider = document.getElementById('main-view-slider');
+      if (viewSlider) {
+        (viewSlider as HTMLElement).style.display = 'flex';
+      }
+      switchView('results');
+      setValidationSuccessToast('Bootstrapping complete! Results updated.');
+      setTimeout(() => setValidationSuccessToast(null), 3500);
+    }}
+    onClose={() => setIsBootstrapModalOpen(false)}
+  />
 
   {/* ─── Validation Error Modal ─── */}
   {validationModal && (

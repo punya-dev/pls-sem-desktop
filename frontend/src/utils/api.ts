@@ -370,5 +370,80 @@ export const api = {
       return { error: err?.message || 'Failed to load calculation results' };
     }
   },
+
+  async startBootstrap(
+    projectPath: string,
+    spec?: ModelSpec,
+    options?: {
+      n_boot?: number;
+      seed?: number;
+      scheme?: string;
+      columns?: string[];
+      rows?: any[][];
+      dataset_name?: string;
+    }
+  ): Promise<{ status?: string; job_id?: string; n_boot?: number; error?: string }> {
+    try {
+      const res = await fetch(`${API_BASE}/project/bootstrap-start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_path: projectPath,
+          spec: spec || undefined,
+          n_boot: options?.n_boot || 500,
+          seed: options?.seed !== undefined ? options.seed : 42,
+          scheme: options?.scheme || 'path',
+          columns: options?.columns || undefined,
+          rows: options?.rows || undefined,
+          dataset_name: options?.dataset_name || undefined,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to start bootstrapping' };
+    }
+  },
+
+  async cancelBootstrap(jobId: string): Promise<{ status?: string; job_id?: string; error?: string }> {
+    try {
+      const res = await fetch(`${API_BASE}/project/bootstrap-cancel?job_id=${encodeURIComponent(jobId)}`, {
+        method: 'POST',
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to cancel bootstrapping' };
+    }
+  },
+
+  async getBootstrapStatus(jobId: string): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE}/project/bootstrap-status?job_id=${encodeURIComponent(jobId)}`);
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to get bootstrap status' };
+    }
+  },
+
+  createBootstrapWebSocket(
+    jobId: string,
+    onMessage: (data: any) => void,
+    onError?: (err: any) => void,
+    onClose?: () => void
+  ): WebSocket {
+    const wsUrl = `${API_BASE.replace(/^http/, 'ws')}/ws/bootstrap-progress/${encodeURIComponent(jobId)}`;
+    const ws = new WebSocket(wsUrl);
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        onMessage(data);
+      } catch (e) {
+        console.error('Failed to parse WS message', e);
+      }
+    };
+    if (onError) ws.onerror = onError;
+    if (onClose) ws.onclose = onClose;
+    return ws;
+  },
 };
+
 

@@ -72,3 +72,22 @@ class RunPlsRequest(BaseModel):
     missing_treatment: str = "mean"
     missing_values: Optional[List[str]] = None
 
+
+class BootstrapStartRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    project_path: str
+    spec: Optional[ModelSpec] = None
+    columns: Optional[List[str]] = None
+    rows: Optional[List[List[Any]]] = None
+    dataset_name: Optional[str] = None
+    scheme: str = "path"
+    max_iter: int = 300
+    tol: float = 1e-7
+    n_boot: int = 500
+    seed: Optional[int] = 42
+    sign_alignment: bool = True
+    missing_treatment: str = "mean"
+    missing_values: Optional[List[str]] = None
+
+

@@ -147,6 +147,35 @@ class TestPLSIntegration(unittest.TestCase):
         self.assertEqual(res_success["status"], "success")
         self.assertTrue(res_success["results"]["converged"])
 
+    def test_bootstrap_job_lifecycle(self):
+        import asyncio
+        import time
+        from main import start_bootstrap_job, get_bootstrap_status, cancel_bootstrap_job
+        from model_spec import BootstrapStartRequest
+
+        boot_req = BootstrapStartRequest(
+            project_path=self.project_path,
+            spec=self.spec,
+            n_boot=100,
+            seed=42,
+        )
+        start_res = asyncio.run(start_bootstrap_job(boot_req))
+        self.assertEqual(start_res["status"], "started")
+        job_id = start_res["job_id"]
+
+        # Wait briefly for completion
+        for _ in range(50):
+            time.sleep(0.1)
+            st = get_bootstrap_status(job_id)
+            if st.get("status") == "completed":
+                break
+
+        final_st = get_bootstrap_status(job_id)
+        self.assertEqual(final_st.get("status"), "completed")
+        self.assertIsNotNone(final_st.get("results"))
+        self.assertIn("significance", final_st["results"])
+        self.assertEqual(len(final_st["results"]["significance"]["paths"]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

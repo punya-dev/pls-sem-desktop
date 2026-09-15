@@ -1,16 +1,20 @@
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict, Set
 import pandas as pd
 import io
+import asyncio
+import uuid
+import threading
+import time
 from scipy import stats
 import numpy as np
 import project_io
 import os
 import workspace_io
 import settings_io
-from model_spec import ModelSpec, ValidateModelRequest, SaveModelRequest, RunPlsRequest
+from model_spec import ModelSpec, ValidateModelRequest, SaveModelRequest, RunPlsRequest, BootstrapStartRequest
 from model_validator import validate_model_spec, ValidationResult
 from engine.pls.algorithm import PLSAlgorithm, run_pls
 
@@ -468,5 +472,224 @@ def load_project_results(path: str, algorithm: str = "pls"):
     if data is None:
         return {"results": None}
     return data
+
+
+# --- Phase 4: Bootstrapping & Live WebSocket Progress ---
+
+active_bootstrap_jobs: Dict[str, Dict[str, Any]] = {}
+
+
+def _broadcast_ws(job: dict, msg: dict):
+    loop = job.get("loop")
+    if not loop or loop.is_closed():
+        return
+    for ws in list(job.get("websockets", [])):
+        try:
+            asyncio.run_coroutine_threadsafe(ws.send_json(msg), loop)
+        except Exception:
+            pass
+
+
+@app.post("/project/bootstrap-start")
+async def start_bootstrap_job(req: BootstrapStartRequest):
+    if not os.path.exists(req.project_path):
+        return {"error": "Project file does not exist"}
+
+    # 1. Load or persist project data
+    data_dict = project_io.load_data(req.project_path)
+    if (not data_dict or not data_dict.get("rows")) and req.columns and req.rows:
+        try:
+            df_temp = pd.DataFrame(req.rows, columns=req.columns)
+            df_clean = df_temp.astype(object).where(pd.notnull(df_temp), None)
+            dtypes = list(df_clean.dtypes.astype(str))
+            project_io.save_data(req.project_path, df_clean.values.tolist(), list(df_clean.columns), dtypes, dataset_name=req.dataset_name)
+            data_dict = {"columns": list(df_clean.columns), "rows": df_clean.values.tolist(), "dataset_name": req.dataset_name}
+        except Exception as e:
+            print(f"Failed to auto-save dataset in start_bootstrap_job: {e}")
+
+    if not data_dict or not data_dict.get("rows"):
+        return {"error": "No dataset found in project. Please import data first."}
+
+    df = pd.DataFrame(data_dict["rows"], columns=data_dict["columns"])
+    for col in df.columns:
+        converted = pd.to_numeric(df[col], errors="coerce")
+        if converted.notnull().sum() > 0:
+            df[col] = converted
+
+    # 2. Resolve Model Spec
+    spec = req.spec
+    if spec is None:
+        saved_model = project_io.load_model_spec(req.project_path)
+        if not saved_model or not saved_model.get("spec"):
+            return {"error": "No path model found. Please draw or save a model first."}
+        try:
+            spec = ModelSpec.model_validate(saved_model["spec"])
+        except Exception as e:
+            return {"error": f"Invalid saved model specification: {str(e)}"}
+
+    # 3. Validate spec
+    validation = validate_model_spec(spec, dataset_columns=list(df.columns))
+    if not validation.is_valid:
+        return {
+            "error": "Model validation failed",
+            "validation": validation.model_dump(),
+        }
+
+    job_id = uuid.uuid4().hex
+    cancel_event = threading.Event()
+    loop = asyncio.get_running_loop()
+
+    job: Dict[str, Any] = {
+        "job_id": job_id,
+        "project_path": req.project_path,
+        "cancel_event": cancel_event,
+        "status": "running",
+        "current": 0,
+        "total": req.n_boot,
+        "percent": 0.0,
+        "start_time": time.time(),
+        "elapsed_sec": 0.0,
+        "results": None,
+        "error": None,
+        "websockets": set(),
+        "loop": loop,
+    }
+    active_bootstrap_jobs[job_id] = job
+
+    def _worker():
+        try:
+            def on_progress(cur: int, tot: int):
+                job["current"] = cur
+                job["total"] = tot
+                job["percent"] = round((cur / tot) * 100, 1)
+                job["elapsed_sec"] = round(time.time() - job["start_time"], 1)
+                msg = {
+                    "type": "progress",
+                    "job_id": job_id,
+                    "current": cur,
+                    "total": tot,
+                    "percent": job["percent"],
+                    "elapsed_sec": job["elapsed_sec"],
+                }
+                _broadcast_ws(job, msg)
+
+            algo = PLSAlgorithm(
+                scheme=req.scheme,
+                max_iter=req.max_iter,
+                tol=req.tol,
+                sign_alignment=req.sign_alignment,
+                missing_treatment=req.missing_treatment or "mean",
+                missing_values=req.missing_values,
+            )
+
+            # Fit base model
+            base_res = algo.fit(df, spec)
+            # Run parallel bootstrap
+            boot_res = algo.bootstrap(
+                df,
+                spec,
+                n_boot=req.n_boot,
+                seed=req.seed,
+                progress_callback=on_progress,
+                cancel_event=cancel_event,
+            )
+            base_res["significance"] = boot_res
+
+            # Save full results with significance to project
+            project_io.save_results(req.project_path, "pls", base_res)
+
+            job["status"] = "completed"
+            job["results"] = base_res
+            job["elapsed_sec"] = round(time.time() - job["start_time"], 1)
+            msg = {
+                "type": "completed",
+                "job_id": job_id,
+                "results": base_res,
+                "elapsed_sec": job["elapsed_sec"],
+            }
+            _broadcast_ws(job, msg)
+        except InterruptedError:
+            job["status"] = "cancelled"
+            job["elapsed_sec"] = round(time.time() - job["start_time"], 1)
+            msg = {"type": "cancelled", "job_id": job_id, "elapsed_sec": job["elapsed_sec"]}
+            _broadcast_ws(job, msg)
+        except Exception as exc:
+            job["status"] = "failed"
+            job["error"] = str(exc)
+            job["elapsed_sec"] = round(time.time() - job["start_time"], 1)
+            msg = {"type": "failed", "job_id": job_id, "error": str(exc), "elapsed_sec": job["elapsed_sec"]}
+            _broadcast_ws(job, msg)
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+    return {
+        "status": "started",
+        "job_id": job_id,
+        "n_boot": req.n_boot,
+    }
+
+
+@app.post("/project/bootstrap-cancel")
+def cancel_bootstrap_job(job_id: str):
+    job = active_bootstrap_jobs.get(job_id)
+    if not job:
+        return {"error": "Job not found"}
+    job["cancel_event"].set()
+    job["status"] = "cancelled"
+    _broadcast_ws(job, {"type": "cancelled", "job_id": job_id})
+    return {"status": "cancelled", "job_id": job_id}
+
+
+@app.get("/project/bootstrap-status")
+def get_bootstrap_status(job_id: str):
+    job = active_bootstrap_jobs.get(job_id)
+    if not job:
+        return {"error": "Job not found"}
+    return {
+        "job_id": job_id,
+        "status": job["status"],
+        "current": job["current"],
+        "total": job["total"],
+        "percent": job["percent"],
+        "elapsed_sec": job.get("elapsed_sec", 0.0),
+        "results": job.get("results"),
+        "error": job.get("error"),
+    }
+
+
+@app.websocket("/ws/bootstrap-progress/{job_id}")
+async def ws_bootstrap_progress(websocket: WebSocket, job_id: str):
+    await websocket.accept()
+    job = active_bootstrap_jobs.get(job_id)
+    if not job:
+        await websocket.send_json({"type": "error", "message": "Job not found"})
+        await websocket.close()
+        return
+
+    job["websockets"].add(websocket)
+
+    # Immediately send current state upon connection
+    initial_type = "progress" if job["status"] == "running" else job["status"]
+    await websocket.send_json({
+        "type": initial_type,
+        "job_id": job_id,
+        "current": job["current"],
+        "total": job["total"],
+        "percent": job["percent"],
+        "elapsed_sec": round(time.time() - job["start_time"], 1),
+        "results": job.get("results"),
+        "error": job.get("error"),
+    })
+
+    try:
+        while True:
+            data = await websocket.receive_json()
+            if isinstance(data, dict) and data.get("action") == "cancel":
+                job["cancel_event"].set()
+                job["status"] = "cancelled"
+                _broadcast_ws(job, {"type": "cancelled", "job_id": job_id})
+    except (WebSocketDisconnect, Exception):
+        job["websockets"].discard(websocket)
+
 
 
