@@ -12,7 +12,6 @@ interface DataManagerModalProps {
 export const DataManagerModal: React.FC<DataManagerModalProps> = ({ dataset: initialDataset, onImport, onCancel }) => {
   const rawDatasetRef = useRef<ParsedDataset>(initialDataset);
 
-  // Auto-detect if -99 exists in data
   const detectedMarker = useMemo(() => {
     for (const row of initialDataset.rows || []) {
       for (const val of row || []) {
@@ -25,14 +24,11 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({ dataset: ini
   const [missingMarker, setMissingMarker] = useState(detectedMarker);
   const [treatment, setTreatment] = useState<'none' | 'listwise' | 'mean'>('mean');
   const [dataset, setDataset] = useState<ParsedDataset>(() => {
-    if (detectedMarker || true) {
-      const headers = initialDataset.variables.map(v => v.name);
-      return processData(initialDataset.filename, headers, initialDataset.rows, {
-        missingValueMarker: detectedMarker,
-        treatment: 'mean',
-      });
-    }
-    return initialDataset;
+    const headers = initialDataset.variables.map(v => v.name);
+    return processData(initialDataset.filename, headers, initialDataset.rows, {
+      missingValueMarker: detectedMarker,
+      treatment: 'mean',
+    });
   });
   const [activeTab, setActiveTab] = useState<'variables' | 'data'>('variables');
   const [sortCol, setSortCol] = useState<number | null>(null);
@@ -43,28 +39,14 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({ dataset: ini
     const headers = raw.variables.map(v => v.name);
     const reprocessed = processData(dataset.filename, headers, raw.rows, {
       missingValueMarker: marker,
-      treatment: treat
+      treatment: treat,
     });
-
     const currentVarsMap = new Map(dataset.variables.map(v => [v.name, v]));
     const mergedVars = reprocessed.variables.map(v => {
       const existing = currentVarsMap.get(v.name);
-      if (existing) {
-        return {
-          ...v,
-          selected: existing.selected,
-          scaleType: v.scaleType, // Freshly re-inferred scale type (Nominal, Ordinal, Metric) from treated data
-          name: existing.name
-        };
-      }
-      return v;
+      return existing ? { ...v, selected: existing.selected, name: existing.name } : v;
     });
-
-    setDataset({
-      ...reprocessed,
-      filename: dataset.filename,
-      variables: mergedVars
-    });
+    setDataset({ ...reprocessed, filename: dataset.filename, variables: mergedVars });
   };
 
   const handleMissingMarkerChange = (val: string) => {
@@ -84,16 +66,13 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({ dataset: ini
   };
 
   const toggleAllVariables = () => {
-    const shouldSelect = dataset.variables.some(variable => !variable.selected);
-    setDataset({
-      ...dataset,
-      variables: dataset.variables.map(variable => ({ ...variable, selected: shouldSelect }))
-    });
+    const allSelected = dataset.variables.every(v => v.selected);
+    setDataset({ ...dataset, variables: dataset.variables.map(v => ({ ...v, selected: !allSelected })) });
   };
-  
-  const setVariableScale = (colIdx: number, scaleType: ParsedVariable['scaleType']) => {
+
+  const setVariableScale = (colIdx: number, scale: ParsedVariable['scaleType']) => {
     const newVars = [...dataset.variables];
-    newVars[colIdx] = { ...newVars[colIdx], scaleType };
+    newVars[colIdx] = { ...newVars[colIdx], scaleType: scale };
     setDataset({ ...dataset, variables: newVars });
   };
 
@@ -108,271 +87,223 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({ dataset: ini
   };
 
   const handleSort = (colIdx: number) => {
-    if (sortCol === colIdx) {
-      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortCol(colIdx);
-      setSortDirection('asc');
-    }
+    if (sortCol === colIdx) setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+    else { setSortCol(colIdx); setSortDirection('asc'); }
   };
 
   const sortedRows = useMemo(() => {
     if (sortCol === null) return dataset.rows;
     return [...dataset.rows].sort((a, b) => {
-      const valA = a[sortCol];
-      const valB = b[sortCol];
-      if (valA === null || valA === undefined || valA === '') return 1;
-      if (valB === null || valB === undefined || valB === '') return -1;
-      const numA = Number(valA);
-      const numB = Number(valB);
-      if (!isNaN(numA) && !isNaN(numB)) {
-        return sortDirection === 'asc' ? numA - numB : numB - numA;
-      }
-      return sortDirection === 'asc'
-        ? String(valA).localeCompare(String(valB))
-        : String(valB).localeCompare(String(valA));
+      const valA = a[sortCol], valB = b[sortCol];
+      if (valA == null || valA === '') return 1;
+      if (valB == null || valB === '') return -1;
+      const numA = Number(valA), numB = Number(valB);
+      if (!isNaN(numA) && !isNaN(numB)) return sortDirection === 'asc' ? numA - numB : numB - numA;
+      return sortDirection === 'asc' ? String(valA).localeCompare(String(valB)) : String(valB).localeCompare(String(valA));
     });
   }, [dataset.rows, sortCol, sortDirection]);
 
   const selectedVarsCount = dataset.variables.filter(v => v.selected).length;
 
   return (
-    <div className="dataset-import-overlay fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-[3px]" role="dialog" aria-modal="true" aria-labelledby="import-dataset-title">
-      <section className="dataset-import-modal flex h-[min(86vh,820px)] w-[min(84vw,1240px)] min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-2xl animate-in fade-in zoom-in-95 duration-150">
-        
-        {/* 1. HEADER */}
-        <div className="dataset-import-header flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-5 py-3.5">
-          <div className="flex min-w-0 items-center gap-3">
-            <h2 id="import-dataset-title" className="shrink-0 text-sm font-semibold tracking-tight text-slate-900">Import Dataset</h2>
-            <div className="flex min-w-0 items-center gap-2">
-              <div className="group relative flex min-w-0 items-center">
-                <svg className="pointer-events-none absolute left-2.5 h-3.5 w-3.5 text-slate-400 transition-colors group-focus-within:text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
-                <input 
-                  type="text" 
-                  value={dataset.filename} 
-                  onChange={updateFileName}
-                  aria-label="Dataset filename"
-                  className="h-7 w-52 min-w-0 rounded-md border border-slate-200 bg-slate-50/80 py-0.5 pl-8 pr-7 font-mono text-xs font-medium text-slate-800 shadow-sm transition-colors hover:border-slate-300 focus:border-indigo-600 focus:bg-white focus:ring-1 focus:ring-indigo-600"
-                />
-                <svg className="pointer-events-none absolute right-2 h-3 w-3 text-slate-400 transition-colors group-hover:text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
-              </div>
-              <div className="hidden rounded border border-slate-200/80 bg-slate-100/80 px-2 py-0.5 font-mono text-[11px] text-slate-500 sm:block">
-                {dataset.rows.length} rows &times; {dataset.variables.length} columns
-              </div>
-            </div>
+    <div className="modal-overlay active" style={{ display: 'flex', zIndex: 9999 }} role="dialog" aria-modal="true">
+      <section className="dm-modal">
+
+        {/* ── Header ── */}
+        <div className="dm-header">
+          <div className="dm-header__left">
+            <span className="material-symbols-outlined" style={{ fontSize: '16px', color: 'var(--color-accent)' }}>table_view</span>
+            <input
+              type="text"
+              value={dataset.filename}
+              onChange={updateFileName}
+              aria-label="Dataset filename"
+              className="dm-filename-input"
+            />
+            <span className="dm-dim-badge">{dataset.rows.length} × {dataset.variables.length}</span>
           </div>
-          <button onClick={onCancel} aria-label="Close import dialog" className="ml-3 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600">
-            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+          <button type="button" className="icon-btn icon-btn--sm" onClick={onCancel} aria-label="Close">
+            <span className="material-symbols-outlined">close</span>
           </button>
         </div>
 
-        {/* 2. MAIN WORKBENCH BODY */}
-        <div className="dataset-import-workbench flex-1 flex flex-col min-h-0 bg-white">
-          <div className="dataset-import-tabs flex shrink-0 items-center justify-between border-b border-slate-200 px-5 py-2.5">
-            <div className="flex items-center space-x-1 rounded-lg border border-slate-200/80 bg-slate-100/90 p-0.5 text-xs">
-              <button 
-                className={`flex items-center space-x-1.5 rounded-md px-3 py-1.5 font-medium transition-colors ${activeTab === 'variables' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
-                onClick={() => setActiveTab('variables')}
-              >
-                <svg className={`w-4 h-4 ${activeTab === 'variables' ? 'text-indigo-500' : 'text-slate-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
-                <span>Variable Definitions</span>
-                <span className={`px-1.5 py-0.5 rounded-full text-[11px] font-semibold ${activeTab === 'variables' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-500'}`}>{dataset.variables.length}</span>
-              </button>
-              <button 
-                className={`flex items-center space-x-1.5 rounded-md px-3 py-1.5 font-medium transition-colors ${activeTab === 'data' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
-                onClick={() => setActiveTab('data')}
-              >
-                <svg className={`w-4 h-4 ${activeTab === 'data' ? 'text-indigo-500' : 'text-slate-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 10h18M3 14h18M9 4v16M15 4v16"></path></svg>
-                <span>Data Preview</span>
-                <span className={`px-1.5 py-0.5 rounded-full text-[11px] font-semibold ${activeTab === 'data' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-500'}`}>{dataset.rows.length}&times;{dataset.variables.length}</span>
-              </button>
-            </div>
-
-            <div className="flex items-center gap-2.5 text-xs">
-              <div className="inline-flex items-center rounded-md border border-slate-200 bg-white px-2.5 py-1 shadow-sm">
-                <span className="mr-1.5 text-[11px] font-medium text-slate-400">Missing Denoted As</span>
-                <input
-                  type="text"
-                  placeholder="e.g. -99, empty by default"
-                  value={missingMarker}
-                  onChange={e => handleMissingMarkerChange(e.target.value)}
-                  className="w-36 h-6 px-1.5 text-xs font-mono border border-slate-200 rounded bg-slate-50 focus:bg-white focus:border-indigo-600 focus:outline-none"
-                  title="Values matching this marker will be converted to normal blank / NA"
-                />
-              </div>
-
-              <label className="inline-flex items-center rounded-md border border-slate-200 bg-white py-1 pl-2.5 pr-2 shadow-sm transition-colors hover:border-slate-300 focus-within:border-indigo-600 focus-within:ring-1 focus-within:ring-indigo-600">
-                <span className="mr-1.5 text-[11px] font-medium text-slate-400">Treatment</span>
-                <select
-                  value={treatment}
-                  onChange={e => handleTreatmentChange(e.target.value as 'none' | 'listwise' | 'mean')}
-                  className="cursor-pointer appearance-none border-0 bg-transparent p-0 pr-4 text-xs font-medium text-slate-800 outline-none focus:ring-0"
-                >
-                  <option value="none">None (Keep as blank/NA)</option>
-                  <option value="listwise">Listwise Deletion</option>
-                  <option value="mean">Mean Imputation</option>
-                </select>
-              </label>
-            </div>
+        {/* ── Tab bar + Controls ── */}
+        <div className="dm-subbar">
+          <div className="dm-tabs">
+            <button
+              type="button"
+              className={`dm-tab ${activeTab === 'variables' ? 'dm-tab--active' : ''}`}
+              onClick={() => setActiveTab('variables')}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>view_column</span>
+              Variables
+              <span className="dm-tab-badge">{dataset.variables.length}</span>
+            </button>
+            <button
+              type="button"
+              className={`dm-tab ${activeTab === 'data' ? 'dm-tab--active' : ''}`}
+              onClick={() => setActiveTab('data')}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>grid_on</span>
+              Data
+              <span className="dm-tab-badge">{dataset.rows.length}</span>
+            </button>
           </div>
 
-          {activeTab === 'variables' && (
-            <div className="flex-1 overflow-y-auto custom-scroll">
-              <table className="dataset-import-table w-full text-left border-collapse text-xs">
-                <thead className="bg-slate-50/80 sticky top-0 border-b border-slate-100 text-[11px] uppercase tracking-wider text-slate-500 font-semibold z-10">
-                  <tr>
-                    <th className="w-12 px-6 py-3">
-                      <input type="checkbox" aria-label="Select all variables" className="w-3.5 h-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-600/30" checked={selectedVarsCount === dataset.variables.length} onChange={toggleAllVariables} />
-                    </th>
-                    <th className="w-64 px-4 py-3">Variable Name</th>
-                    <th className="w-72 px-4 py-3">Measurement Scale</th>
-                    <th className="w-24 px-4 py-3 text-right">Min</th>
-                    <th className="w-24 px-4 py-3 text-right">Max</th>
-                    <th className="w-24 px-4 py-3 text-right">Missing</th>
-                    <th className="px-6 py-3"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-slate-700 font-sans">
-                  {dataset.variables.map((v, i) => (
-                    <tr key={i} className={`hover:bg-slate-50 transition-colors group ${i % 2 !== 0 ? 'bg-slate-50/40' : ''}`}>
-                      <td className="w-12 px-6 py-2.5">
-                        <input 
-                          type="checkbox" 
-                          checked={v.selected}
-                          onChange={() => toggleVariableSelection(i)}
-                          className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-600/30 transition-shadow" 
-                        />
-                      </td>
-                      <td className={`w-64 px-4 py-2.5 font-mono font-medium text-[13px] tracking-tight ${!v.selected ? 'text-slate-400' : 'text-slate-800'}`}>
-                        <EditableCell 
-                          value={v.name} 
-                          onChange={(val) => updateVariableField(i, 'name', val)} 
-                          disabled={!v.selected}
-                        />
-                      </td>
-                      <td className="w-72 px-4 py-2.5">
-                        <div className="relative inline-flex items-center w-56">
-                          <select 
-                            value={v.scaleType}
-                            onChange={(e) => setVariableScale(i, e.target.value as ParsedVariable['scaleType'])}
-                            disabled={!v.selected}
-                            className={`inline-flex items-center justify-between w-full px-3 py-1.5 bg-white hover:bg-slate-50 border border-slate-200 hover:border-slate-300 rounded-md text-[13px] text-slate-700 transition-colors font-medium appearance-none bg-none outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 cursor-pointer shadow-sm ${!v.selected ? 'opacity-50' : ''}`}
-                          >
-                            <option value="Metric">Continuous (Metric)</option>
-                            <option value="Ordinal">Ordinal</option>
-                            <option value="Categorical">Nominal (Categorical)</option>
-                          </select>
-                          <svg className="w-4 h-4 text-slate-400 shrink-0 ml-1.5 absolute right-3 pointer-events-none" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd"></path></svg>
-                        </div>
-                      </td>
-                      <td className={`w-24 px-4 py-2.5 text-right font-mono text-[13px] ${!v.selected ? 'text-slate-400' : 'text-slate-600'}`}>
-                        <EditableCell 
-                          type="number"
-                          value={v.min ?? ''} 
-                          onChange={(val) => updateVariableField(i, 'min', parseFloat(val))} 
-                          disabled={!v.selected}
-                          className="text-right"
-                        />
-                      </td>
-                      <td className={`w-24 px-4 py-2.5 text-right font-mono text-[13px] ${!v.selected ? 'text-slate-400' : 'text-slate-600'}`}>
-                        <EditableCell 
-                          type="number"
-                          value={v.max ?? ''} 
-                          onChange={(val) => updateVariableField(i, 'max', parseFloat(val))} 
-                          disabled={!v.selected}
-                          className="text-right"
-                        />
-                      </td>
-                      <td className={`w-24 px-4 py-2.5 text-right font-mono text-[13px] ${v.missingCount > 0 ? 'text-amber-600 font-medium' : 'text-slate-400'}`}>
-                        {v.missingCount}
-                      </td>
-                      <td className="px-6 py-2.5"></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <div className="dm-controls">
+            <label className="dm-control-group">
+              <span className="dm-control-label">Missing marker</span>
+              <input
+                type="text"
+                placeholder="e.g. -99"
+                value={missingMarker}
+                onChange={e => handleMissingMarkerChange(e.target.value)}
+                className="dm-control-input"
+                title="Values matching this will be treated as missing"
+              />
+            </label>
+            <label className="dm-control-group">
+              <span className="dm-control-label">Treatment</span>
+              <select
+                value={treatment}
+                onChange={e => handleTreatmentChange(e.target.value as 'none' | 'listwise' | 'mean')}
+                className="dm-control-select"
+              >
+                <option value="none">Keep as blank</option>
+                <option value="listwise">Listwise deletion</option>
+                <option value="mean">Mean imputation</option>
+              </select>
+            </label>
+          </div>
+        </div>
 
-          {activeTab === 'data' && (
-            <div className="flex-1 overflow-auto custom-scroll font-mono text-xs">
-              <table className="dataset-import-table w-full text-left border-collapse border-b border-slate-100">
-                <thead className="bg-slate-50 sticky top-0 border-b border-slate-200 text-[11px] uppercase tracking-wider text-slate-500 font-semibold z-10">
-                  <tr>
-                    <th className="w-16 px-4 py-2.5 text-center bg-slate-100/80 border-r border-slate-200 font-sans text-slate-400">Row #</th>
-                    {dataset.variables.map((v, i) => v.selected && (
-                      <th 
-                        key={i} 
-                        onClick={() => handleSort(i)}
-                        className="px-4 py-2.5 border-r border-slate-100 cursor-pointer select-none hover:bg-slate-100/80 transition-colors"
-                        title="Click to sort by this column"
+        {/* ── Variables table ── */}
+        {activeTab === 'variables' && (
+          <div className="dm-body custom-scroll">
+            <table className="dm-table">
+              <thead>
+                <tr>
+                  <th style={{ width: 40 }}>
+                    <input
+                      type="checkbox"
+                      aria-label="Select all"
+                      checked={selectedVarsCount === dataset.variables.length}
+                      onChange={toggleAllVariables}
+                      className="dm-checkbox"
+                    />
+                  </th>
+                  <th>Variable Name</th>
+                  <th>Measurement Scale</th>
+                  <th className="dm-th--num">Min</th>
+                  <th className="dm-th--num">Max</th>
+                  <th className="dm-th--num">Missing</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dataset.variables.map((v, i) => (
+                  <tr key={i} className={!v.selected ? 'dm-row--deselected' : ''}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={v.selected}
+                        onChange={() => toggleVariableSelection(i)}
+                        className="dm-checkbox"
+                      />
+                    </td>
+                    <td className="dm-cell--mono">
+                      <EditableCell value={v.name} onChange={val => updateVariableField(i, 'name', val)} disabled={!v.selected} />
+                    </td>
+                    <td>
+                      <select
+                        value={v.scaleType}
+                        onChange={e => setVariableScale(i, e.target.value as ParsedVariable['scaleType'])}
+                        disabled={!v.selected}
+                        className="dm-scale-select"
                       >
-                        <div className="flex items-center justify-between gap-1">
-                          <span>{v.name}</span>
-                          <span className="text-[10px] text-slate-400">
-                            {sortCol === i ? (sortDirection === 'asc' ? '▲' : '▼') : '↕'}
-                          </span>
-                        </div>
-                      </th>
+                        <option value="Metric">Continuous (Metric)</option>
+                        <option value="Ordinal">Ordinal</option>
+                        <option value="Categorical">Nominal (Categorical)</option>
+                      </select>
+                    </td>
+                    <td className="dm-cell--num">
+                      <EditableCell type="number" value={v.min ?? ''} onChange={val => updateVariableField(i, 'min', parseFloat(val))} disabled={!v.selected} className="text-right" />
+                    </td>
+                    <td className="dm-cell--num">
+                      <EditableCell type="number" value={v.max ?? ''} onChange={val => updateVariableField(i, 'max', parseFloat(val))} disabled={!v.selected} className="text-right" />
+                    </td>
+                    <td className={`dm-cell--num ${v.missingCount > 0 ? 'dm-cell--warning' : 'dm-cell--muted'}`}>
+                      {v.missingCount}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* ── Data preview table ── */}
+        {activeTab === 'data' && (
+          <div className="dm-body dm-body--mono custom-scroll">
+            <table className="dm-table">
+              <thead>
+                <tr>
+                  <th className="dm-th--row">#</th>
+                  {dataset.variables.map((v, i) => v.selected && (
+                    <th key={i} onClick={() => handleSort(i)} className="dm-th--sortable" title="Click to sort">
+                      {v.name}
+                      <span className="dm-sort-icon material-symbols-outlined">
+                        {sortCol === i ? (sortDirection === 'asc' ? 'arrow_upward' : 'arrow_downward') : 'unfold_more'}
+                      </span>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {sortedRows.slice(0, 100).map((row, rIdx) => (
+                  <tr key={rIdx}>
+                    <td className="dm-td--row">{rIdx + 1}</td>
+                    {dataset.variables.map((v, cIdx) => v.selected && (
+                      <td key={cIdx} className={row[cIdx] == null || row[cIdx] === '' ? 'dm-cell--missing' : ''}>
+                        {row[cIdx] == null || row[cIdx] === '' ? 'NA' : String(row[cIdx])}
+                      </td>
                     ))}
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-slate-700 bg-white">
-                  {sortedRows.slice(0, 100).map((row, rIdx) => (
-                    <tr key={rIdx} className={`hover:bg-slate-50 transition-colors ${rIdx % 2 !== 0 ? 'bg-slate-50/40' : ''}`}>
-                      <td className="px-4 py-2 text-center bg-slate-50/50 border-r border-slate-100 font-sans text-slate-400 text-xs">{rIdx + 1}</td>
-                      {dataset.variables.map((v, cIdx) => v.selected && (
-                        <td key={cIdx} className={`px-4 py-2 border-r border-slate-100 ${row[cIdx] == null || row[cIdx] === '' ? 'text-amber-600 bg-amber-50/50 font-semibold' : ''}`}>
-                          {row[cIdx] == null || row[cIdx] === '' ? 'NA' : String(row[cIdx])}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="p-4 bg-white text-center text-xs text-slate-400 font-sans sticky bottom-0 border-t border-slate-100">
-                Showing first {Math.min(100, sortedRows.length)} of {sortedRows.length} observations {sortCol !== null ? `(Sorted by ${dataset.variables[sortCol]?.name || ''} ${sortDirection.toUpperCase()})` : ''}
-              </div>
+                ))}
+              </tbody>
+            </table>
+            <div className="dm-data-footer">
+              Showing {Math.min(100, sortedRows.length)} of {sortedRows.length} rows
+              {sortCol !== null && ` — sorted by ${dataset.variables[sortCol]?.name} ${sortDirection}`}
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
-        {/* 4. FOOTER */}
-        <div className="dataset-import-footer flex shrink-0 items-center justify-between border-t border-slate-200 bg-slate-50 px-5 py-3">
-          <div className="flex items-center space-x-3 text-sm">
+        {/* ── Footer ── */}
+        <div className="dm-footer">
+          <div className="dm-footer__status">
             {selectedVarsCount > 0 ? (
-              <>
-                <span className="flex items-center justify-center w-5 h-5 rounded-full bg-emerald-100 text-emerald-600">
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7"></path></svg>
-                </span>
-                <span className="font-medium text-slate-600">{dataset.rows.length} observations ready to import</span>
-              </>
+              <><span className="material-symbols-outlined" style={{ fontSize: '14px', color: '#059669' }}>check_circle</span>
+              <span>{selectedVarsCount} variable{selectedVarsCount !== 1 ? 's' : ''} · {dataset.rows.length} observations ready</span></>
             ) : (
-              <span className="font-medium text-rose-500">Please select at least one variable</span>
+              <span style={{ color: '#ef4444' }}>Select at least one variable to continue</span>
             )}
           </div>
-          <div className="flex items-center space-x-3">
-            <button 
-              onClick={onCancel} 
-              className="px-5 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 hover:text-slate-900 transition-colors" 
+          <div className="dm-footer__actions">
+            <button type="button" className="modal__btn-cancel" onClick={onCancel}>Cancel</button>
+            <button
               type="button"
-            >
-              Cancel
-            </button>
-            <button 
+              className="modal__btn-create"
               onClick={() => onImport(dataset)}
               disabled={selectedVarsCount === 0}
-              className="flex items-center space-x-2 px-5 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 rounded-lg shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed" 
-              type="button"
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
-              </svg>
-              <span>Import Dataset</span>
+              Import Dataset
             </button>
           </div>
         </div>
+
       </section>
     </div>
   );
 };
+
+export default DataManagerModal;

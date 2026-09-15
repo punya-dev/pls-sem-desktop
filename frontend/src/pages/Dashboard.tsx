@@ -550,14 +550,6 @@ const Dashboard = () => {
                 <option value="Regression">Regression</option>
               </select>
             </div>
-            <div className="modal__field">
-              <label className="modal__label">Dataset</label>
-              {datasetsByStudy[modelModalStudyId] ? (
-                <div className="modal__input" style={{background: 'var(--color-bg-subtle)', color: 'var(--color-text-secondary)'}}>{datasetsByStudy[modelModalStudyId].filename}</div>
-              ) : (
-                <button className="modal__browse-btn" type="button" onClick={() => { setImportingStudyId(modelModalStudyId); fileInputRef.current?.click(); }}>Add dataset</button>
-              )}
-            </div>
           </div>
           <div className="modal__footer">
             <button className="modal__btn-cancel" id="modal-model-cancel-btn" type="button" onClick={() => setModelModalOpen(false)}>Cancel</button>

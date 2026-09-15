@@ -5,7 +5,7 @@ import './index.css'
 import './styles.css'
 import './model-canvas.css'
 import './results.css'
-import './components/DataManagerModal.css'
+
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
