@@ -110,7 +110,7 @@ export const TitleBar: React.FC = () => {
           onClick={() => openTab({ type: 'get-started', title: 'Home' })}
         >
           <svg className="brand__logo" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="CSPLS Logo">
-            <rect width="48" height="48" rx="10" fill="#6B4EE6" />
+            <rect width="48" height="48" rx="10" fill="var(--color-accent, #6B4EE6)" />
             <circle cx="16" cy="16" r="4" fill="#FFFFFF" />
             <circle cx="32" cy="18" r="4" fill="#C7D2FE" />
             <circle cx="20" cy="32" r="5" fill="#EEF2FF" />

@@ -22,6 +22,25 @@ html, body, #root {
   margin: 0;
   padding: 0;
   overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Global desktop app behavior: no text selection anywhere by default */
+* {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Allow text selection ONLY in editable text inputs and pre/code blocks */
+input,
+textarea,
+[contenteditable="true"],
+.selectable-text,
+code,
+pre {
+  -webkit-user-select: text !important;
+  user-select: text !important;
 }
 
 #root {

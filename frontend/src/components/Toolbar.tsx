@@ -38,7 +38,7 @@ const Toolbar = () => {
         
         <div className="tb-dropdown-container">
           <button className="tb-dropdown-btn" type="button" title="Style" id="btn-style" onClick={() => toggleDropdown('style')}>
-            <div className="tb-shape-preview"></div>
+            <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>palette</span>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
           </button>
           <div className="tb-dropdown-menu" id="menu-style" style={{ display: openDropdown === 'style' ? 'block' : 'none' }}>

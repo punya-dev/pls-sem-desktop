@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useStore, type AppSettings } from '../store';
+import { ACCENT_PRESETS, getContrastTextColor, applyAccentColor } from '../utils/theme';
 
 type SettingsTab = 'about' | 'appearance' | 'calculation' | 'canvas';
 
@@ -7,6 +8,32 @@ export const SettingsModal: React.FC = () => {
   const { isSettingsOpen, setIsSettingsOpen, settings, updateSettings } = useStore();
   const [activeTab, setActiveTab] = useState<SettingsTab>('about');
   const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'latest'>('idle');
+
+  const currentAccent = settings.accentColor || '#6B4EE6';
+  const [hexInput, setHexInput] = useState(currentAccent);
+
+  useEffect(() => {
+    setHexInput(settings.accentColor || '#6B4EE6');
+  }, [settings.accentColor]);
+
+  const handleAccentSelect = (colorHex: string) => {
+    updateSettings({ accentColor: colorHex });
+    const isDark = document.documentElement.dataset.theme === 'dark';
+    applyAccentColor(colorHex, isDark);
+    setHexInput(colorHex);
+  };
+
+  const handleHexChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setHexInput(val);
+    if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+      handleAccentSelect(val);
+    }
+  };
+
+  const isCustomSelected = !ACCENT_PRESETS.some(
+    (p) => p.color.toLowerCase() === currentAccent.toLowerCase()
+  );
 
   if (!isSettingsOpen) return null;
 
@@ -115,13 +142,189 @@ export const SettingsModal: React.FC = () => {
                       className={`settings-theme-btn ${settings.theme === mode.id ? 'settings-theme-btn--active' : ''}`}
                       onClick={() => {
                         updateSettings({ theme: mode.id as AppSettings['theme'] });
-                        document.documentElement.dataset.theme = mode.id === 'dark' ? 'dark' : 'light';
+                        const isDark = mode.id === 'dark' || (mode.id === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+                        document.documentElement.dataset.theme = isDark ? 'dark' : 'light';
+                        if (isDark) {
+                          document.documentElement.dataset.darkVariant = settings.darkVariant || 'default';
+                        } else {
+                          delete document.documentElement.dataset.darkVariant;
+                        }
                       }}
                     >
                       <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>{mode.icon}</span>
                       <span>{mode.label}</span>
                     </button>
                   ))}
+                </div>
+
+                {/* Dark variant — only shown when dark/system theme is active */}
+                {(settings.theme === 'dark' || settings.theme === 'system') && (
+                  <div style={{ marginTop: '12px' }}>
+                    <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>
+                      Dark Style
+                    </div>
+                    <div className="settings-theme-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+                      {[
+                        { id: 'default', label: 'Default', icon: 'dark_mode' },
+                        { id: 'grayscale', label: 'Grayscale', icon: 'invert_colors_off' },
+                        { id: 'true-black', label: 'True Black', icon: 'contrast' },
+                      ].map((variant) => (
+                        <button
+                          key={variant.id}
+                          type="button"
+                          className={`settings-theme-btn ${(settings.darkVariant || 'default') === variant.id ? 'settings-theme-btn--active' : ''}`}
+                          onClick={() => {
+                            updateSettings({ darkVariant: variant.id as AppSettings['darkVariant'] });
+                            if (document.documentElement.dataset.theme === 'dark') {
+                              document.documentElement.dataset.darkVariant = variant.id;
+                            }
+                          }}
+                        >
+                          <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>{variant.icon}</span>
+                          <span style={{ fontSize: '11px' }}>{variant.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="settings-section">
+                <div className="settings-section__header">Accent Color</div>
+                <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '8px' }}>
+                  Choose a signature pastel accent or pick any custom hue
+                </div>
+
+                <div className="settings-accent-grid">
+                  {ACCENT_PRESETS.map((preset) => {
+                    const isSelected = (settings.accentColor || '#6B4EE6').toLowerCase() === preset.color.toLowerCase();
+                    const checkColor = getContrastTextColor(preset.color);
+                    return (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        className={`settings-accent-btn ${isSelected ? 'settings-accent-btn--active' : ''}`}
+                        onClick={() => handleAccentSelect(preset.color)}
+                        title={`${preset.name}${preset.isDefault ? ' (Default)' : ''}`}
+                      >
+                        <div
+                          className="settings-accent-swatch"
+                          style={{ backgroundColor: preset.color }}
+                        >
+                          {isSelected && (
+                            <span
+                              className="material-symbols-outlined"
+                              style={{ fontSize: '16px', color: checkColor, fontWeight: 700 }}
+                            >
+                              check
+                            </span>
+                          )}
+                        </div>
+                        <span className="settings-accent-label">
+                          {preset.name}
+                        </span>
+                      </button>
+                    );
+                  })}
+
+                  {/* Custom Color Option with native picker */}
+                  <div
+                    className={`settings-accent-btn settings-accent-custom-wrapper ${isCustomSelected ? 'settings-accent-btn--active' : ''}`}
+                    title="Choose any custom hue"
+                  >
+                    <div
+                      className="settings-accent-swatch"
+                      style={
+                        isCustomSelected
+                          ? { backgroundColor: currentAccent }
+                          : {
+                              background:
+                                'conic-gradient(from 180deg at 50% 50%, #EF4444 0deg, #F59E0B 60deg, #10B981 120deg, #06B6D4 180deg, #3B82F6 240deg, #8B5CF6 300deg, #EF4444 360deg)',
+                            }
+                      }
+                    >
+                      {isCustomSelected ? (
+                        <span
+                          className="material-symbols-outlined"
+                          style={{
+                            fontSize: '16px',
+                            color: getContrastTextColor(currentAccent),
+                            fontWeight: 700,
+                          }}
+                        >
+                          check
+                        </span>
+                      ) : (
+                        <span
+                          className="material-symbols-outlined"
+                          style={{ fontSize: '15px', color: '#FFFFFF', textShadow: '0 1px 2px rgba(0,0,0,0.6)' }}
+                        >
+                          palette
+                        </span>
+                      )}
+                    </div>
+                    <span className="settings-accent-label">Custom</span>
+                    <input
+                      type="color"
+                      className="settings-accent-color-native-input"
+                      value={currentAccent}
+                      onChange={(e) => handleAccentSelect(e.target.value)}
+                      title="Click to open color picker"
+                    />
+                  </div>
+                </div>
+
+                {/* Custom Hex input & Reset to Default */}
+                <div className="settings-accent-custom-meta">
+                  <div className="settings-accent-hex-group">
+                    <span className="settings-accent-hex-label">Hex Code:</span>
+                    <input
+                      type="text"
+                      className="settings-accent-hex-input"
+                      value={hexInput}
+                      placeholder="#6B4EE6"
+                      maxLength={7}
+                      onChange={handleHexChange}
+                    />
+                  </div>
+                  {currentAccent.toLowerCase() !== '#6b4ee6' && (
+                    <button
+                      type="button"
+                      className="settings-link"
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        fontSize: '11px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '3px',
+                      }}
+                      onClick={() => handleAccentSelect('#6B4EE6')}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: '13px' }}>
+                        restart_alt
+                      </span>
+                      Reset to Default
+                    </button>
+                  )}
+                </div>
+
+                {/* Live Accent Preview Box */}
+                <div className="settings-accent-preview">
+                  <span className="settings-accent-preview__label">Preview:</span>
+                  <button type="button" className="settings-accent-preview__btn">
+                    Primary Button
+                  </button>
+                  <span className="settings-accent-preview__pill">
+                    <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>
+                      verified
+                    </span>
+                    Active Pill
+                  </span>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-accent)' }}>
+                    Active Accent Link
+                  </span>
                 </div>
               </div>
 

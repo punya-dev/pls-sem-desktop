@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useStore, type AppTab } from '../store';
 import WorkspaceModal from './WorkspaceModal';
+import { promptOpenWorkspaceFolder } from '../utils/workspace-import';
 
 export const TabBar: React.FC = () => {
   const { tabs, activeTabId, setActiveTab, closeTab, openTab, workspaces, reorderTabs, setActiveWorkspace, renameWorkspace } = useStore();
@@ -11,6 +12,13 @@ export const TabBar: React.FC = () => {
   const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Tab scroll overflow state
+  const [canScrollRight, setCanScrollRight] = useState(false);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+
+  // Workspace Group Collapsing
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
 
   // ─── Drag & Slide State ───────────────────────────────────────────────────
   // 1. Sliding a child tab within an expanded group
@@ -79,21 +87,59 @@ export const TabBar: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [activeTabId, closeTab]);
 
-  // Scroll active tab into view
+  const checkScrollOverflow = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const hasRight = el.scrollWidth > el.clientWidth && el.scrollLeft + el.clientWidth < el.scrollWidth - 3;
+    const hasLeft = el.scrollLeft > 3;
+    setCanScrollRight(hasRight);
+    setCanScrollLeft(hasLeft);
+  };
+
+  // Scroll active tab into view & re-verify overflow
   useEffect(() => {
     if (!scrollRef.current) return;
     const activeEl = scrollRef.current.querySelector('.tab-item--active') as HTMLElement | null;
     if (activeEl) {
       activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
     }
+    const t = setTimeout(checkScrollOverflow, 120);
+    return () => clearTimeout(t);
   }, [activeTabId]);
+
+  // Track scroll overflow changes via scroll listener and ResizeObserver
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    checkScrollOverflow();
+    el.addEventListener('scroll', checkScrollOverflow, { passive: true });
+
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(() => {
+        checkScrollOverflow();
+      });
+      resizeObserver.observe(el);
+      if (el.parentElement) {
+        resizeObserver.observe(el.parentElement);
+      }
+    }
+
+    const t = setTimeout(checkScrollOverflow, 80);
+
+    return () => {
+      clearTimeout(t);
+      el.removeEventListener('scroll', checkScrollOverflow);
+      resizeObserver?.disconnect();
+    };
+  }, [tabs, activeTabId, collapsedGroups]);
 
   const filteredWorkspaces = workspaces.filter((ws) =>
     ws.name.toLowerCase().includes(searchQuery.toLowerCase().trim())
   );
 
   // ─── Workspace Group Collapsing ───────────────────────────────────────────
-  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [groupContextMenu, setGroupContextMenu] = useState<{
     wsId: string;
     wsName: string;
@@ -115,6 +161,30 @@ export const TabBar: React.FC = () => {
       [wsId]: !prev[wsId],
     }));
   };
+
+  // Auto-collapse inactive groups whenever switching to another tab or group
+  useEffect(() => {
+    if (!activeTabId) return;
+    const currentTab = tabs.find((t) => t.id === activeTabId);
+    const activeWsId = currentTab?.workspaceId;
+
+    const allWsIds = new Set<string>();
+    tabs.forEach((t) => {
+      if (t.workspaceId) allWsIds.add(t.workspaceId);
+    });
+
+    setCollapsedGroups((prev) => {
+      const next = { ...prev };
+      allWsIds.forEach((wsId) => {
+        if (wsId === activeWsId) {
+          next[wsId] = false; // Active group stays expanded
+        } else {
+          next[wsId] = true;  // Non-active groups automatically collapse
+        }
+      });
+      return next;
+    });
+  }, [activeTabId]);
 
   const openWorkspaceDirectory = (wsId: string, wsName: string) => {
     setActiveWorkspace(wsId);
@@ -175,14 +245,20 @@ export const TabBar: React.FC = () => {
         return 'inventory_2';
       case 'dataset':
         return 'dataset';
+      case 'docs':
+        return 'menu_book';
+      case 'samples':
+        return 'science';
+      case 'feedback':
+        return 'feedback';
       default:
         return null;
     }
   };
 
   const GROUP_PALETTE = [
-    { bg: 'rgba(107, 78, 230, 0.09)', border: 'rgba(107, 78, 230, 0.26)', text: '#5936d9' },
-    { bg: 'rgba(0, 0, 0, 0.04)', border: 'rgba(0,0,0,0.10)', text: 'var(--color-text-secondary)' },
+    { bg: 'var(--color-accent-subtle)', border: 'var(--color-accent-border)', text: 'var(--color-accent)' },
+    { bg: 'var(--color-accent-subtle)', border: 'var(--color-accent-border)', text: 'var(--color-accent)' },
   ];
 
   const getWorkspaceColor = (_workspaceId: string, groupIndex: number) => {
@@ -258,9 +334,8 @@ export const TabBar: React.FC = () => {
     // Immediately activate tab
     setActiveTab(tab.id);
 
-    // If there is only 1 child tab, delegate to sliding the whole group along the strip!
+    // If there is only 1 child tab, nothing to reorder within the group
     if (childTabs.length <= 1) {
-      handleStripItemMouseDown(e, stripItem);
       return;
     }
 
@@ -710,7 +785,31 @@ export const TabBar: React.FC = () => {
   return (
     <>
       <div className="tabbar-root no-drag">
-        <div className="tabstrip" ref={scrollRef}>
+        {canScrollLeft && (
+          <button
+            className="tab-overflow-indicator tab-overflow-indicator--left"
+            type="button"
+            title="Scroll left to see more tabs"
+            onClick={(e) => {
+              e.stopPropagation();
+              scrollRef.current?.scrollBy({ left: -140, behavior: 'smooth' });
+            }}
+          >
+            <span className="material-symbols-outlined">chevron_left</span>
+          </button>
+        )}
+        <div
+          className={`tabstrip ${
+            canScrollLeft && canScrollRight
+              ? 'has-overflow-both'
+              : canScrollRight
+              ? 'has-overflow-right'
+              : canScrollLeft
+              ? 'has-overflow-left'
+              : ''
+          }`}
+          ref={scrollRef}
+        >
           {stripItems.map((item, itemIndex) => {
             if (item.kind === 'standalone') {
               return renderStandaloneTab(item.tab, itemIndex, item);
@@ -878,6 +977,20 @@ export const TabBar: React.FC = () => {
 
         {/* ─── Add Button with Dropdown ─────────────────────────────────── */}
         <div className="tab-add-wrapper" ref={dropdownRef}>
+          {canScrollRight && (
+            <button
+              className="tab-overflow-indicator tab-overflow-indicator--right"
+              type="button"
+              title="Scroll right to see more tabs"
+              onClick={(e) => {
+                e.stopPropagation();
+                scrollRef.current?.scrollBy({ left: 140, behavior: 'smooth' });
+              }}
+            >
+              <span className="material-symbols-outlined">chevron_right</span>
+            </button>
+          )}
+
           <button
             className={`tab-add-btn ${isDropdownOpen ? 'active' : ''}`}
             type="button"
@@ -979,6 +1092,18 @@ export const TabBar: React.FC = () => {
                 >
                   <span className="material-symbols-outlined">home</span>
                   <span className="tab-menu-dropdown__item-title">Home</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="tab-menu-dropdown__item"
+                  onClick={async () => {
+                    setIsDropdownOpen(false);
+                    await promptOpenWorkspaceFolder();
+                  }}
+                >
+                  <span className="material-symbols-outlined">folder_open</span>
+                  <span className="tab-menu-dropdown__item-title">Open Workspace...</span>
                 </button>
 
                 <button

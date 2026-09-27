@@ -4,12 +4,21 @@ import { useStore } from '../store';
 import WorkspaceModal from '../components/WorkspaceModal';
 import InputDialog from '../components/InputDialog';
 import { api } from '../utils/api';
+import { promptOpenWorkspaceFolder } from '../utils/workspace-import';
 
 const GetStarted = () => {
   const navigate = useNavigate();
-  const { workspaces, activeWorkspaceId, addWorkspace, removeWorkspace, setActiveWorkspace, archivedWorkspaces, archiveWorkspace, renameWorkspace, deleteWorkspace, requestDelete, openTab } = useStore();
+  const { workspaces, activeWorkspaceId, addWorkspace, removeWorkspace, setActiveWorkspace, archivedWorkspaces, archiveWorkspace, renameWorkspace, deleteWorkspace, requestDelete, openTab, isSidebarCollapsed, toggleSidebar } = useStore();
   const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = useState(false);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [editingWsId, setEditingWsId] = useState<string | null>(null);
+  const [editWsName, setEditWsName] = useState('');
+
+  const commitWsRename = (id: string) => {
+    if (editWsName.trim()) {
+      renameWorkspace(id, editWsName.trim());
+    }
+    setEditingWsId(null);
+  };
   const [inputDialogConfig, setInputDialogConfig] = useState<{isOpen: boolean; title: string; placeholder: string; submitLabel: string; initialValue?: string; onSubmit: (val: string) => void}>({
     isOpen: false, title: '', placeholder: '', submitLabel: '', onSubmit: () => {}
   });
@@ -110,7 +119,7 @@ const GetStarted = () => {
                       value={workspaceQuery} 
                       onChange={event => setWorkspaceQuery(event.target.value)} 
                       onBlur={() => { if (!workspaceQuery) setIsWorkspaceSearchOpen(false); }} 
-                      placeholder="Filter workspaces…" 
+                      placeholder="Filter…" 
                     />
                     {workspaceQuery && (
                       <button className="inline-search-clear" type="button" aria-label="Clear workspace search" onMouseDown={event => event.preventDefault()} onClick={() => setWorkspaceQuery('')}>×</button>
@@ -120,7 +129,15 @@ const GetStarted = () => {
                   <span className="sidebar-header__label">Workspaces</span>
                 )}
                 <div className="sidebar-header__actions">
-                  <button className={`icon-btn icon-btn--sm ${isWorkspaceSearchOpen ? 'active' : ''}`} title="Filter workspaces" type="button" onClick={() => { setIsWorkspaceSearchOpen(open => !open); if (isWorkspaceSearchOpen) setWorkspaceQuery(''); }}>
+                  <button className={`icon-btn icon-btn--sm ${isWorkspaceSearchOpen ? 'active' : ''}`} title="Search workspaces" type="button" onClick={() => {
+                    if (isSidebarCollapsed) {
+                      toggleSidebar();
+                      setTimeout(() => setIsWorkspaceSearchOpen(true), 150);
+                    } else {
+                      setIsWorkspaceSearchOpen(open => !open);
+                      if (isWorkspaceSearchOpen) setWorkspaceQuery('');
+                    }
+                  }}>
                     <span className="material-symbols-outlined">search</span>
                   </button>
                   <button className="sidebar-create-folder-btn" title="Create Workspace" type="button" onClick={() => setIsWorkspaceModalOpen(true)}>
@@ -130,7 +147,7 @@ const GetStarted = () => {
                       <line x1="9" x2="15" y1="13" y2="13"></line>
                     </svg>
                   </button>
-                  <button className="icon-btn icon-btn--sm" id="sidebar-collapse-btn" title="Collapse sidebar" type="button" onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}>
+                  <button className="icon-btn icon-btn--sm" id="sidebar-collapse-btn" title={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} type="button" onClick={toggleSidebar}>
                     <span className="material-symbols-outlined">left_panel_close</span>
                   </button>
                 </div>
@@ -138,22 +155,29 @@ const GetStarted = () => {
 
               <div id="sidebar-ws-list" style={{'display': 'flex', 'flexDirection': 'column', 'gap': '2px'}}>
                 {filteredWorkspaces.map(ws => (
-                  <button 
+                  <div 
                     key={ws.id} 
                     className="sidebar-item" 
-                    type="button" 
                     onClick={async () => {
-                      if (ws.path) {
-                        await api.openWorkspace(ws.path);
+                      if (editingWsId !== ws.id) {
+                        if (ws.path) {
+                          await api.openWorkspace(ws.path);
+                        }
+                        setActiveWorkspace(ws.id);
+                        openTab({ type: 'workspace', title: ws.name, workspaceId: ws.id });
                       }
-                      setActiveWorkspace(ws.id);
-                      openTab({ type: 'workspace', title: ws.name, workspaceId: ws.id });
                     }}
                     onContextMenu={(e) => {
                       e.preventDefault();
                       useStore.getState().openContextMenu(e.clientX, e.clientY, [
                         {
-                          id: 'rename', label: 'Rename Workspace', icon: 'edit', action: () => rename('Rename Workspace', ws.name, name => renameWorkspace(ws.id, name))
+                          id: 'rename', 
+                          label: 'Rename Workspace', 
+                          icon: 'edit', 
+                          action: () => {
+                            setEditingWsId(ws.id);
+                            setEditWsName(ws.name);
+                          }
                         },
                         {
                           id: 'duplicate', label: 'Duplicate Workspace', icon: 'content_copy', action: () => useStore.getState().addWorkspace({ ...ws, id: `ws_${Date.now()}`, name: `${ws.name} copy` })
@@ -185,12 +209,30 @@ const GetStarted = () => {
                         }
                       ]);
                     }}
+                    style={{ cursor: 'pointer' }}
                   >
-                    <span className="sidebar-item__left">
+                    <span className="sidebar-item__left" style={{ width: '100%', overflow: 'hidden' }}>
                       <span className="material-symbols-outlined">folder</span>
-                      <span>{ws.name}</span>
+                      {editingWsId === ws.id ? (
+                        <input
+                          autoFocus
+                          type="text"
+                          className="inline-seamless-rename-input"
+                          value={editWsName}
+                          size={Math.max(editWsName.length, 1)}
+                          onChange={(e) => setEditWsName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') commitWsRename(ws.id);
+                            else if (e.key === 'Escape') setEditingWsId(null);
+                          }}
+                          onBlur={() => commitWsRename(ws.id)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <span>{ws.name}</span>
+                      )}
                     </span>
-                  </button>
+                  </div>
                 ))}
                 {isWorkspaceSearchOpen && workspaceQuery && filteredWorkspaces.length === 0 && (
                   <span className="inline-search-empty">No workspaces found</span>
@@ -207,21 +249,21 @@ const GetStarted = () => {
               </span>
             </button>
 
-            <button className="sidebar-item" type="button" data-action="docs">
+            <button className="sidebar-item" type="button" data-action="docs" onClick={() => openTab({ type: 'docs', title: 'Documentation' })}>
               <span className="sidebar-item__left">
                 <span className="material-symbols-outlined">menu_book</span>
                 <span>Documentation</span>
               </span>
             </button>
 
-            <button className="sidebar-item" type="button" data-action="samples">
+            <button className="sidebar-item" type="button" data-action="samples" onClick={() => openTab({ type: 'samples', title: 'Sample Projects' })}>
               <span className="sidebar-item__left">
                 <span className="material-symbols-outlined">science</span>
                 <span>Sample Projects</span>
               </span>
             </button>
 
-            <button className="sidebar-item" type="button" data-action="feedback">
+            <button className="sidebar-item" type="button" data-action="feedback" onClick={() => openTab({ type: 'feedback', title: 'Feedback & Reports' })}>
               <span className="sidebar-item__left">
                 <span className="material-symbols-outlined">feedback</span>
                 <span className="truncate">Feedback &amp; Reports</span>
@@ -238,7 +280,12 @@ const GetStarted = () => {
                 <h1 className="page-header__title">Get Started</h1>
                 <p className="page-header__subtitle">Welcome to CSPLS. Set up your workspace or explore guided sample models to begin.</p>
               </div>
-              <div className="page-header__actions">
+              <div className="page-header__actions" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <button className="btn btn-secondary" type="button" onClick={() => promptOpenWorkspaceFolder()}>
+                  <span className="material-symbols-outlined">folder_open</span>
+                  <span>Open Workspace</span>
+                  <kbd className="kbd">⌘O</kbd>
+                </button>
                 <button className="btn btn-primary" type="button" onClick={() => setIsWorkspaceModalOpen(true)}>
                   <span className="material-symbols-outlined">add</span>
                   <span>Create Workspace</span>
@@ -282,7 +329,7 @@ const GetStarted = () => {
 
                   <div className="release-card__footer">
                     <span className="release-card__date">November 18, 2024</span>
-                    <button className="release-card__changelog" type="button">
+                    <button className="release-card__changelog" type="button" onClick={() => openTab({ type: 'changelog', title: 'Changelog' })}>
                       Technical Changelog
                       <span className="material-symbols-outlined">arrow_forward</span>
                     </button>
@@ -292,7 +339,7 @@ const GetStarted = () => {
                 <div className="animate-fade-in animate-fade-in-delay-2">
                   <div className="section-header">
                     <h2 className="section-header__title">Documentation &amp; Quick Guides</h2>
-                    <a href="#" className="section-header__link">Browse all docs</a>
+                    <a href="#" className="section-header__link" onClick={(e) => { e.preventDefault(); openTab({ type: 'docs', title: 'Documentation' }); }}>Browse all docs</a>
                   </div>
 
                   <div className="doc-list">
@@ -331,6 +378,7 @@ const GetStarted = () => {
                   <div className="section-header__title">
                     Sample Projects to Get Started
                   </div>
+                  <a href="#" className="section-header__link" onClick={(e) => { e.preventDefault(); openTab({ type: 'samples', title: 'Sample Projects' }); }}>More</a>
                 </div>
 
                 <div className="project-list">

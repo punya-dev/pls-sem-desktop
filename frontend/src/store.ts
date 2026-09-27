@@ -8,6 +8,9 @@ export interface Workspace {
   id: string;
   name: string;
   path: string;
+  archivedAt?: string;
+  createdAt?: string;
+  modifiedAt?: string;
 }
 
 export interface Model {
@@ -26,6 +29,7 @@ export interface Study {
   description: string;
   lastModified: string;
   path: string;
+  createdAt?: string;
 }
 
 export interface Variable {
@@ -72,6 +76,7 @@ export interface AppSettings {
   version: string;
   websiteUrl: string;
   theme: 'light' | 'dark' | 'system';
+  darkVariant: 'default' | 'grayscale' | 'true-black';
   fontFamily: 'Inter' | 'Roboto' | 'JetBrains Mono' | 'System';
   language: 'en' | 'es' | 'de' | 'fr' | 'zh';
   decimalSystem: 'point' | 'comma';
@@ -79,6 +84,7 @@ export interface AppSettings {
   parallelProcessors: number | 'all';
   keyboardLayout: 'qwerty' | 'azerty' | 'qwertz';
   flipOrientation: boolean;
+  accentColor: string;
 }
 
 export interface DeleteConfirmDialog {
@@ -90,7 +96,7 @@ export interface DeleteConfirmDialog {
 
 export interface AppTab {
   id: string;
-  type: 'get-started' | 'workspace' | 'model' | 'archive' | 'dataset';
+  type: 'get-started' | 'workspace' | 'model' | 'archive' | 'dataset' | 'docs' | 'samples' | 'feedback' | 'changelog';
   title: string;
   workspaceId?: string | null;
   studyId?: string | null;
@@ -105,6 +111,9 @@ interface AppState {
   updateSettings: (partial: Partial<AppSettings>) => void;
   isSettingsOpen: boolean;
   setIsSettingsOpen: (open: boolean) => void;
+  isSidebarCollapsed: boolean;
+  toggleSidebar: () => void;
+  setSidebarCollapsed: (collapsed: boolean) => void;
 
   // Deletion Confirmation Modal
   deleteConfirmation: DeleteConfirmDialog | null;
@@ -204,6 +213,7 @@ const INITIAL_SETTINGS: AppSettings = {
   version: '0.1.0',
   websiteUrl: 'https://cspls.org',
   theme: 'light',
+  darkVariant: 'default',
   fontFamily: 'Inter',
   language: 'en',
   decimalSystem: 'point',
@@ -211,6 +221,7 @@ const INITIAL_SETTINGS: AppSettings = {
   parallelProcessors: 'all',
   keyboardLayout: 'qwerty',
   flipOrientation: false,
+  accentColor: '#6B4EE6',
 };
 
 export const useStore = create<AppState>()(
@@ -238,6 +249,9 @@ export const useStore = create<AppState>()(
       }),
       isSettingsOpen: false,
       setIsSettingsOpen: (open) => set({ isSettingsOpen: open }),
+      isSidebarCollapsed: false,
+      toggleSidebar: () => set((state) => ({ isSidebarCollapsed: !state.isSidebarCollapsed })),
+      setSidebarCollapsed: (collapsed) => set({ isSidebarCollapsed: collapsed }),
 
       // Deletion Confirmation Modal
       deleteConfirmation: null,
@@ -248,22 +262,22 @@ export const useStore = create<AppState>()(
       tabs: [{ id: 'get-started', type: 'get-started', title: 'Home' }],
       activeTabId: 'get-started',
       openTab: (tabInput) => set((state) => {
-        if (tabInput.type === 'get-started') {
-          const existing = state.tabs.find(t => t.type === 'get-started');
+        const SINGLETON_TYPES = ['get-started', 'archive', 'docs', 'samples', 'feedback', 'changelog'] as const;
+        if (SINGLETON_TYPES.includes(tabInput.type as any)) {
+          const existing = state.tabs.find(t => t.type === tabInput.type);
           if (existing) {
             return { activeTabId: existing.id };
           }
-          const newTab: AppTab = { id: 'get-started', type: 'get-started', title: 'Home' };
-          return { tabs: [...state.tabs, newTab], activeTabId: newTab.id };
-        }
-
-        if (tabInput.type === 'archive') {
-          const existing = state.tabs.find(t => t.type === 'archive');
-          if (existing) {
-            return { activeTabId: existing.id };
-          }
-          const id = tabInput.id || 'tab-archive';
-          const newTab: AppTab = { id, type: 'archive', title: 'Archive' };
+          const id = tabInput.id || `tab-${tabInput.type}`;
+          const title = tabInput.title || (
+            tabInput.type === 'get-started' ? 'Home' :
+            tabInput.type === 'archive' ? 'Archive' :
+            tabInput.type === 'docs' ? 'Documentation' :
+            tabInput.type === 'samples' ? 'Sample Projects' :
+            tabInput.type === 'feedback' ? 'Feedback & Reports' :
+            'Changelog'
+          );
+          const newTab: AppTab = { ...tabInput, id, title };
           return { tabs: [...state.tabs, newTab], activeTabId: id };
         }
         
@@ -449,7 +463,7 @@ export const useStore = create<AppState>()(
         const workspace = state.workspaces.find(item => item.id === id);
         return workspace ? {
           workspaces: state.workspaces.filter(item => item.id !== id),
-          archivedWorkspaces: [...state.archivedWorkspaces, workspace],
+          archivedWorkspaces: [...state.archivedWorkspaces, { ...workspace, archivedAt: workspace.archivedAt || new Date().toISOString() }],
           activeWorkspaceId: state.activeWorkspaceId === id ? (state.workspaces.find(item => item.id !== id)?.id || null) : state.activeWorkspaceId
         } : state;
       }),
@@ -648,7 +662,16 @@ export const useStore = create<AppState>()(
         activeWorkspaceId: state.activeWorkspaceId,
         theme: state.theme,
         settings: state.settings,
+        isSidebarCollapsed: state.isSidebarCollapsed,
       }), // only persist these fields
+      merge: (persistedState: any, currentState: AppState) => ({
+        ...currentState,
+        ...persistedState,
+        settings: {
+          ...INITIAL_SETTINGS,
+          ...(persistedState?.settings || {}),
+        },
+      }),
     }
   )
 );

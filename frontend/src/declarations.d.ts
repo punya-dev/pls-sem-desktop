@@ -7,6 +7,7 @@ declare module '*/utils/model-canvas' {
   export const exportModelSpec: () => any;
   export const getModelCanvasState: () => any;
   export const loadModelCanvasState: (state: any) => void;
+  export const setCanvasResults: (results: any) => void;
   export const toggleMeasurementMode: (nodeId?: string) => void;
 }
 declare module '*/utils/results.js' {

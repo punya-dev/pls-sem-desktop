@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
-import { initModelCanvas, exportModelSpec, getModelCanvasState, loadModelCanvasState } from '../utils/model-canvas';
+import { initModelCanvas, exportModelSpec, getModelCanvasState, loadModelCanvasState, setCanvasResults } from '../utils/model-canvas';
 import { DataManagerModal } from '../components/DataManagerModal';
 import { BootstrapModal } from '../components/BootstrapModal';
 import type { ParsedDataset } from '../utils/dataset-parser';
@@ -9,6 +9,7 @@ import { parseDatasetFile, processData } from '../utils/dataset-parser';
 import { api, type ValidationResponse } from '../utils/api';
 
 import { Upload } from 'lucide-react';
+import AppSidebar from '../components/AppSidebar';
 import '../model-canvas.css';
 import '../results.css';
 
@@ -26,9 +27,31 @@ const ModelEditor = () => {
   const [isImporting, setIsImporting] = useState(false);
   const [isBootstrapModalOpen, setIsBootstrapModalOpen] = useState(false);
   const [variableFilter, setVariableFilter] = useState('');
+  const [isVarSearchOpen, setIsVarSearchOpen] = useState(false);
+  const [isCalcMenuOpen, setIsCalcMenuOpen] = useState(false);
   const [areCategoriesCollapsed, setAreCategoriesCollapsed] = useState(false);
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const calcDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (calcDropdownRef.current && !calcDropdownRef.current.contains(e.target as Node)) {
+        setIsCalcMenuOpen(false);
+      }
+    };
+    if (isCalcMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isCalcMenuOpen]);
+
+  useEffect(() => {
+    // Default to collapsed sidebar in canvas/results page to maximize space
+    useStore.getState().setSidebarCollapsed(true);
+  }, []);
 
   const fixedFills = ['#334155', '#ffffff'];
   const fixedBorders = ['transparent', '#1e293b'];
@@ -91,7 +114,15 @@ const ModelEditor = () => {
     try {
       setIsImporting(true);
       const parsed = await parseDatasetFile(file);
-      setDatasetToImport(parsed);
+      await handleImportComplete(parsed);
+      if (activeStudyId) {
+        openTab({
+          type: 'dataset',
+          title: parsed.filename,
+          studyId: activeStudyId,
+          workspaceId: activeWorkspaceId,
+        });
+      }
     } catch (err) {
       alert("Error importing file: " + err);
     } finally {
@@ -168,6 +199,9 @@ const ModelEditor = () => {
       if (view === 'model') {
         (viewModel as HTMLElement).style.display = 'flex';
         (viewResults as HTMLElement).style.display = 'none';
+        if (plsResults) {
+          setCanvasResults(plsResults);
+        }
         if (sliderBg && sliderBtns && sliderBtns.length >= 2) {
           (sliderBg as HTMLElement).style.transform = 'translateX(0)';
           sliderBtns[0]?.classList.add('active');
@@ -256,6 +290,7 @@ const ModelEditor = () => {
 
       if (runRes.results) {
         setPlsResults(runRes.results);
+        setCanvasResults(runRes.results);
       }
 
       setValidationSuccessToast(`PLS-SEM Calculation Complete! Converged in ${runRes.results?.iterations || 0} iterations`);
@@ -274,12 +309,19 @@ const ModelEditor = () => {
       api.loadProjectResults(activeStudy.path, 'pls').then((res) => {
         if (res && res.results) {
           setPlsResults(res.results);
+          setCanvasResults(res.results);
           const viewSlider = document.getElementById('main-view-slider');
           if (viewSlider) {
             (viewSlider as HTMLElement).style.display = 'flex';
           }
+        } else {
+          setPlsResults(null);
+          setCanvasResults(null);
         }
-      }).catch(() => {});
+      }).catch(() => {
+        setPlsResults(null);
+        setCanvasResults(null);
+      });
     }
   }, [activeStudy?.path]);
 
@@ -563,6 +605,9 @@ const ModelEditor = () => {
           const modelRes = await api.loadProjectModel(activeStudy.path);
           if (modelRes && modelRes.diagram_layout) {
             loadModelCanvasState(modelRes.diagram_layout);
+            if (plsResults) {
+              setCanvasResults(plsResults);
+            }
           }
         } catch (err) {
           console.warn('Could not load saved model layout:', err);
@@ -619,7 +664,9 @@ const ModelEditor = () => {
   }, []);
 
   return (
-    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div className="app-body" style={{ width: '100%', height: '100%', overflow: 'hidden' }}>
+      <AppSidebar activeNav="workspace" />
+      <div style={{ flex: 1, minWidth: 0, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
   {/* ═══ SUB-HEADER / CONTROL BAR ═══ */}
   <div className="subheader">
@@ -648,32 +695,23 @@ const ModelEditor = () => {
         {activeStudy?.name || 'Active_Study'}
       </span>
       <span className="subheader__breadcrumb-sep">/</span>
-      <span className="subheader__breadcrumb-link" style={{color: 'var(--color-accent)'}}>
+      <span className="subheader__breadcrumb-link" style={{color: 'var(--color-accent)', fontWeight: 600}}>
         {activeModel ? `${activeModel.name}.splsm` : 'Untitled model.splsm'}
       </span>
     </div>
     <div className="subheader__actions">
-      {/* Flush Model | Results Switcher */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', marginRight: '6px' }}>
+      {/* Inline Model | Results Switcher */}
+      <div className="subheader__switcher">
         <button
           type="button"
+          className={`subheader__switcher-btn ${currentView === 'model' ? 'active' : ''}`}
           onClick={() => switchView('model')}
-          style={{
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            fontWeight: currentView === 'model' ? 600 : 500,
-            color: currentView === 'model' ? 'var(--color-accent, #6B4EE6)' : 'var(--color-text-muted, #64748B)',
-            padding: '4px 6px',
-            borderBottom: currentView === 'model' ? '2px solid var(--color-accent, #6B4EE6)' : '2px solid transparent',
-            transition: 'all 0.15s ease',
-          }}
         >
           Model
         </button>
-        <span style={{ color: '#CBD5E1', fontSize: '12px' }}>|</span>
         <button
           type="button"
+          className={`subheader__switcher-btn ${currentView === 'results' ? 'active' : ''}`}
           onClick={() => {
             if (plsResults) {
               switchView('results');
@@ -681,73 +719,71 @@ const ModelEditor = () => {
           }}
           disabled={!plsResults}
           title={plsResults ? 'View Results' : 'Please calculate the model first'}
-          style={{
-            background: 'none',
-            border: 'none',
-            cursor: plsResults ? 'pointer' : 'not-allowed',
-            fontWeight: currentView === 'results' ? 600 : 500,
-            color: currentView === 'results' 
-              ? 'var(--color-accent, #6B4EE6)' 
-              : (plsResults ? 'var(--color-text-muted, #64748B)' : '#94A3B8'),
-            opacity: plsResults ? 1 : 0.45,
-            padding: '4px 6px',
-            borderBottom: currentView === 'results' ? '2px solid var(--color-accent, #6B4EE6)' : '2px solid transparent',
-            transition: 'all 0.15s ease',
-          }}
         >
           Results
         </button>
       </div>
 
-      <button
-        className="subheader__btn subheader__btn--primary"
-        id="calculate-btn"
-        type="button"
-        onClick={handleCalculate}
-        disabled={isValidating || isCalculating}
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><polygon points="5 3 19 12 5 21 5 3" /></svg>
-        {isCalculating ? 'Calculating PLS...' : (isValidating ? 'Validating...' : 'Calculate')}
-      </button>
-      <button
-        className="subheader__btn"
-        id="bootstrap-btn"
-        type="button"
-        onClick={() => setIsBootstrapModalOpen(true)}
-        disabled={isValidating || isCalculating}
-        style={{
-          marginLeft: '4px',
-          backgroundColor: '#eef2ff',
-          color: '#4f46e5',
-          borderColor: '#c7d2fe',
-          fontWeight: 600,
-        }}
-        title="Run PLS Bootstrapping with significance testing (p-values, t-values, CIs)"
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 15, height: 15, marginRight: 4 }}>
-          <path d="M18 20V10M12 20V4M6 20v-6" />
-        </svg>
-        Bootstrap
-      </button>
+      {/* Inline Calculate Dropdown */}
+      <div className="subheader__dropdown-container" ref={calcDropdownRef}>
+        <button
+          className="subheader__btn subheader__btn--primary"
+          id="calculate-btn"
+          type="button"
+          onClick={() => setIsCalcMenuOpen(prev => !prev)}
+          disabled={isValidating || isCalculating}
+          title="Calculate Options"
+          style={{ gap: 4 }}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 13, height: 13 }}><polygon points="5 3 19 12 5 21 5 3" /></svg>
+          <span>{isCalculating ? 'Calculating...' : (isValidating ? 'Validating...' : 'Calculate')}</span>
+          <span className="material-symbols-outlined" style={{ fontSize: 16, marginLeft: -1 }}>expand_more</span>
+        </button>
+        {isCalcMenuOpen && (
+          <div className="subheader__dropdown-menu">
+            <button
+              type="button"
+              className="subheader__dropdown-item"
+              onClick={() => {
+                setIsCalcMenuOpen(false);
+                handleCalculate();
+              }}
+            >
+              PLS-SEM Algorithm
+            </button>
+            <button
+              type="button"
+              className="subheader__dropdown-item"
+              onClick={() => {
+                setIsCalcMenuOpen(false);
+                setIsBootstrapModalOpen(true);
+              }}
+            >
+              Bootstrapping...
+            </button>
+          </div>
+        )}
+      </div>
+
       <div className="subheader__divider" />
+
+      {/* Inline Save & Export Icon-Only Buttons */}
       <button
-        className="subheader__btn subheader__btn--ghost"
+        className="subheader__icon-btn"
         type="button"
         onClick={handleSaveModel}
         disabled={isSaving}
-        title="Save Path Model (Cmd+S)"
+        title={isSaving ? 'Saving...' : 'Save Model (⌘S)'}
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" /><polyline points="17 21 17 13 7 13 7 21" /><polyline points="7 3 7 8 15 8" /></svg>
-        {isSaving ? 'Saving...' : 'Save'}
       </button>
       <button
-        className="subheader__btn subheader__btn--ghost"
+        className="subheader__icon-btn"
         type="button"
         onClick={handleExportModel}
         title="Export Model Spec JSON"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1={12} y1={15} x2={12} y2={3} /></svg>
-        Export
       </button>
     </div>
   </div>
@@ -756,37 +792,81 @@ const ModelEditor = () => {
     <div className="app-body">
       {/* ─── Variable Sidebar (Left) ─── */}
       <aside className="var-sidebar" id="var-sidebar">
-        <div className="var-sidebar__search">
-          <div className="var-sidebar__search-inner">
-            <svg className="var-sidebar__search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx={11} cy={11} r={8} /><line x1={21} y1={21} x2="16.65" y2="16.65" /></svg>
-            <input type="text" className="var-sidebar__search-input" value={variableFilter} onChange={event => setVariableFilter(event.currentTarget.value)} placeholder="Filter variables... (⌘F)" />
-          </div>
-        </div>
-        
         {activeDataset ? (
           <div className="var-sidebar__header">
-            <span className="var-sidebar__header-label" title={activeDataset.filename}>{activeDataset.filename}</span>
-            <div style={{display: 'flex', alignItems: 'center', gap: 6}}>
-              <span className="var-sidebar__count">{activeDataset.variables.filter(v => v?.selected).length} vars</span>
-              <button type="button" className="var-sidebar__collapse-all" onClick={() => setAreCategoriesCollapsed(current => !current)}>
-                {areCategoriesCollapsed ? 'Expand' : 'Collapse'}
+            {isVarSearchOpen ? (
+              <div className="inline-search-wrap">
+                <input
+                  autoFocus
+                  type="text"
+                  className="sidebar-inline-search"
+                  value={variableFilter}
+                  onChange={(e) => setVariableFilter(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') {
+                      setIsVarSearchOpen(false);
+                      setVariableFilter('');
+                    }
+                  }}
+                  onBlur={() => {
+                    if (!variableFilter) setIsVarSearchOpen(false);
+                  }}
+                  placeholder="Filter variables…"
+                />
+                {variableFilter && (
+                  <button
+                    className="inline-search-clear"
+                    type="button"
+                    aria-label="Clear variable search"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => setVariableFilter('')}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            ) : (
+              <span className="var-sidebar__header-label" title={activeDataset.filename}>
+                {activeDataset.filename}
+              </span>
+            )}
+            <div className="var-sidebar__header-actions">
+              <button
+                className={`icon-btn icon-btn--sm ${isVarSearchOpen ? 'active' : ''}`}
+                title="Filter variables"
+                type="button"
+                onClick={() => {
+                  setIsVarSearchOpen((open) => !open);
+                  if (isVarSearchOpen) setVariableFilter('');
+                }}
+              >
+                <span className="material-symbols-outlined">search</span>
               </button>
+              <button
+                className="icon-btn icon-btn--sm"
+                title={areCategoriesCollapsed ? 'Expand categories' : 'Collapse categories'}
+                type="button"
+                onClick={() => setAreCategoriesCollapsed((current) => !current)}
+              >
+                <span className="material-symbols-outlined">
+                  {areCategoriesCollapsed ? 'unfold_more' : 'unfold_less'}
+                </span>
+              </button>
+              <span
+                className="sidebar-item__badge"
+                title={`${activeDataset.variables.filter((v) => v?.selected).length} variables`}
+              >
+                {activeDataset.variables.filter((v) => v?.selected).length}
+              </span>
             </div>
           </div>
-        ) : (
-          <div className="var-sidebar__header" style={{ justifyContent: 'space-between' }}>
-            <div style={{display: 'flex', alignItems: 'center', gap: 6}}>
-              <span className="var-sidebar__header-label">Dataset Variables</span>
-              <span className="var-sidebar__count">0</span>
-            </div>
-            <span style={{ fontSize: '10px', color: '#d97706', backgroundColor: '#fef3c7', border: '1px solid #fde68a', padding: '1px 6px', borderRadius: '4px', fontWeight: 500 }}>
-              Unlinked
-            </span>
-          </div>
-        )}
+        ) : null}
 
         {activeDataset ? (
           <div className="var-sidebar__list" id="var-list">
+            {isVarSearchOpen && variableFilter && visibleVariables.length === 0 && (
+              <span className="inline-search-empty">No variables found</span>
+            )}
             {categories.map(cat => {
               const varsInCat = visibleVariables.filter(v => String(v.category ?? 'General') === cat);
               if (varsInCat.length === 0) return null;
@@ -812,36 +892,18 @@ const ModelEditor = () => {
             })}
           </div>
         ) : (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '12px', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <div 
-                style={{ border: '2px dashed #cbd5e1', backgroundColor: '#f8fafc', borderRadius: '12px', padding: '16px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '10px', cursor: 'pointer', transition: 'border-color 0.2s, background-color 0.2s' }}
-                onClick={() => fileInputRef.current?.click()}
-                onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#818cf8'; e.currentTarget.style.backgroundColor = '#f1f5f9'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#cbd5e1'; e.currentTarget.style.backgroundColor = '#f8fafc'; }}
-              >
-                <div style={{ width: '40px', height: '40px', borderRadius: '50%', backgroundColor: '#e0e7ff', border: '1px solid #c7d2fe', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#4f46e5' }}>
-                  <svg style={{ width: '20px', height: '20px' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8"></path>
-                  </svg>
-                </div>
-                <div>
-                  <p style={{ fontSize: '12px', fontWeight: 600, color: '#1e293b', margin: '0 0 4px 0' }}>Drop dataset here</p>
-                  <p style={{ fontSize: '10px', color: '#94a3b8', margin: 0, lineHeight: 1.4 }}>CSV, TXT, or Excel (.xlsx) data matrix to populate variables</p>
-                </div>
-                <button 
-                  style={{ marginTop: '4px', height: '28px', padding: '0 12px', borderRadius: '4px', fontSize: '12px', fontWeight: 500, color: 'white', backgroundColor: '#4f46e5', border: 'none', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}
-                  disabled={isImporting}
-                  onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
-                >
-                  <svg style={{ width: '14px', height: '14px' }} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 4v16m8-8H4" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"></path></svg>
-                  <span>{isImporting ? 'Parsing...' : 'Select Dataset File'}</span>
-                </button>
-              </div>
-            </div>
-            <div style={{ textAlign: 'center', padding: '8px 0', borderTop: '1px solid #f1f5f9', marginTop: '12px' }}>
-              <span style={{ fontSize: '10px', color: '#94a3b8' }}>Variables will appear here once loaded</span>
-            </div>
+          <div style={{ padding: '16px 12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isImporting}
+              className="var-sidebar__insert-btn"
+            >
+              <svg style={{ width: '14px', height: '14px' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path d="M12 4v16m8-8H4" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+              </svg>
+              <span>{isImporting ? 'Parsing...' : 'Insert Dataset'}</span>
+            </button>
             <input 
               type="file" 
               accept=".csv,.txt,.xlsx,.xls,.sav"
@@ -861,15 +923,35 @@ const ModelEditor = () => {
       >
         {/* Toolbar Pill */}
         <div className="canvas-toolbar">
+          {/* Group 1: Select, Connect, Erase, Auto-Align */}
           <div className="tb-btn active" title="Select (V)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" /><path d="M13 13l6 6" /></svg></div>
-          <div className="tb-btn" title="Latent variable (O)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx={12} cy={12} r={8} /></svg></div>
           <div className="tb-btn" title="Path Connector (P)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><line x1={5} y1={12} x2={19} y2={12} /><polyline points="12 5 19 12 12 19" /></svg></div>
+          <div className="tb-btn" title="Erase Element (E)" id="btn-erase">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 16, height: 16 }}>
+              <circle cx={12} cy={12} r={9} />
+              <line x1={15} y1={9} x2={9} y2={15} />
+              <line x1={9} y1={9} x2={15} y2={15} />
+            </svg>
+          </div>
+          <div className="tb-btn" title="Auto-Align Model">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 16, height: 16 }}>
+              <rect x={4} y={4} width={6} height={6} rx={1} />
+              <rect x={14} y={14} width={6} height={6} rx={1} />
+              <line x1={10} y1={7} x2={17} y2={7} />
+              <line x1={17} y1={7} x2={17} y2={14} />
+            </svg>
+          </div>
+          
+          <div className="tb-divider" />
+
+          {/* Group 2: Latent, Moderation, Quadratic, Gaussian, Text */}
+          <div className="tb-btn" title="Latent variable (O)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx={12} cy={12} r={8} /></svg></div>
           <div className="tb-btn" title="Moderation Effect (M)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx={12} cy={12} r={10} /><line x1={12} y1={8} x2={12} y2={16} /><line x1={8} y1={12} x2={16} y2={12} /></svg></div>
           <div className="tb-btn" title="Quadratic Effect (Q)"><span className="tb-btn--text">x²</span></div>
           <div className="tb-btn" title="Gaussian Copula"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M4 22h14a2 2 0 0 0 2-2V7.5L14.5 2H6a2 2 0 0 0-2 2v4" /><polyline points="14 2 14 8 20 8" /><path d="M2 15h10" /><path d="M6 11l-4 4 4 4" /></svg></div>
           <div className="tb-btn" title="Text Note (T)" data-action="add-text-note"><span className="tb-btn--text">T</span></div>
+          
           <div className="tb-divider" />
-          <div className="tb-btn" title="Auto-Align Model"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><rect x={4} y={4} width={6} height={6} rx={1} /><rect x={14} y={14} width={6} height={6} rx={1} /><line x1={10} y1={7} x2={17} y2={7} /><line x1={17} y1={7} x2={17} y2={14} /></svg></div>
           <div id="node-formatting-tools" style={{display: 'flex', gap: '4px'}}>
           <div className="tb-dropdown-container">
             <button className="tb-dropdown-btn" type="button" title="Alignment" id="btn-align">
@@ -897,13 +979,11 @@ const ModelEditor = () => {
           </div>
           <div className="tb-dropdown-container">
             <button className="tb-dropdown-btn" type="button" title="Color &amp; Stroke Styling" id="btn-colors">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 16, height: 16}}><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"></circle><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"></circle><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"></circle><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"></circle><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M12 2C6.477 2 2 6.477 2 12c0 4.991 3.657 9.128 8.438 9.878v-1.785a2.5 2.5 0 012.5-2.5h1.156a4.5 4.5 0 004.5-4.5c0-.62-.126-1.213-.355-1.752A10.007 10.007 0 0012 2z"></path></svg>
+              <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>palette</span>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 14, height: 14}}><polyline points="6 9 12 15 18 9" /></svg>
             </button>
             <div className="tb-dropdown-menu" id="menu-colors" style={{width: '240px', padding: '12px'}}>
               <div style={{marginBottom: '12px'}}>
-                <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', color: 'var(--color-text-hint)', marginBottom: '8px'}}>Fill Color</div>
-              <div className="tb-divider" style={{width: '100%', height: '1px', margin: '8px 0'}}></div>
                 <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', color: 'var(--color-text-hint)', marginBottom: '8px'}}>Fill Color</div>
                 <div style={{display: 'flex', gap: '8px', flexWrap: 'wrap'}}>
                   {[...fixedFills, ...recentFills].map((color, i) => (
@@ -1080,11 +1160,6 @@ const ModelEditor = () => {
           <button className="tb-btn" type="button" title="Redo (Cmd+Shift+Z / Ctrl+Y)" id="btn-redo">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 16, height: 16}}><path strokeLinecap="round" strokeLinejoin="round" d="M21 7v6h-6" /><path strokeLinecap="round" strokeLinejoin="round" d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13" /></svg>
           </button>
-          <button className="tb-btn" type="button" title="Delete Selected Part (Delete / Backspace)" id="btn-delete" style={{color: '#ef4444'}}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 16, height: 16}}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-            </svg>
-          </button>
         </div>
 
         {/* Zoom HUD */}
@@ -1208,11 +1283,11 @@ const ModelEditor = () => {
                 style={{ position: 'relative' }}
               >
                 <div className="tree-item__left">
-                  <div className="tree-item__dot" style={{ backgroundColor: '#6366f1' }} />
+                  <div className="tree-item__dot" style={{ backgroundColor: 'var(--color-accent)' }} />
                   <span>Bootstrap significance</span>
                 </div>
                 {plsResults?.significance && (
-                  <span className="tree-item__size" style={{ backgroundColor: '#e0e7ff', color: '#4338ca', fontWeight: 600 }}>
+                  <span className="tree-item__size" style={{ backgroundColor: 'var(--color-accent-subtle)', color: 'var(--color-accent)', fontWeight: 600 }}>
                     p & t
                   </span>
                 )}
@@ -1849,28 +1924,25 @@ const ModelEditor = () => {
                   <div style={{
                     display: 'flex',
                     gap: '20px',
-                    padding: '14px 18px',
-                    backgroundColor: '#f8fafc',
-                    border: '1px solid #e2e8f0',
-                    borderRadius: '8px',
-                    marginBottom: '20px',
+                    padding: '10px 16px',
+                    backgroundColor: 'var(--color-bg-raised, #f8fafc)',
+                    border: '1px solid var(--color-border-subtle, #e2e8f0)',
+                    borderRadius: 'var(--radius-sm, 6px)',
+                    marginBottom: '18px',
                     alignItems: 'center',
-                    fontSize: '13px',
-                    color: '#334155',
+                    fontSize: '12px',
+                    color: 'var(--color-text-secondary, #334155)',
                   }}>
-                    <span>Bootstrap Samples: <strong>{plsResults.significance.n_boot?.toLocaleString()}</strong></span>
-                    <span>Test: <strong>Two-Tailed (α = 0.05)</strong></span>
-                    <span>Confidence Interval: <strong>95% Percentile</strong></span>
-                    <span style={{ marginLeft: 'auto', fontSize: '12px', color: '#64748b' }}>
-                      Significance: *** p &lt; 0.001, ** p &lt; 0.01, * p &lt; 0.05, ns not significant
-                    </span>
+                    <span>Bootstrap Subsamples: <strong style={{ color: 'var(--color-text-primary)' }}>{plsResults.significance.n_boot?.toLocaleString()}</strong></span>
+                    <span>Test: <strong style={{ color: 'var(--color-text-primary)' }}>Two-Tailed (α = 0.05)</strong></span>
+                    <span>Confidence Interval: <strong style={{ color: 'var(--color-text-primary)' }}>95% Percentile</strong></span>
                   </div>
 
                   {/* Path Coefficients Significance Table */}
-                  <h4 style={{ margin: '0 0 10px', fontSize: '14px', fontWeight: 600, color: '#1e293b' }}>
+                  <h4 style={{ margin: '0 0 10px', fontSize: '13px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
                     Structural Path Significance
                   </h4>
-                  <table className="scientific-table" style={{ marginBottom: '32px' }}>
+                  <table className="scientific-table" style={{ marginBottom: '28px' }}>
                     <thead>
                       <tr>
                         <th>Path (Predictor → Target)</th>
@@ -1885,7 +1957,7 @@ const ModelEditor = () => {
                     </thead>
                     <tbody>
                       {(plsResults.significance.paths || []).map((p: any, idx: number) => {
-                        const isSig = p.p_value < 0.05;
+                        const cellSigClass = p.p_value < 0.001 ? 'cell-sig--p001' : (p.p_value < 0.01 ? 'cell-sig--p01' : (p.p_value < 0.05 ? 'cell-sig--p05' : ''));
                         return (
                           <tr key={idx}>
                             <td>
@@ -1895,27 +1967,26 @@ const ModelEditor = () => {
                                 <span className="construct-name">{p.to_name || getConstructName(p.to)}</span>
                               </div>
                             </td>
-                            <td className="cell-sig">
+                            <td className={cellSigClass}>
                               <div className="cell-value">{fmt(p.original, 4)}</div>
                             </td>
                             <td>{fmt(p.mean, 4)}</td>
                             <td>{fmt(p.se, 4)}</td>
                             <td><strong>{fmt(p.t_stat, 3)}</strong></td>
-                            <td style={{ color: isSig ? '#15803d' : '#b45309', fontWeight: 600 }}>
+                            <td className={cellSigClass} style={{ fontWeight: 600 }}>
                               {p.p_value < 0.0001 ? '< 0.0001' : fmt(p.p_value, 4)}
                             </td>
                             <td>[{fmt(p.ci_low, 4)}, {fmt(p.ci_high, 4)}]</td>
                             <td>
-                              <span style={{
-                                padding: '2px 8px',
-                                borderRadius: '4px',
-                                fontSize: '12px',
-                                fontWeight: 600,
-                                backgroundColor: isSig ? '#dcfce7' : '#f1f5f9',
-                                color: isSig ? '#166534' : '#64748b',
-                              }}>
-                                {p.significance}
-                              </span>
+                              {p.p_value < 0.001 ? (
+                                <span className="sig-badge sig-badge--p001">p &lt; 0.001</span>
+                              ) : p.p_value < 0.01 ? (
+                                <span className="sig-badge sig-badge--p01">p &lt; 0.01</span>
+                              ) : p.p_value < 0.05 ? (
+                                <span className="sig-badge sig-badge--p05">p &lt; 0.05</span>
+                              ) : (
+                                <span className="sig-badge sig-badge--ns">ns</span>
+                              )}
                             </td>
                           </tr>
                         );
@@ -1924,7 +1995,7 @@ const ModelEditor = () => {
                   </table>
 
                   {/* Outer Loadings Significance Table */}
-                  <h4 style={{ margin: '0 0 10px', fontSize: '14px', fontWeight: 600, color: '#1e293b' }}>
+                  <h4 style={{ margin: '0 0 10px', fontSize: '13px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
                     Outer Loadings Significance
                   </h4>
                   <table className="scientific-table">
@@ -1943,45 +2014,44 @@ const ModelEditor = () => {
                     </thead>
                     <tbody>
                       {(plsResults.significance.loadings || []).map((l: any, idx: number) => {
-                        const isSig = l.p_value < 0.05;
+                        const cellSigClass = l.p_value < 0.001 ? 'cell-sig--p001' : (l.p_value < 0.01 ? 'cell-sig--p01' : (l.p_value < 0.05 ? 'cell-sig--p05' : ''));
                         return (
                           <tr key={idx}>
                             <td>{l.construct_name || getConstructName(l.construct)}</td>
                             <td><strong>{l.indicator_name || getIndicatorName(l.indicator)}</strong></td>
-                            <td className="cell-sig">
+                            <td className={cellSigClass}>
                               <div className="cell-value">{fmt(l.original, 4)}</div>
                             </td>
                             <td>{fmt(l.mean, 4)}</td>
                             <td>{fmt(l.se, 4)}</td>
                             <td>{fmt(l.t_stat, 3)}</td>
-                            <td style={{ color: isSig ? '#15803d' : '#b45309', fontWeight: 600 }}>
+                            <td className={cellSigClass} style={{ fontWeight: 600 }}>
                               {l.p_value < 0.0001 ? '< 0.0001' : fmt(l.p_value, 4)}
                             </td>
                             <td>[{fmt(l.ci_low, 4)}, {fmt(l.ci_high, 4)}]</td>
                             <td>
-                              <span style={{
-                                padding: '2px 8px',
-                                borderRadius: '4px',
-                                fontSize: '11px',
-                                fontWeight: 600,
-                                backgroundColor: isSig ? '#dcfce7' : '#f1f5f9',
-                                color: isSig ? '#166534' : '#64748b',
-                              }}>
-                                {l.significance}
-                              </span>
+                              {l.p_value < 0.001 ? (
+                                <span className="sig-badge sig-badge--p001">p &lt; 0.001</span>
+                              ) : l.p_value < 0.01 ? (
+                                <span className="sig-badge sig-badge--p01">p &lt; 0.01</span>
+                              ) : l.p_value < 0.05 ? (
+                                <span className="sig-badge sig-badge--p05">p &lt; 0.05</span>
+                              ) : (
+                                <span className="sig-badge sig-badge--ns">ns</span>
+                              )}
                             </td>
                           </tr>
                         );
                       })}
                     </tbody>
                   </table>
-                  <div className="sig-legend">
-                    <span style={{ color: 'var(--color-text-secondary)', fontWeight: 500 }}>Significance:</span>
-                    <div className="sig-legend__item"><span className="sig-legend__stars">***</span> p &lt; 0.001</div>
-                    <div className="sig-legend__item"><span className="sig-legend__stars">**</span> p &lt; 0.01</div>
-                    <div className="sig-legend__item"><span className="sig-legend__stars">*</span> p &lt; 0.05</div>
-                    <span style={{ flex: 1 }} />
-                    <span>Two-tailed test (5,000 bootstrap subsamples)</span>
+                  <div className="sig-legend-minimal">
+                    <span className="sig-legend-minimal__label">Significance:</span>
+                    <div className="sig-legend-minimal__item"><span className="sig-legend-minimal__dot sig-legend-minimal__dot--p001" /> p &lt; 0.001</div>
+                    <div className="sig-legend-minimal__item"><span className="sig-legend-minimal__dot sig-legend-minimal__dot--p01" /> p &lt; 0.01</div>
+                    <div className="sig-legend-minimal__item"><span className="sig-legend-minimal__dot sig-legend-minimal__dot--p05" /> p &lt; 0.05</div>
+                    <div className="sig-legend-minimal__item"><span className="sig-legend-minimal__dot sig-legend-minimal__dot--ns" /> ns (≥ 0.05)</div>
+                    <span style={{ marginLeft: 'auto', fontSize: '11px', color: 'var(--color-text-muted)' }}>Two-tailed bootstrap test ({plsResults.significance.n_boot?.toLocaleString()} subsamples)</span>
                   </div>
                 </div>
               )
@@ -1991,13 +2061,6 @@ const ModelEditor = () => {
       </main>
     </div>{/* /app-body */}
   </div>{/* /view-results */}
-  {datasetToImport && (
-    <DataManagerModal
-      dataset={datasetToImport}
-      onImport={handleImportComplete}
-      onCancel={() => setDatasetToImport(null)}
-    />
-  )}
 
   <BootstrapModal
     isOpen={isBootstrapModalOpen}
@@ -2174,6 +2237,7 @@ const ModelEditor = () => {
     </div>
   )}
 
+    </div>
     </div>
   );
 };

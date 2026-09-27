@@ -17,7 +17,8 @@ const Dashboard = () => {
     studies, setActiveStudy, models, setActiveModel, addModel,
     datasetsByStudy, setStudyDataset, touchStudy, archiveWorkspace, restoreWorkspace, renameWorkspace,
     deleteWorkspace, deleteStudy, deleteModel, deleteDataset, requestDelete,
-    renameStudy, duplicateStudy, renameModel, duplicateModel, openTab
+    renameStudy, duplicateStudy, renameModel, duplicateModel, openTab,
+    isSidebarCollapsed, toggleSidebar
   } = useStore();
   
   useEffect(() => {
@@ -27,7 +28,6 @@ const Dashboard = () => {
   }, [activeWorkspaceId, workspaces, setActiveWorkspace]);
 
   const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = useState(false);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isWorkspaceSearchOpen, setIsWorkspaceSearchOpen] = useState(false);
   const [workspaceQuery, setWorkspaceQuery] = useState('');
   const [isStudySearchOpen, setIsStudySearchOpen] = useState(false);
@@ -48,6 +48,95 @@ const Dashboard = () => {
   const activeStudies = studies.filter(s => s.workspaceId === activeWorkspaceId);
   const filteredWorkspaces = workspaces.filter(workspace => workspace.name.toLocaleLowerCase().includes(workspaceQuery.toLocaleLowerCase()));
   const filteredStudies = activeStudies.filter(study => study.name.toLocaleLowerCase().includes(studyQuery.toLocaleLowerCase()));
+
+  // Sorting state for studies
+  type SortField = 'name' | 'modified' | 'created';
+  type SortOrder = 'asc' | 'desc';
+  const [sortField, setSortField] = useState<SortField>('modified');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
+  const [isSortMenuOpen, setIsSortMenuOpen] = useState(false);
+  const sortMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (sortMenuRef.current && !sortMenuRef.current.contains(e.target as Node)) {
+        setIsSortMenuOpen(false);
+      }
+    };
+    if (isSortMenuOpen) {
+      document.addEventListener('mousedown', handleOutsideClick);
+      return () => document.removeEventListener('mousedown', handleOutsideClick);
+    }
+  }, [isSortMenuOpen]);
+
+  const sortedStudies = [...filteredStudies].sort((a, b) => {
+    let comparison = 0;
+    if (sortField === 'name') {
+      comparison = a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+    } else if (sortField === 'created') {
+      const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      comparison = aTime - bTime;
+      if (comparison === 0) {
+        comparison = a.name.localeCompare(b.name);
+      }
+    } else {
+      // modified
+      const aDate = Date.parse(a.lastModified);
+      const bDate = Date.parse(b.lastModified);
+      if (!isNaN(aDate) && !isNaN(bDate)) {
+        comparison = aDate - bDate;
+      } else {
+        const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        comparison = aTime - bTime;
+      }
+    }
+    return sortOrder === 'asc' ? comparison : -comparison;
+  });
+
+  // Inline rename state for sidebar workspace, study, and dataset
+  const [editingSidebarWsId, setEditingSidebarWsId] = useState<string | null>(null);
+  const [editSidebarWsName, setEditSidebarWsName] = useState('');
+
+  const [editingStudyId, setEditingStudyId] = useState<string | null>(null);
+  const [editStudyName, setEditStudyName] = useState('');
+
+  const [editingDatasetStudyId, setEditingDatasetStudyId] = useState<string | null>(null);
+  const [editDatasetName, setEditDatasetName] = useState('');
+
+  const [editingModelId, setEditingModelId] = useState<string | null>(null);
+  const [editModelName, setEditModelName] = useState('');
+
+  const commitSidebarWsRename = (id: string) => {
+    if (editSidebarWsName.trim()) {
+      renameWorkspace(id, editSidebarWsName.trim());
+    }
+    setEditingSidebarWsId(null);
+  };
+
+  const commitStudyRename = (id: string) => {
+    if (editStudyName.trim()) {
+      renameStudy(id, editStudyName.trim());
+    }
+    setEditingStudyId(null);
+  };
+
+  const commitDatasetRename = (studyId: string, currentDataset: ParsedDataset) => {
+    if (editDatasetName.trim() && editDatasetName.trim() !== currentDataset.filename) {
+      const updated = { ...currentDataset, filename: editDatasetName.trim() };
+      setStudyDataset(studyId, updated);
+      touchStudy(studyId);
+    }
+    setEditingDatasetStudyId(null);
+  };
+
+  const commitModelRename = (id: string) => {
+    if (editModelName.trim()) {
+      renameModel(id, editModelName.trim());
+    }
+    setEditingModelId(null);
+  };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [datasetToImport, setDatasetToImport] = useState<ParsedDataset | null>(null);
@@ -81,7 +170,15 @@ const Dashboard = () => {
     if (!file) return;
     try {
       const parsed = await parseDatasetFile(file);
-      setDatasetToImport(parsed);
+      if (importingStudyId) {
+        await handleImportComplete(parsed);
+        openTab({
+          type: 'dataset',
+          title: parsed.filename,
+          studyId: importingStudyId,
+          workspaceId: activeWorkspaceId,
+        });
+      }
     } catch (err) {
       alert("Error importing file: " + err);
     } finally {
@@ -166,9 +263,17 @@ const Dashboard = () => {
           <div className="sidebar__top">
             <div className="sidebar-ws-container">
               <div className="sidebar-header" style={{paddingBottom: '10px', borderBottom: 'none'}}>
-                {isWorkspaceSearchOpen ? <div className="inline-search-wrap"><input autoFocus className="sidebar-inline-search" value={workspaceQuery} onChange={event => setWorkspaceQuery(event.target.value)} onBlur={() => { if (!workspaceQuery) setIsWorkspaceSearchOpen(false); }} placeholder="Filter workspaces…" />{workspaceQuery && <button className="inline-search-clear" type="button" aria-label="Clear workspace search" onMouseDown={event => event.preventDefault()} onClick={() => setWorkspaceQuery('')}>×</button>}</div> : <span className="sidebar-header__label">Workspaces</span>}
+                {isWorkspaceSearchOpen ? <div className="inline-search-wrap"><input autoFocus className="sidebar-inline-search" value={workspaceQuery} onChange={event => setWorkspaceQuery(event.target.value)} onBlur={() => { if (!workspaceQuery) setIsWorkspaceSearchOpen(false); }} placeholder="Filter…" />{workspaceQuery && <button className="inline-search-clear" type="button" aria-label="Clear workspace search" onMouseDown={event => event.preventDefault()} onClick={() => setWorkspaceQuery('')}>×</button>}</div> : <span className="sidebar-header__label">Workspaces</span>}
                 <div className="sidebar-header__actions">
-                  <button className={`icon-btn icon-btn--sm ${isWorkspaceSearchOpen ? 'active' : ''}`} title="Filter workspaces" type="button" onClick={() => { setIsWorkspaceSearchOpen(open => !open); if (isWorkspaceSearchOpen) setWorkspaceQuery(''); }}>
+                  <button className={`icon-btn icon-btn--sm ${isWorkspaceSearchOpen ? 'active' : ''}`} title="Search workspaces" type="button" onClick={() => {
+                    if (isSidebarCollapsed) {
+                      toggleSidebar();
+                      setTimeout(() => setIsWorkspaceSearchOpen(true), 150);
+                    } else {
+                      setIsWorkspaceSearchOpen(open => !open);
+                      if (isWorkspaceSearchOpen) setWorkspaceQuery('');
+                    }
+                  }}>
                     <span className="material-symbols-outlined">search</span>
                   </button>
                   <button className="sidebar-create-folder-btn" title="Create Workspace" type="button" onClick={() => setIsWorkspaceModalOpen(true)}>
@@ -178,7 +283,7 @@ const Dashboard = () => {
                       <line x1="9" x2="15" y1="13" y2="13"></line>
                     </svg>
                   </button>
-                  <button className="icon-btn icon-btn--sm" id="sidebar-collapse-btn" title="Collapse sidebar" type="button" onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}>
+                  <button className="icon-btn icon-btn--sm" id="sidebar-collapse-btn" title={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} type="button" onClick={toggleSidebar}>
                     <span className="material-symbols-outlined">left_panel_close</span>
                   </button>
                 </div>
@@ -186,19 +291,26 @@ const Dashboard = () => {
 
               <div id="sidebar-ws-list" style={{display: 'flex', flexDirection: 'column', gap: '2px'}}>
                 {filteredWorkspaces.map(ws => (
-                  <button 
+                  <div 
                     key={ws.id} 
                     className={`sidebar-item ${ws.id === activeWorkspaceId ? 'active' : ''}`}
-                    type="button"
                     onClick={() => {
-                      setActiveWorkspace(ws.id);
-                      openTab({ type: 'workspace', title: ws.name, workspaceId: ws.id });
+                      if (editingSidebarWsId !== ws.id) {
+                        setActiveWorkspace(ws.id);
+                        openTab({ type: 'workspace', title: ws.name, workspaceId: ws.id });
+                      }
                     }}
                     onContextMenu={(e) => {
                       e.preventDefault();
                       useStore.getState().openContextMenu(e.clientX, e.clientY, [
                         {
-                          id: 'rename', label: 'Rename Workspace', icon: 'edit', action: () => rename('Rename Workspace', ws.name, name => renameWorkspace(ws.id, name))
+                          id: 'rename', 
+                          label: 'Rename Workspace', 
+                          icon: 'edit', 
+                          action: () => {
+                            setEditingSidebarWsId(ws.id);
+                            setEditSidebarWsName(ws.name);
+                          }
                         },
                         {
                           id: 'duplicate', label: 'Duplicate Workspace', icon: 'content_copy', action: () => useStore.getState().addWorkspace({ ...ws, id: `ws_${Date.now()}`, name: `${ws.name} copy` })
@@ -216,18 +328,45 @@ const Dashboard = () => {
                               title: 'Delete Workspace',
                               itemName: ws.name,
                               message: 'Are you sure? This workspace and all its contents will be permanently deleted and cannot be recovered.',
-                              onConfirm: () => deleteWorkspace(ws.id),
+                              onConfirm: async () => {
+                                if (ws.path) {
+                                  try {
+                                    await api.deleteWorkspace(ws.path);
+                                  } catch (e) {
+                                    console.warn('Failed to delete workspace on disk:', e);
+                                  }
+                                }
+                                deleteWorkspace(ws.id);
+                              },
                             });
                           } 
                         }
                       ]);
                     }}
+                    style={{ cursor: 'pointer' }}
                   >
-                    <span className="sidebar-item__left">
+                    <span className="sidebar-item__left" style={{ width: '100%', overflow: 'hidden' }}>
                       <span className="material-symbols-outlined">folder</span>
-                      <span>{ws.name}</span>
+                      {editingSidebarWsId === ws.id ? (
+                        <input
+                          autoFocus
+                          type="text"
+                          className="inline-seamless-rename-input"
+                          value={editSidebarWsName}
+                          size={Math.max(editSidebarWsName.length, 1)}
+                          onChange={(e) => setEditSidebarWsName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') commitSidebarWsRename(ws.id);
+                            else if (e.key === 'Escape') setEditingSidebarWsId(null);
+                          }}
+                          onBlur={() => commitSidebarWsRename(ws.id)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <span>{ws.name}</span>
+                      )}
                     </span>
-                  </button>
+                  </div>
                 ))}
                 {isWorkspaceSearchOpen && workspaceQuery && filteredWorkspaces.length === 0 && <span className="inline-search-empty">No workspaces found</span>}
               </div>
@@ -242,19 +381,19 @@ const Dashboard = () => {
               </span>
               <span className="sidebar-item__badge">{archivedWorkspaces.length}</span>
             </button>
-            <button className="sidebar-item" type="button" data-action="docs">
+            <button className="sidebar-item" type="button" data-action="docs" onClick={() => openTab({ type: 'docs', title: 'Documentation' })}>
               <span className="sidebar-item__left">
                 <span className="material-symbols-outlined">menu_book</span>
                 <span>Documentation</span>
               </span>
             </button>
-            <button className="sidebar-item" type="button" data-action="samples">
+            <button className="sidebar-item" type="button" data-action="samples" onClick={() => openTab({ type: 'samples', title: 'Sample Projects' })}>
               <span className="sidebar-item__left">
                 <span className="material-symbols-outlined">science</span>
                 <span>Sample Projects</span>
               </span>
             </button>
-            <button className="sidebar-item" type="button" data-action="feedback">
+            <button className="sidebar-item" type="button" data-action="feedback" onClick={() => openTab({ type: 'feedback', title: 'Feedback & Reports' })}>
               <span className="sidebar-item__left">
                 <span className="material-symbols-outlined">feedback</span>
                 <span className="truncate">Feedback & Reports</span>
@@ -319,23 +458,119 @@ const Dashboard = () => {
                     <span className="material-symbols-outlined" style={{fontSize: '15px'}}>search</span>
                   </button>
                 </div>
-                <div style={{display: 'flex', alignItems: 'center', gap: '32px'}}>
-                  <div className="studies-header__sort" onClick={() => setInputDialogConfig({isOpen: true, title: 'Filter by Modified', placeholder: 'Enter filter query...', submitLabel: 'Apply Filter', onSubmit: () => {}})} style={{ cursor: 'pointer', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <span>Modified</span>
-                    <span className="material-symbols-outlined" style={{fontSize: '15px'}}>filter_list</span>
+                <div style={{display: 'flex', alignItems: 'center', gap: '16px'}}>
+                  {/* Inline Sort Control */}
+                  <div style={{ position: 'relative' }} ref={sortMenuRef}>
+                    <button
+                      type="button"
+                      onClick={() => setIsSortMenuOpen((prev) => !prev)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        padding: 0,
+                        border: 'none',
+                        background: 'transparent',
+                        color: isSortMenuOpen ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: 'var(--text-xs)',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.05em',
+                        cursor: 'pointer',
+                        transition: 'color 0.15s ease',
+                      }}
+                      title="Sort studies"
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: '14px', color: 'currentColor' }}>
+                        sort
+                      </span>
+                      <span>
+                        {sortField === 'name' ? 'Name' : sortField === 'created' ? 'Date Created' : 'Date Modified'}
+                      </span>
+                      <span className="material-symbols-outlined" style={{ fontSize: '14px', color: 'currentColor' }}>
+                        {sortOrder === 'asc' ? 'arrow_upward' : 'arrow_downward'}
+                      </span>
+                    </button>
+
+                    {isSortMenuOpen && (
+                      <div
+                        style={{
+                          position: 'absolute',
+                          top: 'calc(100% + 8px)',
+                          right: 0,
+                          zIndex: 1000,
+                          backgroundColor: 'var(--color-bg-base)',
+                          border: '1px solid var(--color-border-subtle)',
+                          borderRadius: 'var(--radius-md, 6px)',
+                          boxShadow: '0 4px 16px rgba(0,0,0,0.1), 0 1px 3px rgba(0,0,0,0.05)',
+                          minWidth: '160px',
+                          padding: '4px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '2px',
+                        }}
+                      >
+                        {[
+                          { field: 'modified' as const, label: 'Date Modified' },
+                          { field: 'created' as const, label: 'Date Created' },
+                          { field: 'name' as const, label: 'Name' },
+                        ].map((opt) => {
+                          const isSelected = sortField === opt.field;
+                          return (
+                            <button
+                              key={opt.field}
+                              type="button"
+                              onClick={() => {
+                                if (isSelected) {
+                                  setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'));
+                                } else {
+                                  setSortField(opt.field);
+                                  setSortOrder(opt.field === 'name' ? 'asc' : 'desc');
+                                }
+                              }}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                padding: '6px 8px',
+                                borderRadius: 'var(--radius-sm, 4px)',
+                                border: 'none',
+                                background: isSelected ? 'var(--color-accent-subtle)' : 'transparent',
+                                color: isSelected ? 'var(--color-accent)' : 'var(--color-text-secondary)',
+                                fontFamily: 'var(--font-mono)',
+                                fontSize: 'var(--text-xs)',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.05em',
+                                cursor: 'pointer',
+                                textAlign: 'left',
+                                width: '100%',
+                                transition: 'background-color 0.15s ease, color 0.15s ease',
+                              }}
+                            >
+                              <span>{opt.label}</span>
+                              {isSelected && (
+                                <span className="material-symbols-outlined" style={{ fontSize: '13px', color: 'var(--color-accent)' }}>
+                                  {sortOrder === 'asc' ? 'arrow_upward' : 'arrow_downward'}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
-                  <span style={{width: '16px'}}></span>
+
                 </div>
               </div>
 
               <div className="studies-list" id="studies-container">
-                {filteredStudies.length === 0 && (
+                {sortedStudies.length === 0 && (
                   <div className="empty-state animate-fade-in" style={{ padding: '32px 16px', textAlign: 'center' }}>
                     <div style={{fontSize: 'var(--text-md)', color: studyQuery ? 'var(--color-danger)' : 'var(--color-text-secondary)'}}>{studyQuery ? 'No studies found' : 'Create a new study to get started.'}</div>
                   </div>
                 )}
                 
-                {filteredStudies.map(study => {
+                {sortedStudies.map(study => {
                   const studyModels = models.filter(m => m.studyId === study.id);
                   const studyDataset = datasetsByStudy[study.id];
                   const isEmpty = studyModels.length === 0 && !studyDataset;
@@ -354,7 +589,15 @@ const Dashboard = () => {
                                   id: 'create-model', label: 'Create Model', icon: 'add', action: () => { setModelModalStudyId(study.id); setModelName(''); setModelType('PLS-SEM'); setModelModalOpen(true); }
                                 },
                                 ...(!studyDataset ? [{ id: 'add-dataset', label: 'Add Dataset', icon: 'upload_file', action: () => { setImportingStudyId(study.id); fileInputRef.current?.click(); } }] : []),
-                                { id: 'rename', label: 'Rename Study', icon: 'edit', action: () => rename('Rename Study', study.name, name => renameStudy(study.id, name)) },
+                                { 
+                                  id: 'rename', 
+                                  label: 'Rename Study', 
+                                  icon: 'edit', 
+                                  action: () => {
+                                    setEditingStudyId(study.id);
+                                    setEditStudyName(study.name);
+                                  } 
+                                },
                                 { id: 'duplicate', label: 'Duplicate Study', icon: 'content_copy', action: () => duplicateStudy(study.id) },
                                 {
                                   id: 'delete', 
@@ -377,9 +620,29 @@ const Dashboard = () => {
                           <span className="material-symbols-outlined study-folder" style={isEmpty ? {color: 'var(--color-text-hint)', fontVariationSettings: "'FILL' 0"} : {}}>
                             {isExpanded && !isEmpty ? 'folder_open' : 'folder'}
                           </span>
-                          <span className="study-row__name" style={isEmpty ? {color: 'var(--color-text-secondary)', fontWeight: 400} : {}}>
-                            {study.name}
-                          </span>
+                          {editingStudyId === study.id ? (
+                            <input
+                              autoFocus
+                              type="text"
+                              className="inline-seamless-rename-input"
+                              value={editStudyName}
+                              size={Math.max(editStudyName.length, 1)}
+                              onChange={(e) => setEditStudyName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') commitStudyRename(study.id);
+                                else if (e.key === 'Escape') setEditingStudyId(null);
+                              }}
+                              onBlur={() => commitStudyRename(study.id)}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          ) : (
+                            <span 
+                              className="study-row__name" 
+                              style={isEmpty ? {color: 'var(--color-text-secondary)', fontWeight: 400} : {}}
+                            >
+                              {study.name}
+                            </span>
+                          )}
                           <span className="study-row__count">
                             {isEmpty ? 'Empty' : `${studyModels.length + (studyDataset ? 1 : 0)} item${studyModels.length + (studyDataset ? 1 : 0) === 1 ? '' : 's'}`}
                           </span>
@@ -455,31 +718,10 @@ const Dashboard = () => {
           id: 'rename',
           label: 'Rename Dataset',
           icon: 'edit',
-          action: () =>
-            rename(
-              'Rename Dataset',
-              studyDataset.filename,
-              name => {
-                const updated = {
-                  ...studyDataset,
-                  filename: name
-                };
-
-                setStudyDataset(study.id, updated);
-                touchStudy(study.id);
-
-                if (study.path) {
-                  const headers = updated.variables.map(v => v.name);
-
-                  api.saveProjectDataJson(
-                    study.path,
-                    name,
-                    headers,
-                    updated.rows
-                  ).catch(console.warn);
-                }
-              }
-            )
+          action: () => {
+            setEditingDatasetStudyId(study.id);
+            setEditDatasetName(studyDataset.filename);
+          }
         },
         {
           id: 'delete',
@@ -507,7 +749,29 @@ const Dashboard = () => {
     );
   }}
 >
-                                <div className="file-row__left"><span className="material-symbols-outlined">dataset</span><span>{studyDataset.filename}</span><span className="file-badge file-badge--default">{studyDataset.rows.length} rows</span><span className="file-badge file-badge--default">Dataset</span></div>
+                                <div className="file-row__left">
+                                  <span className="material-symbols-outlined">dataset</span>
+                                  {editingDatasetStudyId === study.id ? (
+                                    <input
+                                      autoFocus
+                                      type="text"
+                                      className="inline-seamless-rename-input"
+                                      value={editDatasetName}
+                                      size={Math.max(editDatasetName.length, 1)}
+                                      onChange={(e) => setEditDatasetName(e.target.value)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') commitDatasetRename(study.id, studyDataset);
+                                        else if (e.key === 'Escape') setEditingDatasetStudyId(null);
+                                      }}
+                                      onBlur={() => commitDatasetRename(study.id, studyDataset)}
+                                      onClick={(e) => e.stopPropagation()}
+                                    />
+                                  ) : (
+                                    <span>{studyDataset.filename}</span>
+                                  )}
+                                  <span className="file-badge file-badge--default">{studyDataset.rows.length} rows</span>
+                                  <span className="file-badge file-badge--default">Dataset</span>
+                                </div>
                                 <div className="file-row__meta"><span className="file-row__time">{study.lastModified}</span><span style={{width: '16px'}}></span></div>
                               </div>
                             )}
@@ -522,10 +786,27 @@ const Dashboard = () => {
                                   studyId: study.id,
                                   workspaceId: activeWorkspaceId,
                                 });
-                              }} onContextMenu={e => { e.preventDefault(); e.stopPropagation(); useStore.getState().openContextMenu(e.clientX, e.clientY, [{ id: 'rename', label: 'Rename Model', icon: 'edit', action: () => rename('Rename Model', model.name, name => renameModel(model.id, name)) }, { id: 'duplicate', label: 'Duplicate Model', icon: 'content_copy', action: () => duplicateModel(model.id) }, { id: 'delete', label: 'Delete Model', icon: 'delete', danger: true, action: () => { requestDelete({ title: 'Delete Model', itemName: model.name, message: 'Are you sure? This model will be permanently deleted and cannot be recovered.', onConfirm: () => deleteModel(model.id) }); } }]); }}>
+                              }} onContextMenu={e => { e.preventDefault(); e.stopPropagation(); useStore.getState().openContextMenu(e.clientX, e.clientY, [{ id: 'rename', label: 'Rename Model', icon: 'edit', action: () => { setEditingModelId(model.id); setEditModelName(model.name); } }, { id: 'duplicate', label: 'Duplicate Model', icon: 'content_copy', action: () => duplicateModel(model.id) }, { id: 'delete', label: 'Delete Model', icon: 'delete', danger: true, action: () => { requestDelete({ title: 'Delete Model', itemName: model.name, message: 'Are you sure? This model will be permanently deleted and cannot be recovered.', onConfirm: () => deleteModel(model.id) }); } }]); }}>
                                 <div className="file-row__left">
                                   <span className="material-symbols-outlined">{model.type === 'Dataset' ? 'dataset' : 'account_tree'}</span>
-                                  <span>{model.name}</span>
+                                  {editingModelId === model.id ? (
+                                    <input
+                                      autoFocus
+                                      type="text"
+                                      className="inline-seamless-rename-input"
+                                      value={editModelName}
+                                      size={Math.max(editModelName.length, 1)}
+                                      onChange={(e) => setEditModelName(e.target.value)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') commitModelRename(model.id);
+                                        else if (e.key === 'Escape') setEditingModelId(null);
+                                      }}
+                                      onBlur={() => commitModelRename(model.id)}
+                                      onClick={(e) => e.stopPropagation()}
+                                    />
+                                  ) : (
+                                    <span>{model.name}</span>
+                                  )}
                                   <span className={`file-badge ${model.type === 'PLS-SEM' ? 'file-badge--accent' : (model.type === 'Dataset' ? 'file-badge--default' : '')}`}>{model.type}</span>
                                 </div>
                                 <div className="file-row__meta">

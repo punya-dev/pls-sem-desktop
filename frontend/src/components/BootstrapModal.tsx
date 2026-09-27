@@ -144,12 +144,12 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
       zIndex: 9999,
     }}>
       <div style={{
-        backgroundColor: '#ffffff',
+        backgroundColor: 'var(--color-bg-base, #ffffff)',
         borderRadius: '14px',
         width: '520px',
         maxWidth: '92vw',
-        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.08)',
-        border: '1px solid #e2e8f0',
+        boxShadow: 'var(--shadow-float, 0 20px 25px -5px rgba(0, 0, 0, 0.2))',
+        border: '1px solid var(--color-border-subtle, #e2e8f0)',
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
@@ -157,18 +157,18 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
         {/* Header */}
         <div style={{
           padding: '18px 24px',
-          borderBottom: '1px solid #f1f5f9',
+          borderBottom: '1px solid var(--color-border-subtle, #f1f5f9)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          backgroundColor: '#f8fafc',
+          backgroundColor: 'var(--color-bg-surface, #f8fafc)',
         }}>
           <div>
-            <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: '#0f172a' }}>
+            <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: 'var(--color-text-primary, #0f172a)' }}>
               PLS-SEM Bootstrapping
             </h3>
-            <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#64748b' }}>
-              Multi-core significance testing for path coefficients & loadings
+            <p style={{ margin: '2px 0 0', fontSize: '12px', color: 'var(--color-text-muted, #64748b)' }}>
+              Multi-core significance testing for path coefficients &amp; loadings
             </p>
           </div>
           {stage !== 'running' && (
@@ -179,7 +179,7 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
                 border: 'none',
                 cursor: 'pointer',
                 fontSize: '18px',
-                color: '#94a3b8',
+                color: 'var(--color-text-muted, #94a3b8)',
                 padding: '4px 8px',
                 borderRadius: '6px',
               }}
@@ -194,7 +194,7 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
           {stage === 'config' && (
             <div>
               <div style={{ marginBottom: '18px' }}>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-text-primary, #334155)', marginBottom: '6px' }}>
                   Bootstrap Subsamples
                 </label>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
@@ -208,9 +208,9 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
                         borderRadius: '8px',
                         fontSize: '13px',
                         fontWeight: 600,
-                        border: nBoot === count ? '2px solid #6366f1' : '1px solid #e2e8f0',
-                        backgroundColor: nBoot === count ? '#eef2ff' : '#ffffff',
-                        color: nBoot === count ? '#4f46e5' : '#475569',
+                        border: nBoot === count ? '2px solid var(--color-accent)' : '1px solid var(--color-border-subtle, #e2e8f0)',
+                        backgroundColor: nBoot === count ? 'var(--color-accent-subtle)' : 'var(--color-bg-base, #ffffff)',
+                        color: nBoot === count ? 'var(--color-accent)' : 'var(--color-text-secondary, #475569)',
                         cursor: 'pointer',
                         transition: 'all 0.15s ease',
                       }}
@@ -219,14 +219,14 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
                     </button>
                   ))}
                 </div>
-                <span style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', display: 'block' }}>
+                <span style={{ fontSize: '11px', color: 'var(--color-text-muted, #64748b)', marginTop: '4px', display: 'block' }}>
                   500 is ideal for quick checks; 5,000 is recommended for final academic publishing.
                 </span>
               </div>
 
               <div style={{ display: 'flex', gap: '16px', marginBottom: '18px' }}>
                 <div style={{ flex: 1 }}>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-text-primary, #334155)', marginBottom: '6px' }}>
                     Random Seed
                   </label>
                   <input
@@ -237,27 +237,38 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
                       width: '100%',
                       padding: '8px 12px',
                       borderRadius: '8px',
-                      border: '1px solid #cbd5e1',
+                      border: '1px solid var(--color-border-subtle, #cbd5e1)',
+                      backgroundColor: 'var(--color-bg-base, #ffffff)',
+                      color: 'var(--color-text-primary, #0f172a)',
                       fontSize: '13px',
                       boxSizing: 'border-box',
+                      outline: 'none',
+                    }}
+                    onFocus={(e) => {
+                      e.currentTarget.style.borderColor = 'var(--color-accent)';
+                      e.currentTarget.style.boxShadow = '0 0 0 2px var(--color-accent-subtle)';
+                    }}
+                    onBlur={(e) => {
+                      e.currentTarget.style.borderColor = 'var(--color-border-subtle, #cbd5e1)';
+                      e.currentTarget.style.boxShadow = 'none';
                     }}
                   />
-                  <span style={{ fontSize: '11px', color: '#64748b', marginTop: '2px', display: 'block' }}>
+                  <span style={{ fontSize: '11px', color: 'var(--color-text-muted, #64748b)', marginTop: '2px', display: 'block' }}>
                     Ensures reproducible bootstrap distributions.
                   </span>
                 </div>
 
                 <div style={{ flex: 1 }}>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>
-                    Test Type & Scheme
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-text-primary, #334155)', marginBottom: '6px' }}>
+                    Test Type &amp; Scheme
                   </label>
                   <div style={{
                     padding: '8px 12px',
                     borderRadius: '8px',
-                    backgroundColor: '#f8fafc',
-                    border: '1px solid #e2e8f0',
+                    backgroundColor: 'var(--color-bg-surface, #f8fafc)',
+                    border: '1px solid var(--color-border-subtle, #e2e8f0)',
                     fontSize: '12px',
-                    color: '#475569',
+                    color: 'var(--color-text-secondary, #475569)',
                     lineHeight: '1.4',
                   }}>
                     Two-tailed test (α = 0.05)<br />
@@ -286,10 +297,10 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
           {stage === 'running' && (
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                <span style={{ fontSize: '13px', fontWeight: 600, color: '#1e293b' }}>
+                <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text-primary, #1e293b)' }}>
                   Running Resamples...
                 </span>
-                <span style={{ fontSize: '12px', fontWeight: 600, color: '#6366f1' }}>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-accent)' }}>
                   {percent.toFixed(1)}%
                 </span>
               </div>
@@ -298,7 +309,7 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
               <div style={{
                 width: '100%',
                 height: '10px',
-                backgroundColor: '#f1f5f9',
+                backgroundColor: 'var(--color-bg-surface, #f1f5f9)',
                 borderRadius: '9999px',
                 overflow: 'hidden',
                 position: 'relative',
@@ -306,7 +317,7 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
                 <div style={{
                   width: `${percent}%`,
                   height: '100%',
-                  backgroundColor: '#6366f1',
+                  backgroundColor: 'var(--color-accent)',
                   borderRadius: '9999px',
                   transition: 'width 0.2s ease',
                   backgroundImage: 'linear-gradient(45deg, rgba(255,255,255,0.15) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.15) 50%, rgba(255,255,255,0.15) 75%, transparent 75%, transparent)',
@@ -406,8 +417,8 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
         {/* Footer Buttons */}
         <div style={{
           padding: '14px 24px',
-          borderTop: '1px solid #f1f5f9',
-          backgroundColor: '#f8fafc',
+          borderTop: '1px solid var(--color-border-subtle, #f1f5f9)',
+          backgroundColor: 'var(--color-bg-surface, #f8fafc)',
           display: 'flex',
           justifyContent: 'flex-end',
           gap: '10px',
@@ -420,9 +431,9 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
                 style={{
                   padding: '8px 16px',
                   borderRadius: '8px',
-                  border: '1px solid #cbd5e1',
-                  backgroundColor: '#ffffff',
-                  color: '#475569',
+                  border: '1px solid var(--color-border-subtle, #cbd5e1)',
+                  backgroundColor: 'var(--color-bg-base, #ffffff)',
+                  color: 'var(--color-text-secondary, #475569)',
                   fontSize: '13px',
                   fontWeight: 500,
                   cursor: 'pointer',
@@ -437,13 +448,16 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
                   padding: '8px 20px',
                   borderRadius: '8px',
                   border: 'none',
-                  backgroundColor: '#4f46e5',
+                  backgroundColor: 'var(--color-accent)',
                   color: '#ffffff',
                   fontSize: '13px',
                   fontWeight: 600,
                   cursor: 'pointer',
-                  boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+                  boxShadow: 'var(--shadow-xs, 0 1px 2px 0 rgba(0, 0, 0, 0.05))',
+                  transition: 'background-color var(--transition-fast)',
                 }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-accent-hover)')}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-accent)')}
               >
                 Start Bootstrapping
               </button>
@@ -477,12 +491,16 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
                 padding: '8px 20px',
                 borderRadius: '8px',
                 border: 'none',
-                backgroundColor: '#4f46e5',
+                backgroundColor: 'var(--color-accent)',
                 color: '#ffffff',
                 fontSize: '13px',
                 fontWeight: 600,
                 cursor: 'pointer',
+                boxShadow: 'var(--shadow-xs, 0 1px 2px 0 rgba(0, 0, 0, 0.05))',
+                transition: 'background-color var(--transition-fast)',
               }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-accent-hover)')}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-accent)')}
             >
               {stage === 'completed' ? 'View Results' : 'Close'}
             </button>

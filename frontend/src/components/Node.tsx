@@ -117,7 +117,7 @@ const Node = ({ node, isSelected, onPointerDown, onPointerUp }: NodeProps) => {
             cy={0} 
             r={(wSize/2) + 8} 
             fill="none" 
-            stroke="#a855f7" 
+            stroke="var(--color-accent, #6B4EE6)" 
             strokeWidth="2" 
             strokeDasharray="6 6" 
           />
@@ -129,7 +129,7 @@ const Node = ({ node, isSelected, onPointerDown, onPointerUp }: NodeProps) => {
             height={hSize + 16} 
             rx={4}
             fill="none" 
-            stroke="#a855f7" 
+            stroke="var(--color-accent, #6B4EE6)" 
             strokeWidth="2" 
             strokeDasharray="6 6" 
           />
