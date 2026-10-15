@@ -1,25 +1,138 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
-import { initModelCanvas, exportModelSpec, getModelCanvasState, loadModelCanvasState, setCanvasResults } from '../utils/model-canvas';
+import { initModelCanvas, exportModelSpec, getModelCanvasState, loadModelCanvasState, setCanvasResults, renderModelCanvas, clearModelCanvas, resetModelStyles } from '../utils/model-canvas';
 import { DataManagerModal } from '../components/DataManagerModal';
 import { BootstrapModal } from '../components/BootstrapModal';
 import type { ParsedDataset } from '../utils/dataset-parser';
 import { parseDatasetFile, processData } from '../utils/dataset-parser';
 import { api, type ValidationResponse } from '../utils/api';
 
-import { Upload } from 'lucide-react';
+import {
+  Upload, Trash2, RotateCcw, AlertTriangle, History, Check,
+  FileText, FileSpreadsheet, Code, FileCheck, GitCompare, Copy, Download
+} from 'lucide-react';
 import AppSidebar from '../components/AppSidebar';
 import '../model-canvas.css';
 import '../results.css';
 
+interface TableHeaderToggleProps {
+  label: React.ReactNode;
+  mode: 'matrix' | 'list';
+  onToggle: (mode: 'matrix' | 'list') => void;
+}
+
+const TableHeaderToggle: React.FC<TableHeaderToggleProps> = ({ label, mode, onToggle }) => (
+  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', minWidth: '120px' }}>
+    <span>{label}</span>
+    <div
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '2px',
+        padding: '2px',
+        backgroundColor: 'var(--color-bg-base)',
+        border: '1px solid var(--color-border-subtle)',
+        borderRadius: '5px',
+        userSelect: 'none',
+      }}
+    >
+      <button
+        type="button"
+        title="Matrix View"
+        onClick={(e) => { e.stopPropagation(); onToggle('matrix'); }}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '2px 4px',
+          borderRadius: '3px',
+          border: 'none',
+          backgroundColor: mode === 'matrix' ? 'var(--color-accent-subtle)' : 'transparent',
+          color: mode === 'matrix' ? 'var(--color-accent)' : 'var(--color-text-tertiary)',
+          cursor: 'pointer',
+        }}
+      >
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth={2}>
+          <path d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        title="List View"
+        onClick={(e) => { e.stopPropagation(); onToggle('list'); }}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '2px 4px',
+          borderRadius: '3px',
+          border: 'none',
+          backgroundColor: mode === 'list' ? 'var(--color-accent-subtle)' : 'transparent',
+          color: mode === 'list' ? 'var(--color-accent)' : 'var(--color-text-tertiary)',
+          cursor: 'pointer',
+        }}
+      >
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth={2}>
+          <path d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+        </svg>
+      </button>
+    </div>
+  </div>
+);
+
+function isModelTopologyEqual(specA: any, specB: any): boolean {
+  if (!specA || !specB) return false;
+
+  // 1. Constructs: ID, measurement type, and attached indicators
+  const cA = (specA.constructs || []).map((c: any) => {
+    const rawType = typeof c.type === 'string' ? c.type : (c.type?.value || 'reflective');
+    const inds = (c.indicators || []).slice().sort().join(',');
+    return `${c.id}:${rawType.toLowerCase()}:${inds}`;
+  }).sort();
+
+  const cB = (specB.constructs || []).map((c: any) => {
+    const rawType = typeof c.type === 'string' ? c.type : (c.type?.value || 'reflective');
+    const inds = (c.indicators || []).slice().sort().join(',');
+    return `${c.id}:${rawType.toLowerCase()}:${inds}`;
+  }).sort();
+
+  if (cA.length !== cB.length || cA.some((val: string, idx: number) => val !== cB[idx])) {
+    return false;
+  }
+
+  // 2. Indicators
+  const iA = (specA.indicators || []).map((i: any) => `${i.id}:${i.column || i.name || i.id}`).sort();
+  const iB = (specB.indicators || []).map((i: any) => `${i.id}:${i.column || i.name || i.id}`).sort();
+  if (iA.length !== iB.length || iA.some((val: string, idx: number) => val !== iB[idx])) {
+    return false;
+  }
+
+  // 3. Paths (support both from/to and from_node/to_node)
+  const pA = (specA.paths || []).map((p: any) => `${p.from || p.from_node}->${p.to || p.to_node}`).sort();
+  const pB = (specB.paths || []).map((p: any) => `${p.from || p.from_node}->${p.to || p.to_node}`).sort();
+  if (pA.length !== pB.length || pA.some((val: string, idx: number) => val !== pB[idx])) {
+    return false;
+  }
+
+  return true;
+}
+
 const ModelEditor = () => {
   const navigate = useNavigate();
-  const { workspaces, activeWorkspaceId, studies, activeStudyId, activeModelId, models, datasetsByStudy, setStudyDataset, touchStudy, openTab } = useStore();
+  const { workspaces, activeWorkspaceId, studies, activeStudyId, activeModelId, models, datasetsByStudy, setStudyDataset, touchStudy, openTab, addStudySnapshot, theme, settings, tabs, activeTabId } = useStore();
   
-  const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId);
-  const activeStudy = studies.find(s => s.id === activeStudyId);
-  const activeModel = models.find(model => model.id === activeModelId);
+  const currentTab = tabs.find(t => t.id === activeTabId);
+  const effectiveModelId = currentTab?.modelId || activeModelId;
+  const effectiveStudyId = currentTab?.studyId || activeStudyId;
+  const activeWorkspace = workspaces.find(w => w.id === (currentTab?.workspaceId || activeWorkspaceId));
+  const activeStudy = studies.find(s => s.id === effectiveStudyId);
+  const activeModel = models.find(model => model.id === effectiveModelId);
+  const isCanvasLoadingRef = useRef(true);
+
+  useEffect(() => {
+    renderModelCanvas();
+  }, [theme, settings?.theme, settings?.darkVariant]);
 
   const [currentView, setCurrentView] = useState<'model' | 'results'>('model');
   const [datasetToImport, setDatasetToImport] = useState<ParsedDataset | null>(null);
@@ -31,8 +144,11 @@ const ModelEditor = () => {
   const [isCalcMenuOpen, setIsCalcMenuOpen] = useState(false);
   const [areCategoriesCollapsed, setAreCategoriesCollapsed] = useState(false);
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
+  const [selectedVarNames, setSelectedVarNames] = useState<Set<string>>(new Set());
+  const [lastSelectedVar, setLastSelectedVar] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const calcDropdownRef = useRef<HTMLDivElement>(null);
+  const autoSaveTimerRef = useRef<any>(null);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -65,6 +181,7 @@ const ModelEditor = () => {
   const [activeBorder, setActiveBorder] = useState<string>('#cbd5e1');
   const [activeText, setActiveText] = useState<string>('#1e293b');
 
+  const [autoSaveStatus, setAutoSaveStatus] = useState<'saved' | 'saving' | 'error' | null>('saved');
   const [isSaving, setIsSaving] = useState(false);
   const [saveToast, setSaveToast] = useState<string | null>(null);
   const [isValidating, setIsValidating] = useState(false);
@@ -72,8 +189,53 @@ const ModelEditor = () => {
   const [validationModal, setValidationModal] = useState<ValidationResponse | null>(null);
   const [validationSuccessToast, setValidationSuccessToast] = useState<string | null>(null);
   const [plsResults, setPlsResults] = useState<any>(null);
+  const plsResultsRef = useRef<any>(null);
   const [activeResultTab, setActiveResultTab] = useState<string>('path_coefficients');
-  const [resultViewMode, setResultViewMode] = useState<'matrix' | 'list'>('matrix');
+  const [tableModes, setTableModes] = useState<Record<string, 'matrix' | 'list'>>({
+    path_coefficients: 'matrix',
+    total_indirect_effects: 'matrix',
+    total_effects: 'matrix',
+    outer_loadings: 'matrix',
+    outer_weights: 'matrix',
+    f_squared: 'matrix',
+    htmt: 'matrix',
+  });
+
+  const getTableMode = (key: string): 'matrix' | 'list' => tableModes[key] || 'matrix';
+  const setTableMode = (key: string, mode: 'matrix' | 'list') => {
+    setTableModes(prev => ({ ...prev, [key]: mode }));
+  };
+
+  // Canvas HUD confirmation popovers ('reset' | 'clear' | null)
+  const [hudConfirm, setHudConfirm] = useState<'reset' | 'clear' | null>(null);
+
+  // Model Outdated & Revert Tracking
+  const [isModelOutdated, setIsModelOutdated] = useState(false);
+  const [lastCalculatedModel, setLastCalculatedModel] = useState<{ spec: any; layout: any } | null>(null);
+  const lastCalculatedModelRef = useRef<{ spec: any; layout: any } | null>(null);
+
+  // Snapshot modal state
+  const [isSnapshotModalOpen, setIsSnapshotModalOpen] = useState(false);
+  const [snapshotName, setSnapshotName] = useState('');
+  const [snapshotTargetStudyId, setSnapshotTargetStudyId] = useState<string>('');
+  const [isSavingSnapshot, setIsSavingSnapshot] = useState(false);
+
+  useEffect(() => {
+    (window as any)._customClearCanvasHandler = (e: any) => {
+      e?.preventDefault?.();
+      e?.stopPropagation?.();
+      setHudConfirm('clear');
+    };
+    (window as any)._customResetStylesHandler = (e: any) => {
+      e?.preventDefault?.();
+      e?.stopPropagation?.();
+      setHudConfirm('reset');
+    };
+    return () => {
+      delete (window as any)._customClearCanvasHandler;
+      delete (window as any)._customResetStylesHandler;
+    };
+  }, []);
 
 
   useEffect(() => {
@@ -162,31 +324,108 @@ const ModelEditor = () => {
     });
   };
 
+  const handleVariableClick = (event: React.MouseEvent, variableName: string) => {
+    if (event.shiftKey && lastSelectedVar) {
+      const allNames = visibleVariables.map(v => String(v.name));
+      const idx1 = allNames.indexOf(lastSelectedVar);
+      const idx2 = allNames.indexOf(variableName);
+      if (idx1 !== -1 && idx2 !== -1) {
+        const start = Math.min(idx1, idx2);
+        const end = Math.max(idx1, idx2);
+        const range = allNames.slice(start, end + 1);
+        setSelectedVarNames(new Set(range));
+        return;
+      }
+    }
+    if (event.metaKey || event.ctrlKey) {
+      setSelectedVarNames(prev => {
+        const next = new Set(prev);
+        if (next.has(variableName)) next.delete(variableName);
+        else next.add(variableName);
+        return next;
+      });
+      setLastSelectedVar(variableName);
+    } else {
+      setSelectedVarNames(new Set([variableName]));
+      setLastSelectedVar(variableName);
+    }
+  };
+
   const handleVariableDragStart = (event: React.DragEvent<HTMLDivElement>, variableName: string) => {
+    let itemsToDrag: string[] = [variableName];
+    if (selectedVarNames.has(variableName) && selectedVarNames.size > 1) {
+      itemsToDrag = Array.from(selectedVarNames);
+    } else {
+      setSelectedVarNames(new Set([variableName]));
+      setLastSelectedVar(variableName);
+    }
+
+    const payload = JSON.stringify({ type: 'variable-list', vars: itemsToDrag });
     try {
-      event.dataTransfer.setData('text/plain', variableName);
-      event.dataTransfer.setData('text', variableName);
+      event.dataTransfer.setData('text/plain', payload);
+      event.dataTransfer.setData('application/json', payload);
       event.dataTransfer.effectAllowed = 'copy';
     } catch (e) {}
-    (window as any).__draggedVariable = variableName;
+    (window as any).__draggedPayload = payload;
+  };
+
+  const handleCategoryDragStart = (event: React.DragEvent<HTMLDivElement>, category: string, catVars: string[]) => {
+    const payload = JSON.stringify({
+      type: 'variable-group',
+      name: category,
+      vars: catVars
+    });
+    try {
+      event.dataTransfer.setData('text/plain', payload);
+      event.dataTransfer.setData('application/json', payload);
+      event.dataTransfer.effectAllowed = 'copy';
+    } catch (e) {}
+    (window as any).__draggedPayload = payload;
   };
 
   const handleCanvasDrop = (event: React.DragEvent<any>) => {
     event.preventDefault();
     event.stopPropagation();
-    let variableName = '';
+    let payload = '';
     try {
-      variableName = event.dataTransfer?.getData('text/plain') || event.dataTransfer?.getData('text') || '';
+      payload = event.dataTransfer?.getData('application/json') || event.dataTransfer?.getData('text/plain') || '';
     } catch (e) {}
-    if (!variableName) {
-      variableName = (window as any).__draggedVariable || '';
+    if (!payload) {
+      payload = (window as any).__draggedPayload || '';
     }
-    (window as any).__draggedVariable = null;
-    if (variableName) {
-      (window as any).dropModelVariable?.(variableName, event.clientX, event.clientY);
+    (window as any).__draggedPayload = null;
+    if (payload) {
+      (window as any).dropModelVariable?.(payload, event.clientX, event.clientY);
     }
   };
 
+  const performAutoSave = async () => {
+    if (isCanvasLoadingRef.current || !activeStudy?.path) return;
+    try {
+      setAutoSaveStatus('saving');
+      const spec = exportModelSpec();
+      const layout = getModelCanvasState();
+      const res = await api.saveProjectModel(activeStudy.path, spec, layout, effectiveModelId || undefined);
+      if (res.error) {
+        setAutoSaveStatus('error');
+      } else {
+        setAutoSaveStatus('saved');
+      }
+    } catch (err: any) {
+      console.warn('Auto-save error:', err);
+      setAutoSaveStatus('error');
+    }
+  };
+
+  const triggerDebouncedAutoSave = () => {
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+    }
+    setAutoSaveStatus('saving');
+    autoSaveTimerRef.current = setTimeout(() => {
+      performAutoSave();
+    }, 600);
+  };
 
   const switchView = (view: 'model' | 'results') => {
     setCurrentView(view);
@@ -226,15 +465,9 @@ const ModelEditor = () => {
     }
     try {
       setIsSaving(true);
-      const spec = exportModelSpec();
-      const layout = getModelCanvasState();
-      const res = await api.saveProjectModel(activeStudy.path, spec, layout);
-      if (res.error) {
-        alert('Failed to save model: ' + res.error);
-      } else {
-        setSaveToast('Model saved successfully');
-        setTimeout(() => setSaveToast(null), 2500);
-      }
+      await performAutoSave();
+      setSaveToast('Model saved successfully');
+      setTimeout(() => setSaveToast(null), 2500);
     } catch (err: any) {
       alert('Error saving model: ' + err?.message);
     } finally {
@@ -275,13 +508,15 @@ const ModelEditor = () => {
       }
 
       // 2. Auto-save model
-      await api.saveProjectModel(activeStudy.path, spec, layout);
+      await api.saveProjectModel(activeStudy.path, spec, layout, effectiveModelId || undefined);
 
       // 3. Execute PLS-SEM algorithm
       const runRes = await api.runPlsModel(activeStudy.path, spec, {
         columns: datasetHeaders,
         rows: activeDataset?.rows,
         dataset_name: activeDataset?.filename,
+        model_id: effectiveModelId || undefined,
+        diagram_layout: layout,
       });
       if (runRes.error) {
         alert('PLS-SEM calculation failed: ' + runRes.error);
@@ -290,7 +525,12 @@ const ModelEditor = () => {
 
       if (runRes.results) {
         setPlsResults(runRes.results);
+        plsResultsRef.current = runRes.results;
         setCanvasResults(runRes.results);
+        const calculatedSnapshot = { spec, layout };
+        setLastCalculatedModel(calculatedSnapshot);
+        lastCalculatedModelRef.current = calculatedSnapshot;
+        setIsModelOutdated(false);
       }
 
       setValidationSuccessToast(`PLS-SEM Calculation Complete! Converged in ${runRes.results?.iterations || 0} iterations`);
@@ -306,24 +546,239 @@ const ModelEditor = () => {
 
   useEffect(() => {
     if (activeStudy?.path) {
-      api.loadProjectResults(activeStudy.path, 'pls').then((res) => {
+      api.loadProjectResults(activeStudy.path, 'pls', effectiveModelId || undefined).then((res) => {
         if (res && res.results) {
           setPlsResults(res.results);
-          setCanvasResults(res.results);
+          plsResultsRef.current = res.results;
+          const calculatedSpec = res.spec || exportModelSpec();
+          const calculatedLayout = res.diagram_layout || getModelCanvasState();
+          const calculatedSnapshot = { spec: calculatedSpec, layout: calculatedLayout };
+          setLastCalculatedModel(calculatedSnapshot);
+          lastCalculatedModelRef.current = calculatedSnapshot;
+
+          // Only compare if canvas is fully loaded; otherwise wait for canvas loader to complete
+          if (!isCanvasLoadingRef.current && res.spec) {
+            try {
+              const currentSpec = exportModelSpec();
+              if (!isModelTopologyEqual(currentSpec, calculatedSpec)) {
+                setCanvasResults(null);
+                setIsModelOutdated(true);
+              } else {
+                setCanvasResults(res.results);
+                setIsModelOutdated(false);
+              }
+            } catch (e) {
+              setCanvasResults(res.results);
+              setIsModelOutdated(false);
+            }
+          } else {
+            setCanvasResults(res.results);
+            setIsModelOutdated(false);
+          }
+
           const viewSlider = document.getElementById('main-view-slider');
           if (viewSlider) {
             (viewSlider as HTMLElement).style.display = 'flex';
           }
         } else {
           setPlsResults(null);
+          plsResultsRef.current = null;
           setCanvasResults(null);
+          setLastCalculatedModel(null);
+          lastCalculatedModelRef.current = null;
+          setIsModelOutdated(false);
         }
       }).catch(() => {
         setPlsResults(null);
+        plsResultsRef.current = null;
         setCanvasResults(null);
+        setLastCalculatedModel(null);
+        lastCalculatedModelRef.current = null;
+        setIsModelOutdated(false);
       });
+    } else {
+      setPlsResults(null);
+      plsResultsRef.current = null;
+      setCanvasResults(null);
+      setLastCalculatedModel(null);
+      lastCalculatedModelRef.current = null;
+      setIsModelOutdated(false);
     }
-  }, [activeStudy?.path]);
+  }, [activeStudy?.path, effectiveModelId]);
+
+  const handleRevertToCalculatedModel = () => {
+    if (!lastCalculatedModel?.layout) return;
+    loadModelCanvasState(lastCalculatedModel.layout);
+    if (plsResults) {
+      setCanvasResults(plsResults);
+    }
+    setIsModelOutdated(false);
+    setSaveToast('Canvas reverted to calculated model state');
+    setTimeout(() => setSaveToast(null), 2500);
+    switchView('model');
+  };
+
+  const handleConfirmClearCanvas = () => {
+    setHudConfirm(null);
+    clearModelCanvas();
+    setPlsResults(null);
+    setCanvasResults(null);
+    setLastCalculatedModel(null);
+    lastCalculatedModelRef.current = null;
+    setIsModelOutdated(false);
+    triggerDebouncedAutoSave();
+    setSaveToast('Canvas and results cleared');
+    setTimeout(() => setSaveToast(null), 2500);
+  };
+
+  const handleOpenSnapshotModal = () => {
+    const defaultName = `${activeModel?.name || 'Model'} - Snapshot ${new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+    setSnapshotName(defaultName);
+    setSnapshotTargetStudyId(activeStudyId || studies[0]?.id || '');
+    setIsSnapshotModalOpen(true);
+  };
+
+  const handleSaveSnapshot = async () => {
+    const targetStudy = studies.find(s => s.id === snapshotTargetStudyId) || activeStudy;
+    if (!targetStudy?.path || !plsResults) return;
+    try {
+      setIsSavingSnapshot(true);
+      const spec = lastCalculatedModel?.spec || exportModelSpec();
+      const layout = lastCalculatedModel?.layout || getModelCanvasState();
+      const res = await api.saveSnapshot({
+        projectPath: targetStudy.path,
+        name: snapshotName.trim() || `Snapshot ${new Date().toLocaleDateString()}`,
+        description: '',
+        algorithm: 'pls',
+        results: plsResults,
+        spec,
+        diagramLayout: layout,
+        sourceModelId: effectiveModelId || undefined,
+      });
+      if (res.error) {
+        alert('Failed to save snapshot: ' + res.error);
+        return;
+      }
+      if (res.snapshot) {
+        addStudySnapshot(targetStudy.path, res.snapshot);
+      }
+      setIsSnapshotModalOpen(false);
+      setSaveToast('Snapshot saved successfully');
+      setTimeout(() => setSaveToast(null), 3000);
+    } catch (err: any) {
+      alert('Error saving snapshot: ' + err?.message);
+    } finally {
+      setIsSavingSnapshot(false);
+    }
+  };
+
+  const handleCreateDataFile = () => {
+    if (!plsResults) {
+      alert('Please calculate results first before creating a data file.');
+      return;
+    }
+    try {
+      const scores = plsResults.construct_scores || {};
+      const constructs = Object.keys(scores);
+      if (constructs.length === 0) {
+        alert('No construct scores available to create a data file.');
+        return;
+      }
+      const nSamples = plsResults.n_samples || 0;
+      let csvContent = constructs.join(',') + '\n';
+      for (let i = 0; i < nSamples; i++) {
+        const rowVals = constructs.map(c => scores[c]?.[i] !== undefined ? scores[c][i] : '');
+        csvContent += rowVals.join(',') + '\n';
+      }
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${activeModel?.name || 'Model'}_construct_scores.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setSaveToast('Construct scores data file generated');
+      setTimeout(() => setSaveToast(null), 2500);
+    } catch (e: any) {
+      alert('Error creating data file: ' + e?.message);
+    }
+  };
+
+  const handleExportExcel = () => {
+    if (!plsResults) return;
+    const table = document.querySelector('.scientific-table');
+    if (!table) {
+      alert('No active table to export.');
+      return;
+    }
+    let csv = '';
+    const rows = table.querySelectorAll('tr');
+    rows.forEach(r => {
+      const cells = r.querySelectorAll('th, td');
+      const rowVals: string[] = [];
+      cells.forEach(c => {
+        let text = c.textContent?.trim() || '';
+        if (text.includes(',') || text.includes('"')) {
+          text = `"${text.replace(/"/g, '""')}"`;
+        }
+        rowVals.push(text);
+      });
+      csv += rowVals.join(',') + '\n';
+    });
+    const blob = new Blob([csv], { type: 'application/vnd.ms-excel;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${activeModel?.name || 'Model'}_${activeResultTab}.xls`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setSaveToast('Excel report downloaded');
+    setTimeout(() => setSaveToast(null), 2500);
+  };
+
+  const handleExportHtml = () => {
+    if (!plsResults) return;
+    const table = document.querySelector('.scientific-table');
+    if (!table) return;
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>${activeModel?.name || 'Model'} Results - ${reportTabDetails.title}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 32px; color: #1e293b; }
+    h1 { margin-bottom: 4px; font-size: 20px; }
+    p { margin-top: 0; color: #64748b; font-size: 14px; margin-bottom: 24px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { border: 1px solid #e2e8f0; padding: 8px 12px; text-align: left; }
+    th { background: #f8fafc; font-weight: 600; }
+    tr:nth-child(even) { background: #f8fafc; }
+  </style>
+</head>
+<body>
+  <h1>${reportTabDetails.title}</h1>
+  <p>Model: ${activeModel?.name || 'Model'} | Study: ${activeStudy?.name || 'Study'} | Generated: ${new Date().toLocaleString()}</p>
+  ${table.outerHTML}
+</body>
+</html>`;
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${activeModel?.name || 'Model'}_${activeResultTab}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setSaveToast('HTML report downloaded');
+    setTimeout(() => setSaveToast(null), 2500);
+  };
+
+  const handleCreateReport = () => {
+    window.print();
+  };
+
+  const handleCompare = () => {
+    alert('Model comparison: Snapshots and current runs can be viewed side-by-side by opening snapshots from the study workspace.');
+  };
 
   const fmt = (val: any, decimals: number = 4): string => {
     if (val === undefined || val === null || isNaN(Number(val))) return '—';
@@ -416,6 +871,18 @@ const ModelEditor = () => {
     return map;
   }, [resultConstructs]);
 
+  const allIndicators = useMemo(() => {
+    if (!plsResults) return [];
+    const set = new Set<string>();
+    Object.values(plsResults.measurement?.outer_loadings || {}).forEach((m: any) => {
+      Object.keys(m || {}).forEach(k => set.add(k));
+    });
+    Object.values(plsResults.measurement?.outer_weights || {}).forEach((m: any) => {
+      Object.keys(m || {}).forEach(k => set.add(k));
+    });
+    return Array.from(set).sort();
+  }, [plsResults]);
+
   const reportTabDetails = useMemo(() => {
     switch (activeResultTab) {
       case 'path_coefficients':
@@ -424,9 +891,15 @@ const ModelEditor = () => {
           badge: 'β (beta)',
           subtitle: 'Standardized beta coefficients between endogenous and exogenous latent constructs.',
         };
+      case 'total_indirect_effects':
+        return {
+          title: 'Total Indirect Effects',
+          badge: 'Indirect',
+          subtitle: 'Specific and cumulative indirect mediation pathways across constructs.',
+        };
       case 'total_effects':
         return {
-          title: 'Total & Indirect Effects',
+          title: 'Total Effects',
           badge: 'Direct + Indirect',
           subtitle: 'Cumulative relationships and mediation decomposition across the structural model.',
         };
@@ -596,22 +1069,42 @@ const ModelEditor = () => {
       if (text) setActiveText(text);
     };
 
+    isCanvasLoadingRef.current = true;
+    loadModelCanvasState({ nodes: [], edges: [] });
+
     // Add a tiny delay to ensure DOM is ready
     const timer = setTimeout(async () => {
       initModelCanvas();
 
       if (activeStudy?.path) {
         try {
-          const modelRes = await api.loadProjectModel(activeStudy.path);
-          if (modelRes && modelRes.diagram_layout) {
+          const modelRes = await api.loadProjectModel(activeStudy.path, effectiveModelId || undefined);
+          if (modelRes && modelRes.diagram_layout && modelRes.diagram_layout.nodes) {
             loadModelCanvasState(modelRes.diagram_layout);
-            if (plsResults) {
-              setCanvasResults(plsResults);
-            }
+          } else {
+            loadModelCanvasState({ nodes: [], edges: [] });
           }
         } catch (err) {
           console.warn('Could not load saved model layout:', err);
+        } finally {
+          isCanvasLoadingRef.current = false;
+          if (lastCalculatedModelRef.current?.spec) {
+            try {
+              const currentSpec = exportModelSpec();
+              if (!isModelTopologyEqual(currentSpec, lastCalculatedModelRef.current.spec)) {
+                setCanvasResults(null);
+                setIsModelOutdated(true);
+              } else {
+                setIsModelOutdated(false);
+                if (plsResultsRef.current || plsResults) {
+                  setCanvasResults(plsResultsRef.current || plsResults);
+                }
+              }
+            } catch (e) {}
+          }
         }
+      } else {
+        isCanvasLoadingRef.current = false;
       }
 
       // Load results script if it exists
@@ -655,13 +1148,37 @@ const ModelEditor = () => {
       }
     };
     
+    const handleCanvasChanged = () => {
+      if (isCanvasLoadingRef.current) return;
+      triggerDebouncedAutoSave();
+      if (lastCalculatedModelRef.current?.spec) {
+        try {
+          const currentSpec = exportModelSpec();
+          if (!isModelTopologyEqual(currentSpec, lastCalculatedModelRef.current.spec)) {
+            setCanvasResults(null);
+            setIsModelOutdated(true);
+          } else {
+            setIsModelOutdated(false);
+            if (plsResultsRef.current || plsResults) {
+              setCanvasResults(plsResultsRef.current || plsResults);
+            }
+          }
+        } catch (e) {}
+      }
+    };
+
     document.addEventListener('color-picker-closed', handleColorPickerClosed);
+    window.addEventListener('canvas-changed', handleCanvasChanged);
 
     return () => {
       clearTimeout(timer);
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
       document.removeEventListener('color-picker-closed', handleColorPickerClosed);
+      window.removeEventListener('canvas-changed', handleCanvasChanged);
+      setCanvasResults(null);
+      loadModelCanvasState({ nodes: [], edges: [] });
     };
-  }, []);
+  }, [activeStudy?.path, effectiveModelId]);
 
   return (
     <div className="app-body" style={{ width: '100%', height: '100%', overflow: 'hidden' }}>
@@ -698,6 +1215,34 @@ const ModelEditor = () => {
       <span className="subheader__breadcrumb-link" style={{color: 'var(--color-accent)', fontWeight: 600}}>
         {activeModel ? `${activeModel.name}.splsm` : 'Untitled model.splsm'}
       </span>
+
+      <div className="subheader__divider" style={{ margin: '0 8px' }} />
+
+      {/* Auto-Save Live Status Indicator docked beside breadcrumb */}
+      <div
+        className="subheader__autosave-status"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          fontSize: '11px',
+          color: autoSaveStatus === 'error' ? '#ef4444' : 'var(--color-text-muted)',
+          userSelect: 'none',
+        }}
+        title={autoSaveStatus === 'saving' ? 'Saving changes...' : (autoSaveStatus === 'error' ? 'Failed to auto-save' : 'All changes saved automatically')}
+      >
+        <span
+          style={{
+            width: '6px',
+            height: '6px',
+            borderRadius: '50%',
+            backgroundColor: autoSaveStatus === 'saving' ? '#eab308' : (autoSaveStatus === 'error' ? '#ef4444' : '#22c55e'),
+            display: 'inline-block',
+            flexShrink: 0
+          }}
+        />
+        <span style={{ whiteSpace: 'nowrap' }}>{autoSaveStatus === 'saving' ? 'Saving...' : (autoSaveStatus === 'error' ? 'Save error' : 'Saved')}</span>
+      </div>
     </div>
     <div className="subheader__actions">
       {/* Inline Model | Results Switcher */}
@@ -764,27 +1309,6 @@ const ModelEditor = () => {
           </div>
         )}
       </div>
-
-      <div className="subheader__divider" />
-
-      {/* Inline Save & Export Icon-Only Buttons */}
-      <button
-        className="subheader__icon-btn"
-        type="button"
-        onClick={handleSaveModel}
-        disabled={isSaving}
-        title={isSaving ? 'Saving...' : 'Save Model (⌘S)'}
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" /><polyline points="17 21 17 13 7 13 7 21" /><polyline points="7 3 7 8 15 8" /></svg>
-      </button>
-      <button
-        className="subheader__icon-btn"
-        type="button"
-        onClick={handleExportModel}
-        title="Export Model Spec JSON"
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1={12} y1={15} x2={12} y2={3} /></svg>
-      </button>
     </div>
   </div>
   {/* ═══ APP BODY ═══ */}
@@ -872,20 +1396,36 @@ const ModelEditor = () => {
               if (varsInCat.length === 0) return null;
               return (
                 <div className="var-cat" key={cat}>
-                  <button type="button" className="var-cat__header" onClick={() => toggleCategory(cat)}>
+                  <div
+                    className="var-cat__header"
+                    draggable
+                    onDragStart={(event) => handleCategoryDragStart(event, cat, varsInCat.map(v => String(v.name)))}
+                    onClick={() => toggleCategory(cat)}
+                  >
                     <div className="var-cat__header-left">
                       <svg className={`cat-chevron ${areCategoriesCollapsed || collapsedCategories.has(cat) ? 'rotated' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><polyline points="6 9 12 15 18 9" /></svg>
                       <span className="var-cat__name">{cat}</span>
                     </div>
                     <span className="var-cat__count">{varsInCat.length}</span>
-                  </button>
+                  </div>
                   <div className={`var-items ${areCategoriesCollapsed || collapsedCategories.has(cat) ? 'hidden' : ''}`}>
-                    {varsInCat.map(v => (
-                      <div className="var-item" key={v.name} data-variable-name={String(v.name ?? '')} draggable onDragStart={event => handleVariableDragStart(event, String(v.name ?? ''))}>
-                        <span className="var-item__name">{v.name}</span>
-                        <span className="var-item__type">{String(v.scaleType ?? 'Unknown').slice(0, 3).toUpperCase()}</span>
-                      </div>
-                    ))}
+                    {varsInCat.map(v => {
+                      const vName = String(v.name ?? '');
+                      const isSelected = selectedVarNames.has(vName);
+                      return (
+                        <div
+                          className={`var-item ${isSelected ? 'selected' : ''}`}
+                          key={v.name}
+                          data-variable-name={vName}
+                          draggable
+                          onClick={(event) => handleVariableClick(event, vName)}
+                          onDragStart={event => handleVariableDragStart(event, vName)}
+                        >
+                          <span className="var-item__name">{v.name}</span>
+                          <span className="var-item__type">{String(v.scaleType ?? 'Unknown').slice(0, 3).toUpperCase()}</span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               );
@@ -928,9 +1468,8 @@ const ModelEditor = () => {
           <div className="tb-btn" title="Path Connector (P)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><line x1={5} y1={12} x2={19} y2={12} /><polyline points="12 5 19 12 12 19" /></svg></div>
           <div className="tb-btn" title="Erase Element (E)" id="btn-erase">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 16, height: 16 }}>
-              <circle cx={12} cy={12} r={9} />
-              <line x1={15} y1={9} x2={9} y2={15} />
-              <line x1={9} y1={9} x2={15} y2={15} />
+              <line x1={18} y1={6} x2={6} y2={18} strokeLinecap="round" strokeLinejoin="round" />
+              <line x1={6} y1={6} x2={18} y2={18} strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </div>
           <div className="tb-btn" title="Auto-Align Model">
@@ -1173,14 +1712,143 @@ const ModelEditor = () => {
           <div className="hud-divider" />
           <div className="hud-icon-btn active" id="hud-snap" title="Snap to Grid"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="4" cy="4" r="2" /><circle cx="12" cy="4" r="2" /><circle cx="20" cy="4" r="2" /><circle cx="4" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="20" cy="12" r="2" /><circle cx="4" cy="20" r="2" /><circle cx="12" cy="20" r="2" /><circle cx="20" cy="20" r="2" /></svg></div>
           <div className="hud-divider" />
-          <div className="hud-btn" id="hud-reset" title="Reset Default Styles"><span className="material-symbols-outlined" style={{fontSize: '18px'}}>restart_alt</span></div>
-          <div className="hud-btn" id="hud-delete" title="Delete Selected Part (Delete / Backspace)"><span className="material-symbols-outlined" style={{fontSize: '18px', color: '#ef4444'}}>delete</span></div>
+          <div
+            className="hud-btn"
+            id="hud-reset"
+            title="Reset Default Styles"
+            onClick={() => setHudConfirm(c => c === 'reset' ? null : 'reset')}
+            style={{ color: 'var(--color-text-secondary)', padding: '0 6px', position: 'relative' }}
+          >
+            <RotateCcw size={15} />
+          </div>
+          <div
+            className="hud-btn"
+            id="hud-clear"
+            title="Clear Canvas and Results"
+            onClick={() => setHudConfirm(c => c === 'clear' ? null : 'clear')}
+            style={{ color: '#ef4444', padding: '0 6px', position: 'relative' }}
+          >
+            <Trash2 size={16} color="#ef4444" />
+          </div>
+
+          {/* Popover confirmation anchored directly above reset/clear */}
+          {hudConfirm === 'reset' && (
+            <div style={{
+              position: 'absolute',
+              bottom: 'calc(100% + 8px)',
+              right: '32px',
+              backgroundColor: 'var(--color-bg-base)',
+              border: '1px solid var(--color-border-subtle)',
+              boxShadow: '0 6px 16px rgba(0, 0, 0, 0.18)',
+              borderRadius: '8px',
+              padding: '8px 12px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              whiteSpace: 'nowrap',
+              zIndex: 100,
+              fontSize: '12px',
+            }}>
+              <span style={{ color: 'var(--color-text-primary)', fontWeight: 500 }}>Reset styles to default?</span>
+              <button
+                type="button"
+                onClick={() => {
+                  resetModelStyles();
+                  setHudConfirm(null);
+                  setSaveToast('Model styles reset to default');
+                  setTimeout(() => setSaveToast(null), 2500);
+                }}
+                style={{
+                  padding: '3px 9px',
+                  borderRadius: '4px',
+                  backgroundColor: 'var(--color-accent)',
+                  color: '#ffffff',
+                  border: 'none',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Reset
+              </button>
+              <button
+                type="button"
+                onClick={() => setHudConfirm(null)}
+                style={{
+                  padding: '3px 6px',
+                  borderRadius: '4px',
+                  backgroundColor: 'transparent',
+                  color: 'var(--color-text-secondary)',
+                  border: 'none',
+                  fontSize: '11px',
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+
+          {hudConfirm === 'clear' && (
+            <div style={{
+              position: 'absolute',
+              bottom: 'calc(100% + 8px)',
+              right: '4px',
+              backgroundColor: 'var(--color-bg-base)',
+              border: '1px solid var(--color-border-subtle)',
+              boxShadow: '0 6px 16px rgba(0, 0, 0, 0.18)',
+              borderRadius: '8px',
+              padding: '8px 12px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              whiteSpace: 'nowrap',
+              zIndex: 100,
+              fontSize: '12px',
+            }}>
+              <span style={{ color: '#ef4444', fontWeight: 500 }}>Clear entire canvas & results?</span>
+              <button
+                type="button"
+                onClick={() => {
+                  handleConfirmClearCanvas();
+                  setHudConfirm(null);
+                }}
+                style={{
+                  padding: '3px 9px',
+                  borderRadius: '4px',
+                  backgroundColor: '#ef4444',
+                  color: '#ffffff',
+                  border: 'none',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                onClick={() => setHudConfirm(null)}
+                style={{
+                  padding: '3px 6px',
+                  borderRadius: '4px',
+                  backgroundColor: 'transparent',
+                  color: 'var(--color-text-secondary)',
+                  border: 'none',
+                  fontSize: '11px',
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          )}
         </div>
         {/* SVG Engine Engine */}
         <svg id="model-svg" width="100%" height="100%" style={{display: 'block'}} onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }} onDrop={handleCanvasDrop}>
           <defs>
             <pattern id="dot-grid" width={20} height={20} patternUnits="userSpaceOnUse">
-              <circle cx={2} cy={2} r={1} fill="rgba(100,116,139,0.25)" />
+              <circle cx={2} cy={2} r={1} fill="var(--canvas-dot-color)" />
             </pattern>
             <marker id="arrowhead" markerWidth={10} markerHeight={7} refX={9} refY="3.5" orient="auto">
               <polygon points="0 0, 10 3.5, 0 7" fill="var(--color-text-secondary)" style={{pointerEvents: 'none'}} />
@@ -1189,19 +1857,19 @@ const ModelEditor = () => {
               <polygon points="0 0, 10 3.5, 0 7" fill="var(--color-accent)" style={{pointerEvents: 'none'}} />
             </marker>
             <marker id="arrow-solid" markerWidth={10} markerHeight={10} refX={8} refY={5} orient="auto">
-              <polygon points="1 2, 9 5, 1 8" fill="#1e293b" />
+              <polygon points="1 2, 9 5, 1 8" fill="var(--color-text-primary)" />
             </marker>
             <marker id="arrow-solid-selected" markerWidth={10} markerHeight={10} refX={8} refY={5} orient="auto">
               <polygon points="1 2, 9 5, 1 8" fill="var(--color-accent)" />
             </marker>
             <marker id="arrow-open" markerWidth={10} markerHeight={10} refX={7} refY={5} orient="auto">
-              <path d="M 2 2 L 8 5 L 2 8" fill="none" stroke="#1e293b" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M 2 2 L 8 5 L 2 8" fill="none" stroke="var(--color-text-primary)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
             </marker>
             <marker id="arrow-open-selected" markerWidth={10} markerHeight={10} refX={7} refY={5} orient="auto">
               <path d="M 2 2 L 8 5 L 2 8" fill="none" stroke="var(--color-accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
             </marker>
             <marker id="arrow-diamond" markerWidth={10} markerHeight={10} refX={5} refY={5} orient="auto">
-              <polygon points="5 1.5, 8.5 5, 5 8.5, 1.5 5" fill="#1e293b" />
+              <polygon points="5 1.5, 8.5 5, 5 8.5, 1.5 5" fill="var(--color-text-primary)" />
             </marker>
             <marker id="arrow-diamond-selected" markerWidth={10} markerHeight={10} refX={5} refY={5} orient="auto">
               <polygon points="5 1.5, 8.5 5, 5 8.5, 1.5 5" fill="var(--color-accent)" />
@@ -1242,18 +1910,21 @@ const ModelEditor = () => {
                 className={`tree-item ${activeResultTab === 'path_coefficients' ? 'active' : ''}`}
                 onClick={(e) => { e.preventDefault(); setActiveResultTab('path_coefficients'); }}
               >
-                <div className="tree-item__left">
-                  <div className="tree-item__dot" />
-                  <span>Path coefficients</span>
-                </div>
-                {resultConstructs.length > 0 && <span className="tree-item__size">{resultConstructs.length}×{resultConstructs.length}</span>}
+                Path coefficients
+              </a>
+              <a
+                href="#"
+                className={`tree-item ${activeResultTab === 'total_indirect_effects' ? 'active' : ''}`}
+                onClick={(e) => { e.preventDefault(); setActiveResultTab('total_indirect_effects'); }}
+              >
+                Total indirect effects
               </a>
               <a
                 href="#"
                 className={`tree-item ${activeResultTab === 'total_effects' ? 'active' : ''}`}
                 onClick={(e) => { e.preventDefault(); setActiveResultTab('total_effects'); }}
               >
-                Total & indirect effects
+                Total effects
               </a>
               <a
                 href="#"
@@ -1342,7 +2013,137 @@ const ModelEditor = () => {
       </aside>
       {/* ─── Center Results Area ─── */}
       <main className="results-main">
-        {/* Header Area */}
+        {/* Secondary Header inline with filter search */}
+        <div className="results-secondary-header">
+          <button
+            className="results-tool-btn results-tool-btn--accent"
+            type="button"
+            onClick={handleOpenSnapshotModal}
+            title="Save results and model diagram as a snapshot in this study"
+          >
+            <History size={13} />
+            <span>Save Snapshot</span>
+          </button>
+          <button
+            className="results-tool-btn"
+            type="button"
+            onClick={handleCreateDataFile}
+            title="Create and download data file of construct scores"
+          >
+            <FileText size={13} />
+            <span>Create Data File</span>
+          </button>
+          <button
+            className="results-tool-btn"
+            type="button"
+            onClick={handleExportExcel}
+            title="Export current table to Excel"
+          >
+            <FileSpreadsheet size={13} />
+            <span>Excel</span>
+          </button>
+          <button
+            className="results-tool-btn"
+            type="button"
+            onClick={handleExportHtml}
+            title="Export current table as HTML report"
+          >
+            <Code size={13} />
+            <span>HTML</span>
+          </button>
+          <button
+            className="results-tool-btn"
+            type="button"
+            onClick={handleCreateReport}
+            title="Print or create report"
+          >
+            <FileCheck size={13} />
+            <span>Create Report</span>
+          </button>
+          <button
+            className="results-tool-btn"
+            type="button"
+            onClick={handleCompare}
+            title="Compare models and snapshots"
+          >
+            <GitCompare size={13} />
+            <span>Compare</span>
+          </button>
+        </div>
+
+        {/* Outdated Calculation Notice Banner */}
+        {isModelOutdated && (
+          <div
+            style={{
+              margin: '12px 24px 0',
+              padding: '12px 16px',
+              borderRadius: '8px',
+              backgroundColor: 'rgba(234, 179, 8, 0.1)',
+              border: '1px solid rgba(234, 179, 8, 0.35)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '16px',
+              fontSize: '13px',
+              color: 'var(--color-text-primary)',
+              flexShrink: 0
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <AlertTriangle size={20} color="#eab308" style={{ flexShrink: 0 }} />
+              <div>
+                <div style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>Previous Calculation Results</div>
+                <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
+                  The model was modified after these results were calculated. These figures correspond to a previous version of the model.
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+              {lastCalculatedModel && (
+                <button
+                  type="button"
+                  onClick={handleRevertToCalculatedModel}
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: '12px',
+                    fontWeight: 500,
+                    borderRadius: '6px',
+                    border: '1px solid var(--color-border-default)',
+                    background: 'var(--color-bg-base)',
+                    color: 'var(--color-text-primary)',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px'
+                  }}
+                  title="Revert model canvas to the state used for these results"
+                >
+                  <RotateCcw size={13} />
+                  <span>Revert Canvas to This Model</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleCalculate}
+                disabled={isCalculating}
+                style={{
+                  padding: '6px 14px',
+                  fontSize: '12px',
+                  fontWeight: 500,
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: 'var(--color-accent)',
+                  color: '#fff',
+                  cursor: 'pointer',
+                }}
+              >
+                {isCalculating ? 'Recalculating...' : 'Recalculate Current Model'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Header Area with Inline Title and Table Actions */}
         <div className="report-header">
           <div className="report-header__top">
             <div>
@@ -1352,41 +2153,25 @@ const ModelEditor = () => {
               </h1>
               <p className="report-header__subtitle">{reportTabDetails.subtitle}</p>
             </div>
-            {activeResultTab === 'path_coefficients' && (
-              <div className="view-toggle">
-                <div
-                  className={`view-toggle__btn ${resultViewMode === 'matrix' ? 'active' : ''}`}
-                  onClick={() => setResultViewMode('matrix')}
-                >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
-                  Matrix View
-                </div>
-                <div
-                  className={`view-toggle__btn ${resultViewMode === 'list' ? 'active' : ''}`}
-                  onClick={() => setResultViewMode('list')}
-                >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>
-                  List View
-                </div>
-              </div>
-            )}
-          </div>
-          <div className="report-filters">
-            <div className="report-filters__left">
-              {plsResults && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '13px', color: '#475569' }}>
-                  <span>Converged: <strong style={{ color: '#16a34a' }}>{plsResults.converged ? 'Yes' : 'No'}</strong></span>
-                  <span>Iterations: <strong>{plsResults.iterations}</strong></span>
-                  <span>Sample Size (N): <strong>{plsResults.n_samples}</strong></span>
-                </div>
-              )}
-            </div>
-            <div className="report-filters__right">
-              <button className="report-action-btn" type="button" onClick={handleCopyCurrentTable}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
-                Copy Table
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+              <button
+                className="results-tool-btn"
+                type="button"
+                onClick={handleCopyCurrentTable}
+                title="Copy table to clipboard"
+              >
+                <Copy size={13} />
+                <span>Copy Table</span>
               </button>
-              <button className="report-action-btn" type="button" onClick={handleExportCurrentTable}>Export CSV</button>
+              <button
+                className="results-tool-btn"
+                type="button"
+                onClick={handleExportCurrentTable}
+                title="Export CSV"
+              >
+                <Download size={13} />
+                <span>Export CSV</span>
+              </button>
             </div>
           </div>
         </div>
@@ -1403,11 +2188,17 @@ const ModelEditor = () => {
                 <p style={{ margin: 0, fontSize: '13px' }}>Return to the model canvas and click <strong>Calculate</strong> to run the PLS-SEM algorithm on your data.</p>
               </div>
             ) : activeResultTab === 'path_coefficients' ? (
-              resultViewMode === 'matrix' ? (
+              getTableMode('path_coefficients') === 'matrix' ? (
                 <table className="scientific-table">
                   <thead>
                     <tr>
-                      <th>Source \ Target</th>
+                      <th>
+                        <TableHeaderToggle
+                          label="Source \ Target"
+                          mode={getTableMode('path_coefficients')}
+                          onToggle={(m) => setTableMode('path_coefficients', m)}
+                        />
+                      </th>
                       {resultConstructs.map(c => (
                         <th key={c}>{getConstructName(c)}</th>
                       ))}
@@ -1441,7 +2232,13 @@ const ModelEditor = () => {
                 <table className="scientific-table">
                   <thead>
                     <tr>
-                      <th>Predictor (From)</th>
+                      <th>
+                        <TableHeaderToggle
+                          label="Predictor (From)"
+                          mode={getTableMode('path_coefficients')}
+                          onToggle={(m) => setTableMode('path_coefficients', m)}
+                        />
+                      </th>
                       <th>Target (To)</th>
                       <th>Path Coefficient (β)</th>
                       <th>f² Effect Size</th>
@@ -1479,122 +2276,339 @@ const ModelEditor = () => {
                   </tbody>
                 </table>
               )
-            ) : activeResultTab === 'total_effects' ? (
-              <table className="scientific-table">
-                <thead>
-                  <tr>
-                    <th>Source (From)</th>
-                    <th>Target (To)</th>
-                    <th>Direct Effect</th>
-                    <th>Indirect Effect</th>
-                    <th>Total Effect</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(plsResults.structural?.effects || []).map((eff: any, idx: number) => (
-                    <tr key={idx}>
-                      <td>
-                        <div className="construct-label">
-                          <div className="construct-dot" style={{ background: constructPalette[eff.from] || '#6366f1' }} />
-                          <span className="construct-name">{getConstructName(eff.from)}</span>
-                        </div>
-                      </td>
-                      <td>
-                        <div className="construct-label">
-                          <div className="construct-dot" style={{ background: constructPalette[eff.to] || '#0ea5e9' }} />
-                          <span className="construct-name">{getConstructName(eff.to)}</span>
-                        </div>
-                      </td>
-                      <td>{fmt(eff.direct, 4)}</td>
-                      <td>{fmt(eff.indirect, 4)}</td>
-                      <td className="cell-sig">
-                        <div className="cell-value">{fmt(eff.total, 4)}</div>
-                      </td>
+            ) : activeResultTab === 'total_indirect_effects' ? (
+              getTableMode('total_indirect_effects') === 'matrix' ? (
+                <table className="scientific-table">
+                  <thead>
+                    <tr>
+                      <th>
+                        <TableHeaderToggle
+                          label="Source \ Target"
+                          mode={getTableMode('total_indirect_effects')}
+                          onToggle={(m) => setTableMode('total_indirect_effects', m)}
+                        />
+                      </th>
+                      {resultConstructs.map(c => (
+                        <th key={c}>{getConstructName(c)}</th>
+                      ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {resultConstructs.map(sourceC => (
+                      <tr key={sourceC}>
+                        <td>
+                          <div className="construct-label">
+                            <div className="construct-dot" style={{ background: constructPalette[sourceC] || '#6366f1' }} />
+                            <span className="construct-name">{getConstructName(sourceC)}</span>
+                          </div>
+                        </td>
+                        {resultConstructs.map(targetC => {
+                          if (sourceC === targetC) return <td key={targetC} className="cell-empty">—</td>;
+                          const eff = (plsResults.structural?.effects || []).find((e: any) => e.from === sourceC && e.to === targetC);
+                          if (eff && eff.indirect !== undefined && eff.indirect !== null) {
+                            return (
+                              <td key={targetC} className="cell-sig">
+                                <div className="cell-value">{fmt(eff.indirect, 4)}</div>
+                              </td>
+                            );
+                          }
+                          return <td key={targetC} className="cell-empty">—</td>;
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <table className="scientific-table">
+                  <thead>
+                    <tr>
+                      <th>
+                        <TableHeaderToggle
+                          label="Source (From)"
+                          mode={getTableMode('total_indirect_effects')}
+                          onToggle={(m) => setTableMode('total_indirect_effects', m)}
+                        />
+                      </th>
+                      <th>Target (To)</th>
+                      <th>Indirect Effect</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(plsResults.structural?.effects || []).map((eff: any, idx: number) => (
+                      <tr key={idx}>
+                        <td>
+                          <div className="construct-label">
+                            <div className="construct-dot" style={{ background: constructPalette[eff.from] || '#6366f1' }} />
+                            <span className="construct-name">{getConstructName(eff.from)}</span>
+                          </div>
+                        </td>
+                        <td>
+                          <div className="construct-label">
+                            <div className="construct-dot" style={{ background: constructPalette[eff.to] || '#0ea5e9' }} />
+                            <span className="construct-name">{getConstructName(eff.to)}</span>
+                          </div>
+                        </td>
+                        <td className="cell-sig">
+                          <div className="cell-value">{fmt(eff.indirect, 4)}</div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )
+            ) : activeResultTab === 'total_effects' ? (
+              getTableMode('total_effects') === 'matrix' ? (
+                <table className="scientific-table">
+                  <thead>
+                    <tr>
+                      <th>
+                        <TableHeaderToggle
+                          label="Source \ Target"
+                          mode={getTableMode('total_effects')}
+                          onToggle={(m) => setTableMode('total_effects', m)}
+                        />
+                      </th>
+                      {resultConstructs.map(c => (
+                        <th key={c}>{getConstructName(c)}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {resultConstructs.map(sourceC => (
+                      <tr key={sourceC}>
+                        <td>
+                          <div className="construct-label">
+                            <div className="construct-dot" style={{ background: constructPalette[sourceC] || '#6366f1' }} />
+                            <span className="construct-name">{getConstructName(sourceC)}</span>
+                          </div>
+                        </td>
+                        {resultConstructs.map(targetC => {
+                          if (sourceC === targetC) return <td key={targetC} className="cell-empty">—</td>;
+                          const eff = (plsResults.structural?.effects || []).find((e: any) => e.from === sourceC && e.to === targetC);
+                          if (eff && eff.total !== undefined && eff.total !== null) {
+                            return (
+                              <td key={targetC} className="cell-sig">
+                                <div className="cell-value">{fmt(eff.total, 4)}</div>
+                              </td>
+                            );
+                          }
+                          return <td key={targetC} className="cell-empty">—</td>;
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <table className="scientific-table">
+                  <thead>
+                    <tr>
+                      <th>
+                        <TableHeaderToggle
+                          label="Source (From)"
+                          mode={getTableMode('total_effects')}
+                          onToggle={(m) => setTableMode('total_effects', m)}
+                        />
+                      </th>
+                      <th>Target (To)</th>
+                      <th>Direct Effect</th>
+                      <th>Indirect Effect</th>
+                      <th>Total Effect</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(plsResults.structural?.effects || []).map((eff: any, idx: number) => (
+                      <tr key={idx}>
+                        <td>
+                          <div className="construct-label">
+                            <div className="construct-dot" style={{ background: constructPalette[eff.from] || '#6366f1' }} />
+                            <span className="construct-name">{getConstructName(eff.from)}</span>
+                          </div>
+                        </td>
+                        <td>
+                          <div className="construct-label">
+                            <div className="construct-dot" style={{ background: constructPalette[eff.to] || '#0ea5e9' }} />
+                            <span className="construct-name">{getConstructName(eff.to)}</span>
+                          </div>
+                        </td>
+                        <td>{fmt(eff.direct, 4)}</td>
+                        <td>{fmt(eff.indirect, 4)}</td>
+                        <td className="cell-sig">
+                          <div className="cell-value">{fmt(eff.total, 4)}</div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )
             ) : activeResultTab === 'outer_loadings' ? (
-              <table className="scientific-table">
-                <thead>
-                  <tr>
-                    <th>Construct</th>
-                    <th>Indicator</th>
-                    <th>Outer Loading (λ)</th>
-                    <th>Indicator Reliability (λ²)</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.entries(plsResults.measurement?.outer_loadings || {}).flatMap(([cid, loads]: [string, any]) =>
-                    Object.entries(loads || {}).map(([iid, val]: [string, any]) => {
-                      const loadNum = Number(val);
-                      const rel = plsResults.measurement?.indicator_reliability?.[cid]?.[iid] ?? (loadNum * loadNum);
-                      const isHigh = loadNum >= 0.708;
-                      return (
-                        <tr key={`${cid}-${iid}`}>
-                          <td>
-                            <div className="construct-label">
-                              <div className="construct-dot" style={{ background: constructPalette[cid] || '#6366f1' }} />
-                              <span className="construct-name">{getConstructName(cid)}</span>
-                            </div>
-                          </td>
-                          <td><strong>{getIndicatorName(iid)}</strong></td>
-                          <td className={isHigh ? 'cell-sig' : 'cell-ns'}>
-                            <div className="cell-value">{fmt(loadNum, 4)}</div>
-                          </td>
-                          <td>{fmt(rel, 4)}</td>
-                          <td>
-                            <span style={{
-                              padding: '2px 8px',
-                              borderRadius: '4px',
-                              fontSize: '11px',
-                              fontWeight: 600,
-                              backgroundColor: isHigh ? '#dcfce7' : (loadNum >= 0.6 ? '#fef3c7' : '#fee2e2'),
-                              color: isHigh ? '#166534' : (loadNum >= 0.6 ? '#92400e' : '#991b1b')
-                            }}>
-                              {isHigh ? 'Established (λ ≥ 0.708)' : (loadNum >= 0.6 ? 'Acceptable' : 'Low (< 0.60)')}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
+              getTableMode('outer_loadings') === 'matrix' ? (
+                <table className="scientific-table">
+                  <thead>
+                    <tr>
+                      <th>
+                        <TableHeaderToggle
+                          label="Indicator \ Construct"
+                          mode={getTableMode('outer_loadings')}
+                          onToggle={(m) => setTableMode('outer_loadings', m)}
+                        />
+                      </th>
+                      {resultConstructs.map(c => (
+                        <th key={c}>{getConstructName(c)}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {allIndicators.map(iid => (
+                      <tr key={iid}>
+                        <td><strong>{getIndicatorName(iid)}</strong></td>
+                        {resultConstructs.map(cid => {
+                          const val = plsResults.measurement?.outer_loadings?.[cid]?.[iid];
+                          if (val !== undefined && val !== null) {
+                            const num = Number(val);
+                            const isHigh = num >= 0.708;
+                            return (
+                              <td key={cid} className={isHigh ? 'cell-sig' : 'cell-ns'}>
+                                <div className="cell-value">{fmt(num, 4)}</div>
+                              </td>
+                            );
+                          }
+                          return <td key={cid} className="cell-empty">—</td>;
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <table className="scientific-table">
+                  <thead>
+                    <tr>
+                      <th>
+                        <TableHeaderToggle
+                          label="Construct"
+                          mode={getTableMode('outer_loadings')}
+                          onToggle={(m) => setTableMode('outer_loadings', m)}
+                        />
+                      </th>
+                      <th>Indicator</th>
+                      <th>Outer Loading (λ)</th>
+                      <th>Indicator Reliability (λ²)</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(plsResults.measurement?.outer_loadings || {}).flatMap(([cid, loads]: [string, any]) =>
+                      Object.entries(loads || {}).map(([iid, val]: [string, any]) => {
+                        const loadNum = Number(val);
+                        const rel = plsResults.measurement?.indicator_reliability?.[cid]?.[iid] ?? (loadNum * loadNum);
+                        const isHigh = loadNum >= 0.708;
+                        return (
+                          <tr key={`${cid}-${iid}`}>
+                            <td>
+                              <div className="construct-label">
+                                <div className="construct-dot" style={{ background: constructPalette[cid] || '#6366f1' }} />
+                                <span className="construct-name">{getConstructName(cid)}</span>
+                              </div>
+                            </td>
+                            <td><strong>{getIndicatorName(iid)}</strong></td>
+                            <td className={isHigh ? 'cell-sig' : 'cell-ns'}>
+                              <div className="cell-value">{fmt(loadNum, 4)}</div>
+                            </td>
+                            <td>{fmt(rel, 4)}</td>
+                            <td>
+                              <span style={{
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                fontSize: '11px',
+                                fontWeight: 600,
+                                backgroundColor: isHigh ? '#dcfce7' : (loadNum >= 0.6 ? '#fef3c7' : '#fee2e2'),
+                                color: isHigh ? '#166534' : (loadNum >= 0.6 ? '#92400e' : '#991b1b')
+                              }}>
+                                {isHigh ? 'Established (λ ≥ 0.708)' : (loadNum >= 0.6 ? 'Acceptable' : 'Low (< 0.60)')}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              )
             ) : activeResultTab === 'outer_weights' ? (
-              <table className="scientific-table">
-                <thead>
-                  <tr>
-                    <th>Construct</th>
-                    <th>Indicator</th>
-                    <th>Outer Weight (w)</th>
-                    <th>Outer VIF</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.entries(plsResults.measurement?.outer_weights || {}).flatMap(([cid, weights]: [string, any]) =>
-                    Object.entries(weights || {}).map(([iid, val]: [string, any]) => {
-                      const vif = plsResults.measurement?.outer_vif?.[cid]?.[iid];
-                      return (
-                        <tr key={`${cid}-${iid}`}>
-                          <td>
-                            <div className="construct-label">
-                              <div className="construct-dot" style={{ background: constructPalette[cid] || '#6366f1' }} />
-                              <span className="construct-name">{getConstructName(cid)}</span>
-                            </div>
-                          </td>
-                          <td><strong>{getIndicatorName(iid)}</strong></td>
-                          <td className="cell-sig">
-                            <div className="cell-value">{fmt(val, 4)}</div>
-                          </td>
-                          <td>{vif !== undefined ? fmt(vif, 4) : '1.0000'}</td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
+              getTableMode('outer_weights') === 'matrix' ? (
+                <table className="scientific-table">
+                  <thead>
+                    <tr>
+                      <th>
+                        <TableHeaderToggle
+                          label="Indicator \ Construct"
+                          mode={getTableMode('outer_weights')}
+                          onToggle={(m) => setTableMode('outer_weights', m)}
+                        />
+                      </th>
+                      {resultConstructs.map(c => (
+                        <th key={c}>{getConstructName(c)}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {allIndicators.map(iid => (
+                      <tr key={iid}>
+                        <td><strong>{getIndicatorName(iid)}</strong></td>
+                        {resultConstructs.map(cid => {
+                          const val = plsResults.measurement?.outer_weights?.[cid]?.[iid];
+                          if (val !== undefined && val !== null) {
+                            return (
+                              <td key={cid} className="cell-sig">
+                                <div className="cell-value">{fmt(val, 4)}</div>
+                              </td>
+                            );
+                          }
+                          return <td key={cid} className="cell-empty">—</td>;
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <table className="scientific-table">
+                  <thead>
+                    <tr>
+                      <th>
+                        <TableHeaderToggle
+                          label="Construct"
+                          mode={getTableMode('outer_weights')}
+                          onToggle={(m) => setTableMode('outer_weights', m)}
+                        />
+                      </th>
+                      <th>Indicator</th>
+                      <th>Outer Weight (w)</th>
+                      <th>Outer VIF</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(plsResults.measurement?.outer_weights || {}).flatMap(([cid, weights]: [string, any]) =>
+                      Object.entries(weights || {}).map(([iid, val]: [string, any]) => {
+                        const vif = plsResults.measurement?.outer_vif?.[cid]?.[iid];
+                        return (
+                          <tr key={`${cid}-${iid}`}>
+                            <td>
+                              <div className="construct-label">
+                                <div className="construct-dot" style={{ background: constructPalette[cid] || '#6366f1' }} />
+                                <span className="construct-name">{getConstructName(cid)}</span>
+                              </div>
+                            </td>
+                            <td><strong>{getIndicatorName(iid)}</strong></td>
+                            <td className="cell-sig">
+                              <div className="cell-value">{fmt(val, 4)}</div>
+                            </td>
+                            <td>{vif !== undefined ? fmt(vif, 4) : '1.0000'}</td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              )
             ) : activeResultTab === 'r_squared' ? (
               <table className="scientific-table">
                 <thead>
@@ -1642,56 +2656,105 @@ const ModelEditor = () => {
                 </tbody>
               </table>
             ) : activeResultTab === 'f_squared' ? (
-              <table className="scientific-table">
-                <thead>
-                  <tr>
-                    <th>Predictor (From)</th>
-                    <th>Target (To)</th>
-                    <th>f² Value</th>
-                    <th>Effect Size Interpretation</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.entries(plsResults.structural?.f_squared || {}).flatMap(([target, preds]: [string, any]) =>
-                    Object.entries(preds || {}).map(([pred, val]: [string, any]) => {
-                      const f2 = Number(val);
-                      const interp = f2 >= 0.35 ? 'Large effect (≥ 0.35)' : (f2 >= 0.15 ? 'Medium effect (≥ 0.15)' : (f2 >= 0.02 ? 'Small effect (≥ 0.02)' : 'Negligible (< 0.02)'));
-                      return (
-                        <tr key={`${pred}->${target}`}>
-                          <td>
-                            <div className="construct-label">
-                              <div className="construct-dot" style={{ background: constructPalette[pred] || '#6366f1' }} />
-                              <span className="construct-name">{getConstructName(pred)}</span>
-                            </div>
-                          </td>
-                          <td>
-                            <div className="construct-label">
-                              <div className="construct-dot" style={{ background: constructPalette[target] || '#0ea5e9' }} />
-                              <span className="construct-name">{getConstructName(target)}</span>
-                            </div>
-                          </td>
-                          <td className="cell-sig">
-                            <div className="cell-value">{fmt(f2, 4)}</div>
-                          </td>
-                          <td>
-                            <span style={{
-                              padding: '2px 8px',
-                              borderRadius: '4px',
-                              fontSize: '11px',
-                              fontWeight: 600,
-                              backgroundColor: f2 >= 0.15 ? '#dcfce7' : (f2 >= 0.02 ? '#fef3c7' : '#f1f5f9'),
-                              color: f2 >= 0.15 ? '#166534' : (f2 >= 0.02 ? '#92400e' : '#475569')
-                            }}>
-                              {interp}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            ) : activeResultTab === 'reliability' ? (
+              getTableMode('f_squared') === 'matrix' ? (
+                <table className="scientific-table">
+                  <thead>
+                    <tr>
+                      <th>
+                        <TableHeaderToggle
+                          label="Predictor \ Target"
+                          mode={getTableMode('f_squared')}
+                          onToggle={(m) => setTableMode('f_squared', m)}
+                        />
+                      </th>
+                      {resultConstructs.map(c => (
+                        <th key={c}>{getConstructName(c)}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {resultConstructs.map(pred => (
+                      <tr key={pred}>
+                        <td>
+                          <div className="construct-label">
+                            <div className="construct-dot" style={{ background: constructPalette[pred] || '#6366f1' }} />
+                            <span className="construct-name">{getConstructName(pred)}</span>
+                          </div>
+                        </td>
+                        {resultConstructs.map(tgt => {
+                          const val = plsResults.structural?.f_squared?.[tgt]?.[pred];
+                          if (val !== undefined && val !== null) {
+                            const f2 = Number(val);
+                            const isHigh = f2 >= 0.15;
+                            return (
+                              <td key={tgt} className={isHigh ? 'cell-sig' : ''}>
+                                <div className="cell-value">{fmt(f2, 4)}</div>
+                              </td>
+                            );
+                          }
+                          return <td key={tgt} className="cell-empty">—</td>;
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <table className="scientific-table">
+                  <thead>
+                    <tr>
+                      <th>
+                        <TableHeaderToggle
+                          label="Predictor (From)"
+                          mode={getTableMode('f_squared')}
+                          onToggle={(m) => setTableMode('f_squared', m)}
+                        />
+                      </th>
+                      <th>Target (To)</th>
+                      <th>f² Value</th>
+                      <th>Effect Size Interpretation</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(plsResults.structural?.f_squared || {}).flatMap(([target, preds]: [string, any]) =>
+                      Object.entries(preds || {}).map(([pred, val]: [string, any]) => {
+                        const f2 = Number(val);
+                        const interp = f2 >= 0.35 ? 'Large effect (≥ 0.35)' : (f2 >= 0.15 ? 'Medium effect (≥ 0.15)' : (f2 >= 0.02 ? 'Small effect (≥ 0.02)' : 'Negligible (< 0.02)'));
+                        return (
+                          <tr key={`${pred}->${target}`}>
+                            <td>
+                              <div className="construct-label">
+                                <div className="construct-dot" style={{ background: constructPalette[pred] || '#6366f1' }} />
+                                <span className="construct-name">{getConstructName(pred)}</span>
+                              </div>
+                            </td>
+                            <td>
+                              <div className="construct-label">
+                                <div className="construct-dot" style={{ background: constructPalette[target] || '#0ea5e9' }} />
+                                <span className="construct-name">{getConstructName(target)}</span>
+                              </div>
+                            </td>
+                            <td className="cell-sig">
+                              <div className="cell-value">{fmt(f2, 4)}</div>
+                            </td>
+                            <td>
+                              <span style={{
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                fontSize: '11px',
+                                fontWeight: 600,
+                                backgroundColor: f2 >= 0.15 ? '#dcfce7' : (f2 >= 0.02 ? '#fef3c7' : '#f1f5f9'),
+                                color: f2 >= 0.15 ? '#166534' : (f2 >= 0.02 ? '#92400e' : '#475569')
+                              }}>
+                                {interp}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              )) : activeResultTab === 'reliability' ? (
               <table className="scientific-table">
                 <thead>
                   <tr>
@@ -1747,40 +2810,108 @@ const ModelEditor = () => {
                     Heterotrait-Monotrait Ratio (HTMT)
                     <span style={{ marginLeft: '8px', fontSize: '11px', fontWeight: 400, color: '#64748b' }}>(Threshold &lt; 0.85 / 0.90)</span>
                   </h4>
-                  <table className="scientific-table">
-                    <thead>
-                      <tr>
-                        <th>Construct</th>
-                        {resultConstructs.map(c => <th key={c}>{getConstructName(c)}</th>)}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {resultConstructs.map(c1 => (
-                        <tr key={c1}>
-                          <td>
-                            <div className="construct-label">
-                              <div className="construct-dot" style={{ background: constructPalette[c1] || '#6366f1' }} />
-                              <span className="construct-name">{getConstructName(c1)}</span>
-                            </div>
-                          </td>
-                          {resultConstructs.map(c2 => {
-                            if (c1 === c2) return <td key={c2} className="cell-empty">—</td>;
-                            const htmtVal = plsResults.reliability_and_validity?.htmt?.[c1]?.[c2];
-                            if (htmtVal !== undefined) {
-                              const num = Number(htmtVal);
-                              const ok = num < 0.85;
-                              return (
-                                <td key={c2} className={ok ? 'cell-sig' : 'cell-ns'}>
+                  {getTableMode('htmt') === 'matrix' ? (
+                    <table className="scientific-table">
+                      <thead>
+                        <tr>
+                          <th>
+                            <TableHeaderToggle
+                              label="Construct"
+                              mode={getTableMode('htmt')}
+                              onToggle={(m) => setTableMode('htmt', m)}
+                            />
+                          </th>
+                          {resultConstructs.map(c => <th key={c}>{getConstructName(c)}</th>)}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {resultConstructs.map(c1 => (
+                          <tr key={c1}>
+                            <td>
+                              <div className="construct-label">
+                                <div className="construct-dot" style={{ background: constructPalette[c1] || '#6366f1' }} />
+                                <span className="construct-name">{getConstructName(c1)}</span>
+                              </div>
+                            </td>
+                            {resultConstructs.map(c2 => {
+                              if (c1 === c2) return <td key={c2} className="cell-empty">—</td>;
+                              const htmtVal = plsResults.reliability_and_validity?.htmt?.[c1]?.[c2];
+                              if (htmtVal !== undefined) {
+                                const num = Number(htmtVal);
+                                const ok = num < 0.85;
+                                return (
+                                  <td key={c2} className={ok ? 'cell-sig' : 'cell-ns'}>
+                                    <div className="cell-value">{fmt(num, 4)}</div>
+                                  </td>
+                                );
+                              }
+                              return <td key={c2} className="cell-empty">—</td>;
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <table className="scientific-table">
+                      <thead>
+                        <tr>
+                          <th>
+                            <TableHeaderToggle
+                              label="Construct 1"
+                              mode={getTableMode('htmt')}
+                              onToggle={(m) => setTableMode('htmt', m)}
+                            />
+                          </th>
+                          <th>Construct 2</th>
+                          <th>HTMT Ratio</th>
+                          <th>Evaluation</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {resultConstructs.flatMap((c1, i) =>
+                          resultConstructs.slice(i + 1).map(c2 => {
+                            const val = plsResults.reliability_and_validity?.htmt?.[c1]?.[c2] ??
+                                        plsResults.reliability_and_validity?.htmt?.[c2]?.[c1];
+                            if (val === undefined || val === null) return null;
+                            const num = Number(val);
+                            const isOk = num < 0.85;
+                            const isAcceptable = num < 0.90;
+                            return (
+                              <tr key={`${c1}-${c2}`}>
+                                <td>
+                                  <div className="construct-label">
+                                    <div className="construct-dot" style={{ background: constructPalette[c1] || '#6366f1' }} />
+                                    <span className="construct-name">{getConstructName(c1)}</span>
+                                  </div>
+                                </td>
+                                <td>
+                                  <div className="construct-label">
+                                    <div className="construct-dot" style={{ background: constructPalette[c2] || '#0ea5e9' }} />
+                                    <span className="construct-name">{getConstructName(c2)}</span>
+                                  </div>
+                                </td>
+                                <td className={isOk ? 'cell-sig' : 'cell-ns'}>
                                   <div className="cell-value">{fmt(num, 4)}</div>
                                 </td>
-                              );
-                            }
-                            return <td key={c2} className="cell-empty">—</td>;
-                          })}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                                <td>
+                                  <span style={{
+                                    padding: '2px 8px',
+                                    borderRadius: '4px',
+                                    fontSize: '11px',
+                                    fontWeight: 600,
+                                    backgroundColor: isOk ? '#dcfce7' : (isAcceptable ? '#fef3c7' : '#fee2e2'),
+                                    color: isOk ? '#166534' : (isAcceptable ? '#92400e' : '#991b1b')
+                                  }}>
+                                    {isOk ? 'Established (< 0.85)' : (isAcceptable ? 'Acceptable (< 0.90)' : 'High (≥ 0.90)')}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        ).filter(Boolean)}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
 
                 <div>
@@ -2066,11 +3197,19 @@ const ModelEditor = () => {
     isOpen={isBootstrapModalOpen}
     projectPath={activeStudy?.path || ''}
     spec={exportModelSpec()}
+    modelId={effectiveModelId || undefined}
+    diagramLayout={getModelCanvasState()}
     datasetHeaders={activeDataset?.variables?.map(v => v.name)}
     datasetRows={activeDataset?.rows}
     datasetName={activeDataset?.filename}
     onComplete={(results) => {
       setPlsResults(results);
+      plsResultsRef.current = results;
+      setCanvasResults(results);
+      const calculatedSnapshot = { spec: exportModelSpec(), layout: getModelCanvasState() };
+      setLastCalculatedModel(calculatedSnapshot);
+      lastCalculatedModelRef.current = calculatedSnapshot;
+      setIsModelOutdated(false);
       setActiveResultTab('bootstrap_significance');
       const viewSlider = document.getElementById('main-view-slider');
       if (viewSlider) {
@@ -2190,6 +3329,158 @@ const ModelEditor = () => {
           >
             Back to Canvas
           </button>
+        </div>
+      </div>
+    </div>
+  )}
+
+  {/* ─── Save Results Snapshot Modal ─── */}
+  {isSnapshotModalOpen && (
+    <div style={{
+      position: 'fixed',
+      inset: 0,
+      backgroundColor: 'rgba(15, 23, 42, 0.65)',
+      backdropFilter: 'blur(4px)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 9999,
+    }}>
+      <div style={{
+        backgroundColor: 'var(--color-bg-base)',
+        color: 'var(--color-text-primary)',
+        borderRadius: '12px',
+        width: '420px',
+        maxWidth: '92vw',
+        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.08)',
+        overflow: 'hidden',
+        border: '1px solid var(--color-border-subtle)',
+      }}>
+        <div style={{
+          padding: '16px 20px',
+          borderBottom: '1px solid var(--color-border-subtle)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+        }}>
+          <div style={{
+            width: '32px',
+            height: '32px',
+            borderRadius: '8px',
+            backgroundColor: 'var(--color-accent-subtle)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'var(--color-accent)',
+            flexShrink: 0,
+          }}>
+            <History size={18} />
+          </div>
+          <div>
+            <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 600, color: 'var(--color-text-primary)' }}>Save Snapshot</h3>
+          </div>
+        </div>
+
+        <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div>
+            <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: '6px' }}>
+              Project / Study
+            </label>
+            <select
+              value={snapshotTargetStudyId}
+              onChange={(e) => setSnapshotTargetStudyId(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                fontSize: '13px',
+                borderRadius: '6px',
+                border: '1px solid var(--color-border-default)',
+                background: 'var(--color-bg-raised)',
+                color: 'var(--color-text-primary)',
+                outline: 'none',
+                boxSizing: 'border-box'
+              }}
+            >
+              {studies.map(s => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: '6px' }}>
+              Snapshot Name
+            </label>
+            <input
+              type="text"
+              value={snapshotName}
+              onChange={(e) => setSnapshotName(e.target.value)}
+              placeholder="e.g. Model Run 1 - Final Baseline"
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                fontSize: '13px',
+                borderRadius: '6px',
+                border: '1px solid var(--color-border-default)',
+                background: 'var(--color-bg-raised)',
+                color: 'var(--color-text-primary)',
+                outline: 'none',
+                boxSizing: 'border-box'
+              }}
+              autoFocus
+            />
+          </div>
+        </div>
+
+        <div style={{
+          padding: '12px 20px',
+          backgroundColor: 'var(--color-bg-raised)',
+          borderTop: '1px solid var(--color-border-subtle)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '10px',
+        }}>
+          <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+            Workspace: {activeWorkspace?.name || 'Default Workspace'}
+          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              type="button"
+              onClick={() => setIsSnapshotModalOpen(false)}
+              disabled={isSavingSnapshot}
+              style={{
+                padding: '6px 12px',
+                backgroundColor: 'transparent',
+                color: 'var(--color-text-primary)',
+                border: '1px solid var(--color-border-default)',
+                borderRadius: '6px',
+                fontSize: '12px',
+                fontWeight: 500,
+                cursor: 'pointer',
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveSnapshot}
+              disabled={isSavingSnapshot || !snapshotName.trim()}
+              style={{
+                padding: '6px 14px',
+                backgroundColor: 'var(--color-accent)',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '6px',
+                fontSize: '12px',
+                fontWeight: 500,
+                cursor: isSavingSnapshot || !snapshotName.trim() ? 'not-allowed' : 'pointer',
+                opacity: isSavingSnapshot || !snapshotName.trim() ? 0.6 : 1,
+              }}
+            >
+              {isSavingSnapshot ? 'Saving...' : 'Save'}
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -156,11 +156,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ activeNav }) => {
                         label: 'Duplicate Workspace',
                         icon: 'content_copy',
                         action: () =>
-                          useStore.getState().addWorkspace({
-                            ...ws,
-                            id: `ws_${Date.now()}`,
-                            name: `${ws.name} copy`,
-                          }),
+                          useStore.getState().duplicateWorkspace(ws.id),
                       },
                       {
                         id: 'archive',

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { ParsedDataset } from './utils/dataset-parser';
+import { api } from './utils/api';
 
 export type ShapeType = 'circle' | 'rect' | 'hexagon' | 'octagon';
 
@@ -94,13 +95,23 @@ export interface DeleteConfirmDialog {
   onConfirm: () => void;
 }
 
+export interface StudySnapshot {
+  id: string;
+  name: string;
+  description?: string;
+  algorithm: string;
+  created_at: string;
+  source_model_id?: string;
+}
+
 export interface AppTab {
   id: string;
-  type: 'get-started' | 'workspace' | 'model' | 'archive' | 'dataset' | 'docs' | 'samples' | 'feedback' | 'changelog';
+  type: 'get-started' | 'workspace' | 'model' | 'archive' | 'dataset' | 'docs' | 'samples' | 'feedback' | 'changelog' | 'snapshot';
   title: string;
   workspaceId?: string | null;
   studyId?: string | null;
   modelId?: string | null;
+  snapshotId?: string | null;
 }
 
 interface AppState {
@@ -137,6 +148,10 @@ interface AppState {
   activeStudyId: string | null;
   models: Model[];
   datasetsByStudy: Record<string, ParsedDataset>;
+  snapshotsByStudy: Record<string, StudySnapshot[]>;
+  setStudySnapshots: (studyId: string, snapshots: StudySnapshot[]) => void;
+  addStudySnapshot: (studyId: string, snapshot: StudySnapshot) => void;
+  removeStudySnapshot: (studyId: string, snapshotId: string) => void;
   activeModelId: string | null;
   addModel: (model: Model) => void;
   removeModel: (id: string) => void;
@@ -153,6 +168,7 @@ interface AppState {
   deleteModel: (id: string) => void;
   deleteDataset: (studyId: string) => void;
   renameWorkspace: (id: string, name: string) => void;
+  duplicateWorkspace: (id: string) => void | Promise<void>;
   setActiveWorkspace: (id: string) => void;
   addStudy: (study: Study) => void;
   syncWorkspaceStudies: (workspaceId: string, diskProjects: Array<{ path: string; name: string; fullPath: string }>) => void;
@@ -226,7 +242,7 @@ const INITIAL_SETTINGS: AppSettings = {
 
 export const useStore = create<AppState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       // Global & Settings
       theme: 'light',
       toggleTheme: () => set((state) => {
@@ -353,6 +369,32 @@ export const useStore = create<AppState>()(
           };
         }
 
+        if (tabInput.type === 'snapshot' && tabInput.snapshotId) {
+          const existing = state.tabs.find(t => t.type === 'snapshot' && t.snapshotId === tabInput.snapshotId);
+          if (existing) {
+            return {
+              activeTabId: existing.id,
+              activeStudyId: tabInput.studyId ?? state.activeStudyId,
+              activeWorkspaceId: tabInput.workspaceId ?? state.activeWorkspaceId,
+            };
+          }
+          const id = tabInput.id || `tab-snapshot-${tabInput.snapshotId}`;
+          const newTab: AppTab = {
+            id,
+            type: 'snapshot',
+            title: tabInput.title || 'Snapshot',
+            workspaceId: tabInput.workspaceId,
+            studyId: tabInput.studyId,
+            snapshotId: tabInput.snapshotId,
+          };
+          return {
+            tabs: [...state.tabs, newTab],
+            activeTabId: id,
+            activeStudyId: tabInput.studyId ?? state.activeStudyId,
+            activeWorkspaceId: tabInput.workspaceId ?? state.activeWorkspaceId,
+          };
+        }
+
         const id = tabInput.id || `tab-${Date.now()}`;
         const newTab: AppTab = { ...tabInput, id };
         return { tabs: [...state.tabs, newTab], activeTabId: id };
@@ -436,6 +478,28 @@ export const useStore = create<AppState>()(
       activeStudyId: null,
       models: INITIAL_MODELS,
       datasetsByStudy: {},
+      snapshotsByStudy: {},
+      setStudySnapshots: (studyId, snapshots) =>
+        set((state) => ({
+          snapshotsByStudy: { ...state.snapshotsByStudy, [studyId]: snapshots },
+        })),
+      addStudySnapshot: (studyId, snapshot) =>
+        set((state) => {
+          const current = state.snapshotsByStudy[studyId] || [];
+          return {
+            snapshotsByStudy: {
+              ...state.snapshotsByStudy,
+              [studyId]: [snapshot, ...current.filter((s) => s.id !== snapshot.id)],
+            },
+          };
+        }),
+      removeStudySnapshot: (studyId, snapshotId) =>
+        set((state) => ({
+          snapshotsByStudy: {
+            ...state.snapshotsByStudy,
+            [studyId]: (state.snapshotsByStudy[studyId] || []).filter((s) => s.id !== snapshotId),
+          },
+        })),
       activeModelId: null,
       addModel: (model) => set((state) => ({ models: [...state.models, model] })),
       removeModel: (id) => set((state) => ({ models: state.models.filter(model => model.id !== id) })),
@@ -443,16 +507,108 @@ export const useStore = create<AppState>()(
         models: state.models.map(model => model.id === id ? { ...model, name, lastModified: 'Just now' } : model),
         tabs: state.tabs.map(tab => tab.type === 'model' && tab.modelId === id ? { ...tab, title: name } : tab),
       })),
-      duplicateModel: (id) => set((state) => {
+      duplicateModel: (id) => {
+        const state = get();
         const model = state.models.find(item => item.id === id);
-        return model ? { models: [...state.models, { ...model, id: `model_${Date.now()}`, name: `${model.name} copy`, lastModified: 'Just now' }] } : state;
-      }),
+        if (!model) return;
+        const newModelId = `model_${Date.now()}`;
+        const newModelName = `${model.name} copy`;
+        const duplicatedModel: Model = {
+          ...model,
+          id: newModelId,
+          name: newModelName,
+          lastModified: 'Just now'
+        };
+
+        const study = state.studies.find(s => s.id === model.studyId);
+        if (study && study.path) {
+          api.duplicateModel(study.path, id, newModelId).catch(console.warn);
+        }
+
+        set({ models: [...state.models, duplicatedModel] });
+      },
       setActiveModel: (id) => set({ activeModelId: id }),
 
       addWorkspace: (ws) => set((state) => ({ 
         workspaces: [...state.workspaces, ws],
         activeWorkspaceId: ws.id 
       })),
+      duplicateWorkspace: async (id) => {
+        const state = get();
+        const ws = state.workspaces.find(w => w.id === id);
+        if (!ws) return;
+        const newName = `${ws.name} copy`;
+        let targetPath = ws.path;
+        if (ws.path) {
+          try {
+            const res = await api.duplicateWorkspace(ws.path, newName);
+            if (res && res.workspace_path) {
+              targetPath = res.workspace_path;
+            }
+          } catch (err) {
+            console.warn('Could not duplicate workspace on disk:', err);
+          }
+        }
+        const newWsId = targetPath;
+        const sourceStudies = state.studies.filter(s => s.workspaceId === id);
+        const newStudies: Study[] = [];
+        const newModels: Model[] = [];
+        const newDatasetsByStudy: Record<string, ParsedDataset> = {};
+
+        for (const s of sourceStudies) {
+          const newStudyId = `study_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+          const fileName = s.path ? s.path.replace(/\\/g, '/').split('/').pop() : `${s.name}.pls`;
+          const newStudyPath = targetPath ? `${targetPath.replace(/[/\\]+$/, '')}/${fileName}` : s.path;
+
+          newStudies.push({
+            ...s,
+            id: newStudyId,
+            workspaceId: newWsId,
+            path: newStudyPath,
+            lastModified: 'Just now',
+          });
+
+          const studyModels = state.models.filter(m => m.studyId === s.id);
+          const modelIdMap: Record<string, string> = {};
+          studyModels.forEach((m, idx) => {
+            const newModelId = `model_${Date.now()}_${idx}_${Math.random().toString(36).substr(2, 5)}`;
+            modelIdMap[m.id] = newModelId;
+            newModels.push({
+              ...m,
+              id: newModelId,
+              studyId: newStudyId,
+              lastModified: 'Just now',
+            });
+          });
+
+          if (newStudyPath && Object.keys(modelIdMap).length > 0) {
+            api.remapModelIds(newStudyPath, modelIdMap).catch(console.warn);
+          }
+
+          const dataset = state.datasetsByStudy[s.id];
+          if (dataset) {
+            newDatasetsByStudy[newStudyId] = {
+              ...dataset,
+              variables: dataset.variables.map(v => ({ ...v })),
+              rows: dataset.rows.map(r => [...r]),
+            };
+          }
+        }
+
+        set((curr) => ({
+          workspaces: [...curr.workspaces, { ...ws, id: newWsId, name: newName, path: targetPath }],
+          studies: [...curr.studies, ...newStudies],
+          models: [...curr.models, ...newModels],
+          datasetsByStudy: { ...curr.datasetsByStudy, ...newDatasetsByStudy },
+          activeWorkspaceId: newWsId,
+        }));
+
+        state.openTab({
+          type: 'workspace',
+          title: newName,
+          workspaceId: newWsId,
+        });
+      },
       removeWorkspace: (id) => set((state) => ({
         workspaces: state.workspaces.filter(w => w.id !== id),
         activeWorkspaceId: state.activeWorkspaceId === id ? (state.workspaces.find(w => w.id !== id)?.id || null) : state.activeWorkspaceId,
@@ -587,17 +743,47 @@ export const useStore = create<AppState>()(
         datasetsByStudy: Object.fromEntries(Object.entries(state.datasetsByStudy).filter(([studyId]) => studyId !== id)),
       })),
       renameStudy: (id, name) => set((state) => ({ studies: state.studies.map(study => study.id === id ? { ...study, name, lastModified: 'Just now' } : study) })),
-      duplicateStudy: (id) => set((state) => {
+      duplicateStudy: async (id) => {
+        const state = get();
         const study = state.studies.find(item => item.id === id);
-        if (!study) return state;
+        if (!study) return;
         const studyId = `study_${Date.now()}`;
+        const newStudyName = `${study.name} copy`;
         const dataset = state.datasetsByStudy[id];
-        return {
-          studies: [...state.studies, { ...study, id: studyId, name: `${study.name} copy`, lastModified: 'Just now' }],
-          models: [...state.models, ...state.models.filter(model => model.studyId === id).map(model => ({ ...model, id: `model_${Date.now()}_${model.id}`, studyId, name: `${model.name} copy`, lastModified: 'Just now' }))],
-          datasetsByStudy: dataset ? { ...state.datasetsByStudy, [studyId]: { ...dataset, variables: dataset.variables.map(variable => ({ ...variable })), rows: dataset.rows.map(row => [...row]) } } : state.datasetsByStudy,
-        };
-      }),
+
+        const studyModels = state.models.filter(m => m.studyId === id);
+        const modelIdMap: Record<string, string> = {};
+        const clonedModels = studyModels.map(m => {
+          const newModelId = `model_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+          modelIdMap[m.id] = newModelId;
+          return {
+            ...m,
+            id: newModelId,
+            studyId,
+            name: `${m.name} copy`,
+            lastModified: 'Just now'
+          };
+        });
+
+        let targetPath = study.path;
+        const currentWs = state.workspaces.find(w => w.id === study.workspaceId);
+        if (study.path && currentWs && currentWs.path) {
+          try {
+            const res = await api.duplicateProject(currentWs.path, study.path, newStudyName, modelIdMap);
+            if (res && res.project_path) {
+              targetPath = res.project_path;
+            }
+          } catch (err) {
+            console.warn('Could not duplicate project file on disk:', err);
+          }
+        }
+
+        set((curr) => ({
+          studies: [...curr.studies, { ...study, id: studyId, name: newStudyName, path: targetPath, lastModified: 'Just now' }],
+          models: [...curr.models, ...clonedModels],
+          datasetsByStudy: dataset ? { ...curr.datasetsByStudy, [studyId]: { ...dataset, variables: dataset.variables.map(variable => ({ ...variable })), rows: dataset.rows.map(row => [...row]) } } : curr.datasetsByStudy,
+        }));
+      },
       setActiveStudy: (id) => set({ activeStudyId: id }),
       setStudyDataset: (studyId, dataset) => set((state) => ({
         datasetsByStudy: { ...state.datasetsByStudy, [studyId]: dataset }

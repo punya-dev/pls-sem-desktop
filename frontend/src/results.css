@@ -6,6 +6,7 @@
 
 .results-subheader {
   height: 44px;
+  box-sizing: border-box;
   background: var(--color-bg-surface);
   border-bottom: 1px solid var(--color-border-subtle);
   padding: 0 16px;
@@ -48,8 +49,15 @@
   display: flex; flex-direction: column;
   flex-shrink: 0;
 }
-.results-sidebar__search { padding: 10px; border-bottom: 1px solid var(--color-border-subtle); }
-.results-sidebar__search-wrap { position: relative; display: flex; align-items: center; }
+.results-sidebar__search {
+  height: 44px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+.results-sidebar__search-wrap { width: 100%; position: relative; display: flex; align-items: center; }
 .results-sidebar__search-icon { position: absolute; left: 10px; width: 14px; height: 14px; color: var(--color-text-muted); pointer-events: none; }
 .results-sidebar__search-input {
   width: 100%; padding: 4px 10px 4px 32px;
@@ -117,6 +125,54 @@
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+}
+
+/* Secondary header inline with filter search */
+.results-secondary-header {
+  height: 44px;
+  box-sizing: border-box;
+  background: var(--color-bg-surface);
+  border-bottom: 1px solid var(--color-border-subtle);
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+
+.results-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.results-tool-btn:hover {
+  background: var(--color-bg-raised);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-strong, var(--color-border-default));
+}
+
+.results-tool-btn--accent {
+  color: var(--color-accent);
+  background: var(--color-accent-subtle);
+  border-color: var(--color-accent-border, rgba(107, 78, 230, 0.25));
+}
+
+.results-tool-btn--accent:hover {
+  background: var(--color-accent);
+  color: #ffffff;
+  border-color: var(--color-accent);
 }
 
 /* Report header */

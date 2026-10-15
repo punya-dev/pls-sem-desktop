@@ -9,6 +9,8 @@ interface BootstrapModalProps {
   datasetHeaders?: string[];
   datasetRows?: any[][];
   datasetName?: string;
+  modelId?: string;
+  diagramLayout?: any;
   onComplete: (results: any) => void;
   onClose: () => void;
 }
@@ -20,6 +22,8 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
   datasetHeaders,
   datasetRows,
   datasetName,
+  modelId,
+  diagramLayout,
   onComplete,
   onClose,
 }) => {
@@ -66,6 +70,8 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
         columns: datasetHeaders,
         rows: datasetRows,
         dataset_name: datasetName,
+        model_id: modelId,
+        diagram_layout: diagramLayout,
       });
 
       if (startRes.error || !startRes.job_id) {

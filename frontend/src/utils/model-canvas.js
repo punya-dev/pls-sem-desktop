@@ -83,6 +83,15 @@ export function initModelCanvas() {
     history.push(state);
     if (history.length > 50) history.shift();
     historyIndex = history.length - 1;
+
+    try {
+      window.dispatchEvent(new CustomEvent('canvas-changed', {
+        detail: {
+          nodeCount: nodes.length,
+          edgeCount: edges.length
+        }
+      }));
+    } catch (e) {}
   }
   
   setTimeout(() => pushHistory(), 500);
@@ -105,7 +114,9 @@ export function initModelCanvas() {
     
     // Update HUD
     const zoomLevelEl = document.getElementById('hud-zoom-level');
-    if (zoomLevelEl) zoomLevelEl.textContent = Math.round(transform.k * 100) + '%';
+    if (zoomLevelEl && !zoomLevelEl.querySelector('input')) {
+      zoomLevelEl.textContent = Math.round(transform.k * 100) + '%';
+    }
     
     // Scale background pattern
     const pattern = document.getElementById('dot-grid');
@@ -114,26 +125,49 @@ export function initModelCanvas() {
     }
   }
 
+  function getModelCenterOfMass() {
+    const validNodes = nodes.filter(n => typeof n.x === 'number' && !isNaN(n.x) && typeof n.y === 'number' && !isNaN(n.y));
+    if (validNodes.length === 0) return null;
+    let sumX = 0;
+    let sumY = 0;
+    validNodes.forEach(n => {
+      sumX += n.x;
+      sumY += n.y;
+    });
+    return {
+      x: sumX / validNodes.length,
+      y: sumY / validNodes.length
+    };
+  }
+
+  function zoomToCenterOfMass(newK) {
+    newK = Math.max(0.1, Math.min(newK, 3));
+    const rect = svg.getBoundingClientRect();
+    const com = getModelCenterOfMass();
+
+    if (com) {
+      // Center of mass placed right at the center of the canvas viewport
+      transform.x = (rect.width / 2) - (com.x * newK);
+      transform.y = (rect.height / 2) - (com.y * newK);
+    } else {
+      const centerX = rect.width / 2;
+      const centerY = rect.height / 2;
+      const ratio = newK / transform.k;
+      transform.x = centerX - (centerX - transform.x) * ratio;
+      transform.y = centerY - (centerY - transform.y) * ratio;
+    }
+    transform.k = newK;
+    applyTransform();
+  }
+
   // --- Zoom & Pan ---
   svg.addEventListener('wheel', (e) => {
     e.preventDefault();
-    const zoomIntensity = 0.1;
+    const zoomIntensity = 0.08;
     const wheel = e.deltaY < 0 ? 1 : -1;
     const zoomFactor = Math.exp(wheel * zoomIntensity);
-    
     const newK = Math.max(0.1, Math.min(transform.k * zoomFactor, 3));
-    const ratio = newK / transform.k;
-    
-    const pt = svg.createSVGPoint();
-    pt.x = e.clientX;
-    pt.y = e.clientY;
-    const svgPt = pt.matrixTransform(svg.getScreenCTM().inverse());
-    
-    transform.x = svgPt.x - (svgPt.x - transform.x) * ratio;
-    transform.y = svgPt.y - (svgPt.y - transform.y) * ratio;
-    transform.k = newK;
-    
-    applyTransform();
+    zoomToCenterOfMass(newK);
   }, { passive: false });
 
   let isPanning = false;
@@ -186,12 +220,10 @@ export function initModelCanvas() {
 
   // HUD Controls
   document.getElementById('hud-zoom-in')?.addEventListener('click', () => {
-    transform.k = Math.min(transform.k * 1.2, 3);
-    applyTransform();
+    zoomToCenterOfMass(transform.k * 1.2);
   });
   document.getElementById('hud-zoom-out')?.addEventListener('click', () => {
-    transform.k = Math.max(transform.k / 1.2, 0.1);
-    applyTransform();
+    zoomToCenterOfMass(transform.k / 1.2);
   });
   document.getElementById('hud-fit')?.addEventListener('click', () => {
     if (nodes.length === 0) return;
@@ -220,9 +252,55 @@ export function initModelCanvas() {
       k: k
     };
     applyTransform();
-    const zoomLevelEl = document.getElementById('hud-zoom-level');
-    if (zoomLevelEl) zoomLevelEl.textContent = `${Math.round(transform.k * 100)}%`;
   });
+
+  const zoomLevelEl = document.getElementById('hud-zoom-level');
+  if (zoomLevelEl) {
+    zoomLevelEl.title = "Click to edit zoom %";
+    zoomLevelEl.addEventListener('click', function(e) {
+      if (this.querySelector('input')) return;
+      const currentPct = Math.round(transform.k * 100);
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'hud-zoom__level-input';
+      input.value = `${currentPct}%`;
+
+      this.innerHTML = '';
+      this.appendChild(input);
+      input.focus();
+      input.select();
+
+      let finished = false;
+      const finishZoom = (valToApply) => {
+        if (finished) return;
+        finished = true;
+        if (valToApply !== undefined && !isNaN(valToApply) && valToApply > 0) {
+          const clamped = Math.max(10, Math.min(valToApply, 300));
+          zoomToCenterOfMass(clamped / 100);
+        }
+        zoomLevelEl.textContent = `${Math.round(transform.k * 100)}%`;
+      };
+
+      input.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const valStr = input.value.replace(/[^0-9.]/g, '');
+          const val = parseFloat(valStr);
+          finishZoom(val);
+        } else if (ev.key === 'Escape') {
+          ev.preventDefault();
+          ev.stopPropagation();
+          finishZoom();
+        }
+      });
+      input.addEventListener('blur', () => {
+        const valStr = input.value.replace(/[^0-9.]/g, '');
+        const val = parseFloat(valStr);
+        finishZoom(val);
+      });
+    });
+  }
 
   document.getElementById('hud-snap')?.addEventListener('click', function() {
     isSnapping = !isSnapping;
@@ -230,7 +308,7 @@ export function initModelCanvas() {
     if (bgRect) bgRect.style.fill = isSnapping ? 'url(#dot-grid)' : 'none';
   });
   
-  document.getElementById('hud-reset')?.addEventListener('click', function() {
+  function resetModelStyles() {
     nodes.forEach(n => {
       delete n.fill;
       delete n.stroke;
@@ -251,22 +329,43 @@ export function initModelCanvas() {
       delete e.arrowhead;
     });
     render();
+    pushHistory();
+    window.dispatchEvent(new CustomEvent('canvas-changed'));
+  }
+
+  document.getElementById('hud-reset')?.addEventListener('click', function(e) {
+    if (window._customResetStylesHandler) {
+      window._customResetStylesHandler(e);
+      return;
+    }
+    resetModelStyles();
   });
 
-  document.getElementById('hud-clear')?.addEventListener('click', function() {
-    if (confirm("Are you sure you want to clear the entire canvas?")) {
-      nodes.length = 0;
-      edges.length = 0;
-      selectedIds.clear();
-      transform.x = 0;
-      transform.y = 0;
-      transform.k = 1;
-      applyTransform();
-      const zoomLevelEl = document.getElementById('hud-zoom-level');
-      if (zoomLevelEl) zoomLevelEl.textContent = `${Math.round(transform.k * 100)}%`;
-      emptyHint.style.display = 'block';
-      render();
-      pushHistory();
+  function clearModelCanvas() {
+    nodes.length = 0;
+    edges.length = 0;
+    selectedIds.clear();
+    transform.x = 0;
+    transform.y = 0;
+    transform.k = 1;
+    applyTransform();
+    const zoomLevelEl = document.getElementById('hud-zoom-level');
+    if (zoomLevelEl) zoomLevelEl.textContent = `${Math.round(transform.k * 100)}%`;
+    if (emptyHint) emptyHint.style.display = 'block';
+    setCanvasResults(null);
+    render();
+    pushHistory();
+    window.dispatchEvent(new CustomEvent('canvas-changed'));
+  }
+
+  document.getElementById('hud-clear')?.addEventListener('click', function(e) {
+    // If handled by React or custom dialog, stop
+    if (window._customClearCanvasHandler) {
+      window._customClearCanvasHandler(e);
+      return;
+    }
+    if (confirm("Are you sure you want to clear the entire canvas and results?")) {
+      clearModelCanvas();
     }
   });
 
@@ -338,12 +437,14 @@ export function initModelCanvas() {
           const pt = getSvgCenter();
           addNode(name.trim(), pt.x, pt.y);
         }
-      } else if (title.includes('Text Note')) {
+      } else if (title.includes('Text Note') || this.getAttribute('data-action') === 'add-text-note') {
         const text = prompt('Enter text note:');
         if (text && text.trim()) {
           const pt = getSvgCenter();
           nodes.push({ id: generateId(), label: text.trim(), x: pt.x, y: pt.y, isLatent: null, isText: true, bold: false, italic: false, fontSize: 14 });
+          if (emptyHint) emptyHint.style.display = 'none';
           render();
+          pushHistory();
         }
       } else if (title.includes('Add Comment')) {
         const text = prompt('Enter Comment:');
@@ -398,6 +499,7 @@ export function initModelCanvas() {
     const colWidth = 360;
     const rowHeight = 220;
     
+    // Calculate layout coordinates
     const center = getSvgCenter();
     const startX = center.x - (columns.length - 1) * colWidth / 2;
 
@@ -423,13 +525,38 @@ export function initModelCanvas() {
     });
     
     selectedIds.clear();
+
+    // Synchronously compute fit & center transform to eliminate model jump/glitch
+    if (nodes.length > 0) {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      nodes.forEach(n => {
+        const halfW = (n.width || (n.isLatent !== false ? 64 : 64)) / 2 + 24;
+        const halfH = (n.height || (n.isLatent !== false ? 64 : 24)) / 2 + 24;
+        minX = Math.min(minX, n.x - halfW);
+        minY = Math.min(minY, n.y - halfH);
+        maxX = Math.max(maxX, n.x + halfW);
+        maxY = Math.max(maxY, n.y + halfH);
+      });
+      const rect = svg.getBoundingClientRect();
+      const modelWidth = Math.max(maxX - minX, 100);
+      const modelHeight = Math.max(maxY - minY, 100);
+      const padding = 60;
+      const availW = Math.max(rect.width - padding * 2, 100);
+      const availH = Math.max(rect.height - padding * 2, 100);
+      const scale = Math.min(availW / modelWidth, availH / modelHeight, 1.2);
+      const k = Math.max(Math.min(scale, 1.2), 0.2);
+      const cx = (minX + maxX) / 2;
+      const cy = (minY + maxY) / 2;
+      transform = {
+        x: (rect.width / 2) - (cx * k),
+        y: (rect.height / 2) - (cy * k),
+        k: k
+      };
+      applyTransform();
+    }
+
     render();
     pushHistory();
-
-    // Automatically center and fit the model within visible boundaries after auto-aligning
-    setTimeout(() => {
-      document.getElementById('hud-fit')?.click();
-    }, 50);
   });
 
   // Colors and Font Size (Using Global Event Delegation)
@@ -684,16 +811,53 @@ export function initModelCanvas() {
     return l.startsWith('LATENT') || l.startsWith('NEW_CONSTRUCT') || l.startsWith('CONSTRUCT') || l.startsWith('NODE_') || l.startsWith('LV_');
   }
 
-  window.dropModelVariable = (name, clientX, clientY) => {
-    if (!name) return;
+  window.dropModelVariable = (payload, clientX, clientY) => {
+    if (!payload) return;
     
+    // Normalize payload to a list of variable names and an optional construct title
+    let varList = [];
+    let customTitle = '';
+
+    if (Array.isArray(payload)) {
+      varList = payload.filter(Boolean).map(String);
+    } else if (typeof payload === 'object' && payload !== null) {
+      if (Array.isArray(payload.vars)) {
+        varList = payload.vars.filter(Boolean).map(String);
+      }
+      if (payload.name) {
+        customTitle = String(payload.name).trim();
+      }
+    } else if (typeof payload === 'string') {
+      const trimmed = payload.trim();
+      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (Array.isArray(parsed)) {
+            varList = parsed.filter(Boolean).map(String);
+          } else if (parsed && typeof parsed === 'object') {
+            if (Array.isArray(parsed.vars)) varList = parsed.vars.filter(Boolean).map(String);
+            if (parsed.name) customTitle = String(parsed.name).trim();
+          }
+        } catch (e) {
+          varList = [trimmed];
+        }
+      } else if (trimmed.includes(',')) {
+        varList = trimmed.split(',').map(s => s.trim()).filter(Boolean);
+      } else {
+        varList = [trimmed];
+      }
+    }
+
+    if (varList.length === 0) return;
+
     const pt = svg.createSVGPoint();
     pt.x = clientX;
     pt.y = clientY;
     const svgPt = pt.matrixTransform(zoomLayer.getScreenCTM().inverse());
     
-    // Check if dropped on a latent node
+    // Check if dropped on an existing latent node
     const targetNode = nodes.find(n => {
+      if (n.isLatent === false || n.isText) return false;
       const dx = n.x - svgPt.x;
       const dy = n.y - svgPt.y;
       return Math.sqrt(dx*dx + dy*dy) <= NODE_R;
@@ -701,39 +865,56 @@ export function initModelCanvas() {
 
     if (targetNode) {
       const existingIndicators = nodes.filter(n => !n.isLatent && n.parentId === targetNode.id);
-      if (!existingIndicators.some(n => n.label === name)) {
-        nodes.push({
-          id: generateId(),
-          label: name,
-          isLatent: false,
-          parentId: targetNode.id,
-          x: targetNode.x + 155,
-          y: targetNode.y + (existingIndicators.length * 40)
-        });
+      let addedAny = false;
+      varList.forEach((name) => {
+        if (!existingIndicators.some(n => n.label === name) && !nodes.some(n => n.parentId === targetNode.id && n.label === name)) {
+          const countNow = nodes.filter(n => !n.isLatent && n.parentId === targetNode.id).length;
+          nodes.push({
+            id: generateId(),
+            label: name,
+            isLatent: false,
+            parentId: targetNode.id,
+            x: targetNode.x + 155,
+            y: targetNode.y + (countNow * 40)
+          });
+          addedAny = true;
+        }
+      });
 
-        // Automatically refine construct name based on indicators if default
-        const allIndNames = [...existingIndicators.map(i => i.label), name];
-        const derived = deriveConstructName(allIndNames);
+      if (addedAny) {
+        // Automatically refine construct name if default or derived
+        const allCurrentInds = nodes.filter(n => !n.isLatent && n.parentId === targetNode.id).map(i => i.label);
+        const derived = deriveConstructName(allCurrentInds);
         if (derived && isDefaultOrDerivedName(targetNode.label)) {
           targetNode.label = derived;
         }
-
         emptyHint.style.display = 'none';
         render();
         pushHistory();
       }
     } else {
-      // Dropping onto empty space: create latent node and attach this variable as its indicator
-      const stem = deriveConstructName([name]) || name.toUpperCase().replace(/[_\-\s.]*[0-9]+$/, '');
+      // Dropping onto empty space: create latent node and attach all variables as its indicators
+      const stem = customTitle || deriveConstructName(varList) || (varList[0] ? varList[0].toUpperCase().replace(/[_\-\s.]*[0-9]+$/, '') : 'NEW_CONSTRUCT');
       const newLatent = addNode(stem, svgPt.x, svgPt.y);
-      nodes.push({
-        id: generateId(),
-        label: name,
-        isLatent: false,
-        parentId: newLatent.id,
-        x: newLatent.x + 155,
-        y: newLatent.y
+
+      const indHeight = 24;
+      const gap = 16;
+      const spacing = indHeight + gap;
+      const totalLength = (varList.length - 1) * spacing;
+      const start = -totalLength / 2;
+
+      varList.forEach((name, idx) => {
+        nodes.push({
+          id: generateId(),
+          label: name,
+          isLatent: false,
+          parentId: newLatent.id,
+          x: newLatent.x + 155,
+          y: newLatent.y + start + (idx * spacing)
+        });
       });
+
+      emptyHint.style.display = 'none';
       render();
       pushHistory();
     }
@@ -760,8 +941,22 @@ export function initModelCanvas() {
     let w = node.width || defaultW;
     let h = node.height || defaultH;
     let shape = node.shape || (node.isLatent ? 'circle' : 'rect');
-    let fill = node.fill || defaultFill;
-    let stroke = node.stroke || defaultStroke;
+    let fill = node.fill;
+    let stroke = node.stroke;
+    if (!fill || fill === '#334155' || fill === '#1e293b' || fill === '#1e1b4b' || fill === '#e2e8f0' || (typeof fill === 'string' && fill.includes('var(--canvas-latent-fill)'))) {
+      fill = defaultFill;
+    }
+    if (!stroke || stroke === '#1e293b' || stroke === '#475569' || stroke === '#94a3b8' || stroke === 'none' || (typeof stroke === 'string' && stroke.includes('var(--canvas-latent-stroke)'))) {
+      stroke = defaultStroke;
+    }
+    if (node.isLatent === false) {
+      if (!node.fill || node.fill === '#fef08a' || node.fill === '#451a03' || (typeof node.fill === 'string' && node.fill.includes('var(--canvas-manifest-fill)'))) {
+        fill = defaultFill;
+      }
+      if (!node.stroke || node.stroke === '#ca8a04' || node.stroke === '#b45309' || (typeof node.stroke === 'string' && node.stroke.includes('var(--canvas-manifest-stroke)'))) {
+        stroke = defaultStroke;
+      }
+    }
     let strokeW = '1.5';
     let el;
     
@@ -795,7 +990,9 @@ export function initModelCanvas() {
     }
     
     el.setAttribute('fill', fill);
+    el.style.fill = fill;
     el.setAttribute('stroke', isSelected ? 'var(--color-accent)' : stroke);
+    el.style.stroke = isSelected ? 'var(--color-accent)' : stroke;
     el.setAttribute('stroke-width', strokeW);
     return el;
   }
@@ -1136,8 +1333,10 @@ export function initModelCanvas() {
         bg.setAttribute('width', pillW);
         bg.setAttribute('height', pillH);
         bg.setAttribute('rx', '4');
-        bg.setAttribute('fill', 'var(--color-bg-primary, #ffffff)');
-        bg.setAttribute('stroke', selectedIds.has(edge.id) ? 'var(--color-accent, #6B4EE6)' : 'var(--color-border-divider, #cbd5e1)');
+        bg.setAttribute('fill', 'var(--canvas-badge-bg)');
+        bg.style.fill = 'var(--canvas-badge-bg)';
+        bg.setAttribute('stroke', selectedIds.has(edge.id) ? 'var(--color-accent)' : 'var(--canvas-badge-border)');
+        bg.style.stroke = selectedIds.has(edge.id) ? 'var(--color-accent)' : 'var(--canvas-badge-border)';
         bg.setAttribute('stroke-width', '1');
         badgeG.appendChild(bg);
 
@@ -1147,7 +1346,8 @@ export function initModelCanvas() {
         txt.setAttribute('font-size', '10.5');
         txt.setAttribute('font-family', 'var(--font-mono, monospace)');
         txt.setAttribute('font-weight', '600');
-        txt.setAttribute('fill', 'var(--color-text-primary, #1e293b)');
+        txt.setAttribute('fill', 'var(--canvas-badge-text)');
+        txt.style.fill = 'var(--canvas-badge-text)';
         txt.textContent = textVal;
         badgeG.appendChild(txt);
 
@@ -1208,7 +1408,7 @@ export function initModelCanvas() {
       if (node.isLatent) {
         let w = node.width || NODE_R * 2;
         let h = node.height || NODE_R * 2;
-        g.appendChild(createNodeShape(node, NODE_R * 2, NODE_R * 2, '#334155', 'none', isSelected));
+        g.appendChild(createNodeShape(node, NODE_R * 2, NODE_R * 2, 'var(--canvas-latent-fill)', 'var(--canvas-latent-stroke)', isSelected));
         
         // Selection box (Dotted shape)
         if (isSelected) {
@@ -1268,10 +1468,12 @@ export function initModelCanvas() {
             const yiq = ((r * 299) + (g * 587) + (b * 114)) / 1000;
             return (yiq >= 128) ? '#000000' : '#ffffff';
           };
-          text.setAttribute('fill', node.color || getContrast(node.fill || '#e0e7ff'));
+          text.setAttribute('fill', node.color || 'var(--canvas-latent-text)');
+          text.style.fill = node.color || 'var(--canvas-latent-text)';
         } else {
           text.setAttribute('y', h/2 + 24);
           text.setAttribute('fill', node.color || 'var(--color-text-primary)');
+          text.style.fill = node.color || 'var(--color-text-primary)';
         }
         text.setAttribute('font-size', node.fontSize || '14');
         if (node.bold) text.setAttribute('font-weight', 'bold');
@@ -1298,7 +1500,8 @@ export function initModelCanvas() {
             r2Text.setAttribute('font-size', '10.5');
             r2Text.setAttribute('font-weight', '600');
             r2Text.setAttribute('font-family', 'var(--font-mono, monospace)');
-            r2Text.setAttribute('fill', '#ffffff');
+            r2Text.setAttribute('fill', 'var(--canvas-latent-text)');
+            r2Text.style.fill = 'var(--canvas-latent-text)';
             r2Text.textContent = `R²: ${r2Val}`;
             r2Group.appendChild(r2Text);
           } else {
@@ -1309,7 +1512,9 @@ export function initModelCanvas() {
             r2Label.setAttribute('font-size', '9');
             r2Label.setAttribute('font-weight', '600');
             r2Label.setAttribute('font-family', 'var(--font-sans)');
-            r2Label.setAttribute('fill', 'rgba(255, 255, 255, 0.8)');
+            r2Label.setAttribute('fill', 'var(--canvas-latent-text)');
+            r2Label.style.fill = 'var(--canvas-latent-text)';
+            r2Label.style.opacity = '0.85';
             r2Label.textContent = 'R²';
             r2Group.appendChild(r2Label);
 
@@ -1320,7 +1525,8 @@ export function initModelCanvas() {
             r2Text.setAttribute('font-size', '12.5');
             r2Text.setAttribute('font-weight', '600');
             r2Text.setAttribute('font-family', 'var(--font-mono, monospace)');
-            r2Text.setAttribute('fill', '#ffffff');
+            r2Text.setAttribute('fill', 'var(--canvas-latent-text)');
+            r2Text.style.fill = 'var(--canvas-latent-text)';
             r2Text.textContent = r2Val;
             r2Group.appendChild(r2Text);
           }
@@ -1389,7 +1595,7 @@ export function initModelCanvas() {
         let w = node.width || indWidth;
         let h = node.height || indHeight;
         
-        g.appendChild(createNodeShape(node, indWidth, indHeight, '#fef08a', '#ca8a04', isSelected));
+        g.appendChild(createNodeShape(node, indWidth, indHeight, 'var(--canvas-manifest-fill)', 'var(--canvas-manifest-stroke)', isSelected));
 
         if (isSelected) {
           const gap = 8;
@@ -1431,7 +1637,7 @@ export function initModelCanvas() {
         indText.textContent = node.label;
         indText.setAttribute('y', 4);
         indText.setAttribute('text-anchor', 'middle');
-        indText.setAttribute('fill', node.color || '#422006');
+        indText.setAttribute('fill', node.color || 'var(--canvas-manifest-text)');
         indText.setAttribute('font-size', node.fontSize || '10');
         if (node.bold) indText.setAttribute('font-weight', 'bold');
         if (node.italic) indText.setAttribute('font-style', 'italic');
@@ -1449,7 +1655,7 @@ export function initModelCanvas() {
               : getEdgeCoordinates(parent, node, true);
             const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
             path.setAttribute('d', `M ${x1} ${y1} L ${x2} ${y2}`);
-            path.setAttribute('stroke', '#64748b');
+            path.setAttribute('stroke', 'var(--canvas-edge-stroke)');
             path.setAttribute('stroke-width', '1.5');
             path.setAttribute('marker-end', 'url(#arrow-solid)');
             edgesLayer.appendChild(path);
@@ -1475,8 +1681,8 @@ export function initModelCanvas() {
               bg.setAttribute('width', pillW);
               bg.setAttribute('height', pillH);
               bg.setAttribute('rx', '3');
-              bg.setAttribute('fill', 'var(--color-bg-primary, #ffffff)');
-              bg.setAttribute('stroke', 'var(--color-border-divider, #cbd5e1)');
+              bg.setAttribute('fill', 'var(--canvas-badge-bg)');
+              bg.setAttribute('stroke', 'var(--canvas-badge-border)');
               bg.setAttribute('stroke-width', '0.75');
               badgeG.appendChild(bg);
 
@@ -1486,7 +1692,7 @@ export function initModelCanvas() {
               txt.setAttribute('font-size', '9.5');
               txt.setAttribute('font-family', 'var(--font-mono, monospace)');
               txt.setAttribute('font-weight', '500');
-              txt.setAttribute('fill', 'var(--color-text-secondary, #475569)');
+              txt.setAttribute('fill', 'var(--canvas-badge-text)');
               txt.textContent = textVal;
               badgeG.appendChild(txt);
 
@@ -2176,8 +2382,17 @@ export function initModelCanvas() {
     if (ctxTargetId) {
       const node = nodes.find(n => n.id === ctxTargetId);
       if (node) {
-        nodes.push({ ...node, id: generateId(), x: node.x + 40, y: node.y + 40 });
+        const copy = JSON.parse(JSON.stringify(node));
+        copy.id = generateId();
+        copy.x = (node.x || 0) + 40;
+        copy.y = (node.y || 0) + 40;
+        if (copy.label) {
+          copy.label = `${copy.label}_copy`;
+        }
+        nodes.push(copy);
         render();
+        pushHistory();
+        window.dispatchEvent(new CustomEvent('canvas-changed'));
       }
     }
     hideContextMenu();
@@ -2483,6 +2698,39 @@ export function initModelCanvas() {
   window.canvasUndo = undo;
   window.canvasRedo = redo;
   window.setCanvasResults = setCanvasResults;
+  window.renderModelCanvas = render;
+  window.clearModelCanvas = clearModelCanvas;
+  window.resetModelStyles = resetModelStyles;
+
+  try {
+    if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined') {
+      const themeObserver = new MutationObserver(() => {
+        render();
+      });
+      themeObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['data-theme', 'data-dark-variant']
+      });
+    }
+  } catch (e) {}
+}
+
+export function resetModelStyles() {
+  if (typeof window !== 'undefined' && window.resetModelStyles) {
+    window.resetModelStyles();
+  }
+}
+
+export function clearModelCanvas() {
+  if (typeof window !== 'undefined' && window.clearModelCanvas) {
+    window.clearModelCanvas();
+  }
+}
+
+export function renderModelCanvas() {
+  if (typeof window !== 'undefined' && window.renderModelCanvas) {
+    window.renderModelCanvas();
+  }
 }
 
 export function setCanvasResults(results) {
