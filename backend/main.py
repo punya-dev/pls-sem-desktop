@@ -357,6 +357,109 @@ def validate_model(req: ValidateModelRequest):
     return result.model_dump()
 
 
+class DuplicateModelRequest(BaseModel):
+    project_path: str
+    source_model_id: str
+    new_model_id: str
+
+class DuplicateProjectRequest(BaseModel):
+    folder_path: str
+    source_path: str
+    new_name: str
+    model_id_map: Optional[Dict[str, str]] = None
+
+class RemapModelIdsRequest(BaseModel):
+    project_path: str
+    model_id_map: Dict[str, str]
+
+class DuplicateWorkspaceRequest(BaseModel):
+    source_folder_path: str
+    new_name: str
+
+class SaveSnapshotRequest(BaseModel):
+    project_path: str
+    name: str
+    description: Optional[str] = ""
+    algorithm: Optional[str] = "pls"
+    results: dict
+    spec: dict
+    diagram_layout: dict
+    source_model_id: Optional[str] = None
+
+class CreateModelFromSnapshotRequest(BaseModel):
+    project_path: str
+    snapshot_id: str
+    new_model_id: str
+    new_model_name: str
+
+class DeleteSnapshotRequest(BaseModel):
+    project_path: str
+    snapshot_id: str
+
+@app.post("/project/save-snapshot")
+def save_snapshot_endpoint(req: SaveSnapshotRequest):
+    if not os.path.exists(req.project_path):
+        return {"error": "Project file does not exist"}
+    try:
+        res = project_io.save_snapshot(
+            req.project_path,
+            name=req.name,
+            algorithm=req.algorithm,
+            results=req.results,
+            spec=req.spec,
+            diagram_layout=req.diagram_layout,
+            description=req.description,
+            source_model_id=req.source_model_id,
+        )
+        return res
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/project/list-snapshots")
+def list_snapshots_endpoint(path: str):
+    if not os.path.exists(path):
+        return {"error": "Project file does not exist"}
+    try:
+        return project_io.list_snapshots(path)
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/project/get-snapshot")
+def get_snapshot_endpoint(path: str, snapshot_id: str):
+    if not os.path.exists(path):
+        return {"error": "Project file does not exist"}
+    try:
+        snap = project_io.get_snapshot(path, snapshot_id)
+        if not snap:
+            return {"error": "Snapshot not found"}
+        return snap
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.post("/project/delete-snapshot")
+def delete_snapshot_endpoint(req: DeleteSnapshotRequest):
+    if not os.path.exists(req.project_path):
+        return {"error": "Project file does not exist"}
+    try:
+        ok = project_io.delete_snapshot(req.project_path, req.snapshot_id)
+        return {"status": "deleted" if ok else "not_found"}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.post("/project/create-model-from-snapshot")
+def create_model_from_snapshot_endpoint(req: CreateModelFromSnapshotRequest):
+    if not os.path.exists(req.project_path):
+        return {"error": "Project file does not exist"}
+    try:
+        return project_io.create_model_from_snapshot(
+            req.project_path,
+            snapshot_id=req.snapshot_id,
+            new_model_id=req.new_model_id,
+            new_model_name=req.new_model_name,
+        )
+    except Exception as e:
+        return {"error": str(e)}
+
 @app.post("/project/save-model")
 def save_project_model(req: SaveModelRequest):
     if not os.path.exists(req.project_path):
@@ -372,6 +475,7 @@ def save_project_model(req: SaveModelRequest):
             req.project_path,
             req.spec.model_dump(by_alias=True),
             diagram_layout=req.diagram_layout,
+            model_id=req.model_id,
         )
         return {
             "status": "saved",
@@ -382,15 +486,63 @@ def save_project_model(req: SaveModelRequest):
 
 
 @app.get("/project/load-model")
-def load_project_model(path: str):
+def load_project_model(path: str, model_id: Optional[str] = None):
     if not os.path.exists(path):
         return {"error": "Project file does not exist"}
 
-    model_data = project_io.load_model_spec(path)
+    model_data = project_io.load_model_spec(path, model_id=model_id)
     if model_data is None or model_data.get("spec") is None:
-        return {"spec": None, "diagram_layout": None, "updated_at": None}
+        return {"spec": None, "diagram_layout": None, "updated_at": None, "model_key": model_id}
 
     return model_data
+
+
+@app.post("/project/duplicate-model")
+def duplicate_project_model(req: DuplicateModelRequest):
+    if not os.path.exists(req.project_path):
+        return {"error": "Project file does not exist"}
+    try:
+        res = project_io.duplicate_model_spec(req.project_path, req.source_model_id, req.new_model_id)
+        return res
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/project/duplicate")
+def duplicate_project_file(req: DuplicateProjectRequest):
+    try:
+        res = project_io.duplicate_project(req.folder_path, req.source_path, req.new_name, req.model_id_map)
+        return res
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/project/remap-model-ids")
+def remap_project_model_ids(req: RemapModelIdsRequest):
+    if not os.path.exists(req.project_path):
+        return {"error": "Project file does not exist"}
+    try:
+        import sqlite3
+        conn = sqlite3.connect(req.project_path)
+        cur = conn.cursor()
+        for old_id, new_id in req.model_id_map.items():
+            cur.execute("UPDATE model_spec SET model_key = ? WHERE model_key = ?", (new_id, old_id))
+            cur.execute("UPDATE results SET model_key = ? WHERE model_key = ?", (new_id, old_id))
+            cur.execute("UPDATE snapshots SET source_model_id = ? WHERE source_model_id = ?", (new_id, old_id))
+        conn.commit()
+        conn.close()
+        return {"status": "remapped"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/workspace/duplicate")
+def duplicate_workspace_folder(req: DuplicateWorkspaceRequest):
+    try:
+        res = workspace_io.duplicate_workspace(req.source_folder_path, req.new_name)
+        return res
+    except Exception as e:
+        return {"error": str(e)}
 
 
 @app.post("/project/run-pls")
@@ -423,7 +575,7 @@ def run_project_pls(req: RunPlsRequest):
     # 2. Resolve Model spec
     spec = req.spec
     if spec is None:
-        saved_model = project_io.load_model_spec(req.project_path)
+        saved_model = project_io.load_model_spec(req.project_path, req.model_id)
         if not saved_model or not saved_model.get("spec"):
             return {"error": "No path model found. Please draw or save a model first."}
         try:
@@ -452,8 +604,16 @@ def run_project_pls(req: RunPlsRequest):
         if req.bootstrap:
             res["significance"] = algo.bootstrap(df, spec, n_boot=req.n_boot)
 
-        # 5. Persist results in project file
-        project_io.save_results(req.project_path, "pls", res)
+        # 5. Persist results in project file scoped to model_id
+        spec_dict = spec.model_dump(by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else None)
+        project_io.save_results(
+            req.project_path,
+            "pls",
+            res,
+            model_id=req.model_id,
+            spec=spec_dict,
+            diagram_layout=req.diagram_layout,
+        )
 
         return {
             "status": "success",
@@ -465,10 +625,10 @@ def run_project_pls(req: RunPlsRequest):
 
 
 @app.get("/project/load-results")
-def load_project_results(path: str, algorithm: str = "pls"):
+def load_project_results(path: str, algorithm: str = "pls", model_id: Optional[str] = None):
     if not os.path.exists(path):
         return {"error": "Project file does not exist"}
-    data = project_io.load_results(path, algorithm=algorithm)
+    data = project_io.load_results(path, algorithm=algorithm, model_id=model_id)
     if data is None:
         return {"results": None}
     return data
@@ -595,8 +755,16 @@ async def start_bootstrap_job(req: BootstrapStartRequest):
             )
             base_res["significance"] = boot_res
 
-            # Save full results with significance to project
-            project_io.save_results(req.project_path, "pls", base_res)
+            # Save full results with significance to project scoped to model_id
+            spec_dict = spec.model_dump(by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else None)
+            project_io.save_results(
+                req.project_path,
+                "pls",
+                base_res,
+                model_id=getattr(req, "model_id", None),
+                spec=spec_dict,
+                diagram_layout=getattr(req, "diagram_layout", None),
+            )
 
             job["status"] = "completed"
             job["results"] = base_res

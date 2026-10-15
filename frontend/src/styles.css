@@ -588,6 +588,8 @@ body[data-window-fullscreen="true"] .titlebar__traffic-light-space {
   color: var(--color-text-primary);
   border-color: var(--color-border-subtle);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  font-weight: 600;
+  position: relative;
 }
 
 .tab-icon {
@@ -917,6 +919,127 @@ body[data-window-fullscreen="true"] .titlebar__traffic-light-space {
   background: var(--color-bg-base);
   border-color: var(--group-border);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+/* ─── Tab Contrast & Dark Mode Aesthetics ────────────────────────────────── */
+
+[data-theme="dark"] .tab-item {
+  color: #94a3b8;
+}
+
+[data-theme="dark"] .tab-item .tab-icon {
+  color: #71717a;
+  opacity: 0.85;
+}
+
+[data-theme="dark"] .tab-item:hover:not(.tab-item--active) {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f8fafc;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .tab-item:hover:not(.tab-item--active) .tab-icon {
+  color: #cbd5e1;
+  opacity: 1;
+}
+
+[data-theme="dark"] .tab-item--active {
+  background: #27272a !important;
+  color: #ffffff !important;
+  border-color: rgba(255, 255, 255, 0.16) !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.14) !important;
+  font-weight: 600 !important;
+}
+
+[data-theme="dark"] .tab-item--active .tab-icon {
+  color: var(--color-accent) !important;
+  opacity: 1 !important;
+  filter: drop-shadow(0 0 5px rgba(var(--color-accent-rgb), 0.5));
+}
+
+[data-theme="dark"] .tab-item--active .tab-close-btn {
+  color: #a1a1aa;
+}
+
+[data-theme="dark"] .tab-item--active .tab-close-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+}
+
+[data-theme="dark"] .tab-group {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .tab-group:hover:not(.tab-group--has-active) {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+[data-theme="dark"] .tab-group-chevron-btn {
+  color: #71717a;
+}
+
+[data-theme="dark"] .tab-group-chevron-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #cbd5e1;
+}
+
+[data-theme="dark"] .tab-group--has-active {
+  background: rgba(var(--color-accent-rgb), 0.14) !important;
+  border-color: rgba(var(--color-accent-rgb), 0.45) !important;
+  box-shadow: 0 0 12px rgba(var(--color-accent-rgb), 0.15);
+}
+
+[data-theme="dark"] .tab-group--has-active .tab-group-name-btn {
+  color: #ffffff !important;
+  font-weight: 600;
+}
+
+[data-theme="dark"] .tab-group--has-active .tab-group-name-btn .tab-icon {
+  color: var(--color-accent) !important;
+  filter: drop-shadow(0 0 4px rgba(var(--color-accent-rgb), 0.5));
+}
+
+[data-theme="dark"] .tab-group-name-btn--active {
+  background: #27272a !important;
+  border-color: rgba(var(--color-accent-rgb), 0.5) !important;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
+  color: #ffffff !important;
+  font-weight: 600 !important;
+}
+
+[data-theme="dark"] .tab-group-name-btn--active .tab-icon {
+  color: var(--color-accent) !important;
+  filter: drop-shadow(0 0 4px rgba(var(--color-accent-rgb), 0.5));
+}
+
+[data-theme="dark"] .tab-group .tab-item--active {
+  background: #27272a !important;
+  color: #ffffff !important;
+  border-color: rgba(255, 255, 255, 0.18) !important;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+  font-weight: 600 !important;
+}
+
+[data-theme="dark"] .tab-group .tab-item:not(.tab-item--active) {
+  color: #94a3b8;
+}
+
+[data-theme="dark"] .tab-group .tab-item:hover:not(.tab-item--active) {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f8fafc;
+}
+
+[data-theme="dark"] .tab-group-count {
+  background: rgba(255, 255, 255, 0.1);
+  color: #94a3b8;
+}
+
+[data-theme="dark"] .tab-group--has-active .tab-group-count {
+  background: rgba(var(--color-accent-rgb), 0.35) !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(var(--color-accent-rgb), 0.5);
+  font-weight: 700;
 }
 
 /* ─── Tab Group Context Menu ─────────────────────────────────────────────── */
