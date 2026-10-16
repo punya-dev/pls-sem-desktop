@@ -104,4 +104,41 @@ def get_recent_workspaces():
         })
     return workspaces
 
+
+def duplicate_workspace(source_folder_path: str, new_name: str):
+    import shutil
+    source_folder_path = os.path.expanduser(source_folder_path)
+    if not os.path.exists(source_folder_path):
+        raise FileNotFoundError("Source workspace folder not found")
+
+    parent_dir = os.path.dirname(source_folder_path)
+    clean_name = "".join(c for c in new_name if c.isalnum() or c in (" ", "-", "_")).strip()
+    if not clean_name:
+        clean_name = "Workspace Copy"
+    target_folder_path = os.path.join(parent_dir, clean_name)
+    counter = 1
+    while os.path.exists(target_folder_path):
+        target_folder_path = os.path.join(parent_dir, f"{clean_name} ({counter})")
+        counter += 1
+
+    shutil.copytree(source_folder_path, target_folder_path)
+
+    ws_file = os.path.join(target_folder_path, "workspace.json")
+    if os.path.exists(ws_file):
+        with open(ws_file, "r") as f:
+            data = json.load(f)
+        now = datetime.utcnow().isoformat()
+        data["name"] = new_name
+        data["created_at"] = now
+        data["modified_at"] = now
+        with open(ws_file, "w") as f:
+            json.dump(data, f, indent=2)
+
+    add_recent_workspace(target_folder_path)
+    return {
+        "status": "duplicated",
+        "workspace_path": target_folder_path,
+        "name": new_name
+    }
+
     

@@ -1,0 +1,2144 @@
+import React, { useEffect, useState, useMemo, useRef } from 'react';
+import { useStore } from '../store';
+import { api } from '../utils/api';
+import AppSidebar from '../components/AppSidebar';
+import {
+  History,
+  Edit3,
+  Download,
+  Copy,
+  ChevronRight,
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
+  AlertCircle,
+  FileSpreadsheet,
+  FileText,
+  Code,
+  FileCheck,
+  LayoutGrid
+} from 'lucide-react';
+import '../model-canvas.css';
+import '../results.css';
+
+interface TableHeaderToggleProps {
+  label: React.ReactNode;
+  mode: 'matrix' | 'list';
+  onToggle: (mode: 'matrix' | 'list') => void;
+}
+
+const TableHeaderToggle: React.FC<TableHeaderToggleProps> = ({ label, mode, onToggle }) => (
+  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', minWidth: '120px' }}>
+    <span>{label}</span>
+    <div
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '2px',
+        padding: '2px',
+        backgroundColor: 'var(--color-bg-base)',
+        border: '1px solid var(--color-border-subtle)',
+        borderRadius: '5px',
+        userSelect: 'none',
+      }}
+    >
+      <button
+        type="button"
+        title="Matrix View"
+        onClick={(e) => { e.stopPropagation(); onToggle('matrix'); }}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '2px 4px',
+          borderRadius: '3px',
+          border: 'none',
+          backgroundColor: mode === 'matrix' ? 'var(--color-accent-subtle)' : 'transparent',
+          color: mode === 'matrix' ? 'var(--color-accent)' : 'var(--color-text-tertiary)',
+          cursor: 'pointer',
+        }}
+      >
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth={2}>
+          <path d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        title="List View"
+        onClick={(e) => { e.stopPropagation(); onToggle('list'); }}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '2px 4px',
+          borderRadius: '3px',
+          border: 'none',
+          backgroundColor: mode === 'list' ? 'var(--color-accent-subtle)' : 'transparent',
+          color: mode === 'list' ? 'var(--color-accent)' : 'var(--color-text-tertiary)',
+          cursor: 'pointer',
+        }}
+      >
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth={2}>
+          <path d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+        </svg>
+      </button>
+    </div>
+  </div>
+);
+
+export const SnapshotView: React.FC = () => {
+  const { tabs, activeTabId, studies, workspaces, models, addModel, openTab } = useStore();
+  const activeTab = tabs.find(t => t.id === activeTabId);
+
+  const activeStudy = studies.find(s => s.id === activeTab?.studyId) ||
+    studies.find(s => s.path && activeTab?.snapshotId);
+  const activeWorkspace = workspaces.find(w => w.id === activeTab?.workspaceId);
+
+  const [snapshot, setSnapshot] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [currentView, setCurrentView] = useState<'results' | 'diagram'>('diagram');
+  const [activeResultTab, setActiveResultTab] = useState<string>('path_coefficients');
+  const [tableModes, setTableModes] = useState<Record<string, 'matrix' | 'list'>>({
+    path_coefficients: 'matrix',
+    total_indirect_effects: 'matrix',
+    total_effects: 'matrix',
+    outer_loadings: 'matrix',
+    outer_weights: 'matrix',
+    f_squared: 'matrix',
+    htmt: 'matrix',
+  });
+
+  const getTableMode = (key: string): 'matrix' | 'list' => tableModes[key] || 'matrix';
+  const setTableMode = (key: string, mode: 'matrix' | 'list') => {
+    setTableModes(prev => ({ ...prev, [key]: mode }));
+  };
+
+  // Diagram Zoom & Pan state
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const panStartRef = useRef({ x: 0, y: 0 });
+  const containerRef = useRef<HTMLDivElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+
+  // Dragging and interactive layout nodes
+  const [layoutNodes, setLayoutNodes] = useState<any[]>([]);
+  const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
+  const dragStartPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const initialNodesPosRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+
+  // Edit Model Dialog
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [newModelName, setNewModelName] = useState('');
+  const [isCreatingModel, setIsCreatingModel] = useState(false);
+  const [copyToast, setCopyToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    const fetchSnapshot = async () => {
+      if (!activeStudy?.path || !activeTab?.snapshotId) {
+        setError('Missing study or snapshot reference.');
+        setLoading(false);
+        return;
+      }
+      try {
+        setLoading(true);
+        const res = await api.getSnapshot(activeStudy.path, activeTab.snapshotId);
+        if (!isMounted) return;
+        if (res.error) {
+          setError(res.error);
+        } else {
+          setSnapshot(res);
+          setNewModelName(`${res.name || 'Model'} (Editable)`);
+        }
+      } catch (err: any) {
+        if (isMounted) setError(err?.message || 'Failed to load snapshot');
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    };
+
+    fetchSnapshot();
+    return () => {
+      isMounted = false;
+    };
+  }, [activeStudy?.path, activeTab?.snapshotId]);
+
+  const results = snapshot?.results;
+  const spec = snapshot?.spec || snapshot?.model_spec;
+  const layout = snapshot?.diagram_layout;
+
+  const centerDiagram = (nodesList: any[]) => {
+    if (!nodesList || nodesList.length === 0) return;
+    const xs = nodesList.map((n: any) => n.x);
+    const ys = nodesList.map((n: any) => n.y);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    const midX = (minX + maxX) / 2;
+    const midY = (minY + maxY) / 2;
+    const container = containerRef.current;
+    const w = container?.clientWidth || 900;
+    const h = container?.clientHeight || 600;
+    setPanOffset({ x: w / 2 - midX, y: h / 2 - midY });
+  };
+
+  // Initialize layoutNodes and auto-center diagram view when diagram layout is loaded
+  useEffect(() => {
+    if (layout?.nodes && layout.nodes.length > 0) {
+      setLayoutNodes(JSON.parse(JSON.stringify(layout.nodes)));
+      setTimeout(() => {
+        centerDiagram(layout.nodes);
+      }, 50);
+    }
+  }, [layout]);
+
+  const handleNodeMouseDown = (e: React.MouseEvent, nodeId: string) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setDraggingNodeId(nodeId);
+    dragStartPosRef.current = { x: e.clientX, y: e.clientY };
+    const map = new Map<string, { x: number; y: number }>();
+    layoutNodes.forEach((n: any) => {
+      map.set(n.id, { x: n.x, y: n.y });
+    });
+    initialNodesPosRef.current = map;
+  };
+
+  const handleCanvasMouseMove = (e: React.MouseEvent) => {
+    if (draggingNodeId) {
+      const dx = (e.clientX - dragStartPosRef.current.x) / zoomLevel;
+      const dy = (e.clientY - dragStartPosRef.current.y) / zoomLevel;
+      const initialPos = initialNodesPosRef.current.get(draggingNodeId);
+      if (!initialPos) return;
+
+      // Snap to 10px grid
+      const rawNewX = initialPos.x + dx;
+      const rawNewY = initialPos.y + dy;
+      const snappedX = Math.round(rawNewX / 10) * 10;
+      const snappedY = Math.round(rawNewY / 10) * 10;
+      const actualDx = snappedX - initialPos.x;
+      const actualDy = snappedY - initialPos.y;
+
+      setLayoutNodes(prev =>
+        prev.map(n => {
+          if (n.id === draggingNodeId) {
+            return { ...n, x: snappedX, y: snappedY };
+          }
+          // If dragging a latent node, move its attached indicators too
+          if (n.parentId === draggingNodeId) {
+            const childInit = initialNodesPosRef.current.get(n.id);
+            if (childInit) {
+              return { ...n, x: childInit.x + actualDx, y: childInit.y + actualDy };
+            }
+          }
+          return n;
+        })
+      );
+      return;
+    }
+
+    if (isPanning) {
+      setPanOffset({
+        x: e.clientX - panStartRef.current.x,
+        y: e.clientY - panStartRef.current.y,
+      });
+    }
+  };
+
+  const handleCanvasMouseUp = () => {
+    setDraggingNodeId(null);
+    setIsPanning(false);
+  };
+
+  const handleAutoAlign = () => {
+    if (!layoutNodes || layoutNodes.length === 0) return;
+    const newNodes = JSON.parse(JSON.stringify(layoutNodes));
+    const edges = layout?.edges || [];
+
+    // Topological sort of latent constructs
+    const depths = new Map<string, number>();
+    newNodes.forEach((n: any) => {
+      if (n.isLatent !== false && !n.isText) depths.set(n.id, 0);
+    });
+
+    let changed = true;
+    let iterations = 0;
+    while (changed && iterations < 50) {
+      changed = false;
+      iterations++;
+      edges.forEach((e: any) => {
+        const sourceDepth = depths.get(e.sourceId);
+        const targetDepth = depths.get(e.targetId);
+        if (sourceDepth !== undefined && targetDepth !== undefined) {
+          if (targetDepth <= sourceDepth) {
+            depths.set(e.targetId, sourceDepth + 1);
+            changed = true;
+          }
+        }
+      });
+    }
+
+    const maxDepth = Math.max(0, ...Array.from(depths.values()));
+    const columns: any[][] = Array.from({ length: maxDepth + 1 }, () => []);
+
+    depths.forEach((depth, id) => {
+      const node = newNodes.find((n: any) => n.id === id);
+      if (node) columns[depth].push(node);
+    });
+
+    const colWidth = 320;
+    const rowHeight = 200;
+
+    const container = containerRef.current;
+    const centerX = (container?.clientWidth || 900) / 2;
+    const centerY = (container?.clientHeight || 600) / 2;
+
+    const startX = centerX - ((columns.length - 1) * colWidth) / 2;
+
+    columns.forEach((colNodes, colIdx) => {
+      const startY = centerY - ((colNodes.length - 1) * rowHeight) / 2;
+      colNodes.forEach((node, rowIdx) => {
+        const oldX = node.x;
+        const oldY = node.y;
+        node.x = Math.round((startX + colIdx * colWidth) / 20) * 20;
+        node.y = Math.round((startY + rowIdx * rowHeight) / 20) * 20;
+        const dx = node.x - oldX;
+        const dy = node.y - oldY;
+        // Move child indicators with latent construct
+        newNodes.filter((child: any) => child.parentId === node.id).forEach((child: any) => {
+          child.x += dx;
+          child.y += dy;
+        });
+      });
+    });
+
+    setLayoutNodes(newNodes);
+    centerDiagram(newNodes);
+  };
+
+  const handleDownloadPNG = () => {
+    const svgEl = svgRef.current;
+    if (!svgEl) return;
+    try {
+      const svgClone = svgEl.cloneNode(true) as SVGSVGElement;
+      const bbox = svgEl.getBoundingClientRect();
+      const width = bbox.width || 1200;
+      const height = bbox.height || 800;
+
+      svgClone.setAttribute('width', String(width));
+      svgClone.setAttribute('height', String(height));
+
+      const svgData = new XMLSerializer().serializeToString(svgClone);
+      const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+      const URL = window.URL || window.webkitURL || window;
+      const blobURL = URL.createObjectURL(svgBlob);
+
+      const image = new Image();
+      image.onload = () => {
+        const canvas = document.createElement('canvas');
+        const scale = 2;
+        canvas.width = width * scale;
+        canvas.height = height * scale;
+        const context = canvas.getContext('2d');
+        if (!context) return;
+        context.scale(scale, scale);
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, width, height);
+        context.drawImage(image, 0, 0);
+
+        const pngUrl = canvas.toDataURL('image/png');
+        const downloadLink = document.createElement('a');
+        downloadLink.download = `${(snapshot?.name || 'model').replace(/\s+/g, '_')}.png`;
+        downloadLink.href = pngUrl;
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
+        URL.revokeObjectURL(blobURL);
+      };
+      image.src = blobURL;
+    } catch (e) {
+      console.error('Error generating PNG export:', e);
+      alert('Failed to export PNG');
+    }
+  };
+
+  const allIndicators = useMemo(() => {
+    if (!results) return [];
+    const set = new Set<string>();
+    Object.values(results.measurement?.outer_loadings || {}).forEach((m: any) => {
+      Object.keys(m || {}).forEach(k => set.add(k));
+    });
+    Object.values(results.measurement?.outer_weights || {}).forEach((m: any) => {
+      Object.keys(m || {}).forEach(k => set.add(k));
+    });
+    return Array.from(set).sort();
+  }, [results]);
+
+  const getIndicatorName = (iid: string) => {
+    if (!iid) return '';
+    return results?.indicator_names?.[iid] || iid;
+  };
+
+  const fmt = (val: any, decimals: number = 4): string => {
+    if (val === undefined || val === null || isNaN(Number(val))) return '—';
+    return Number(val).toFixed(decimals);
+  };
+
+  const reportTabDetails = useMemo(() => {
+    switch (activeResultTab) {
+      case 'path_coefficients':
+        return {
+          title: 'Path Coefficients',
+          badge: 'β (beta)',
+          subtitle: 'Standardized beta coefficients between endogenous and exogenous latent constructs.',
+        };
+      case 'total_indirect_effects':
+        return {
+          title: 'Total Indirect Effects',
+          badge: 'Indirect',
+          subtitle: 'Specific and cumulative indirect mediation pathways across constructs.',
+        };
+      case 'total_effects':
+        return {
+          title: 'Total Effects',
+          badge: 'Direct + Indirect',
+          subtitle: 'Cumulative relationships and mediation decomposition across the structural model.',
+        };
+      case 'outer_loadings':
+        return {
+          title: 'Outer Loadings',
+          badge: 'λ (lambda)',
+          subtitle: 'Bivariate correlations between each indicator and its associated latent construct score.',
+        };
+      case 'outer_weights':
+        return {
+          title: 'Outer Weights',
+          badge: 'w',
+          subtitle: 'Relative contribution weights of indicators to their latent construct scores.',
+        };
+      case 'r_squared':
+        return {
+          title: 'R-Square (R²)',
+          badge: 'R² & Adj R²',
+          subtitle: 'Coefficient of determination measuring variance explained for endogenous constructs.',
+        };
+      case 'construct_reliability':
+      case 'reliability':
+        return {
+          title: 'Construct Reliability & Validity',
+          badge: 'α, CR, ρA, AVE',
+          subtitle: 'Internal consistency reliability (Cronbach\'s α, CR, rho_A) and convergent validity (AVE).',
+        };
+      case 'htmt':
+        return {
+          title: 'Discriminant Validity (HTMT)',
+          badge: 'Heterotrait-Monotrait Ratio',
+          subtitle: 'HTMT ratios of correlations. Values strictly below 0.85 (or 0.90) indicate distinct construct validity.',
+        };
+      case 'fornell_larcker':
+        return {
+          title: 'Fornell-Larcker Criterion',
+          badge: '√AVE vs Correlations',
+          subtitle: 'Square root of AVE (on diagonal) compared against inter-construct correlations (off-diagonal).',
+        };
+      case 'f_squared':
+        return {
+          title: 'f-Square Effect Sizes',
+          badge: 'f²',
+          subtitle: 'Cohen\'s f² effect size of omitted predictor on endogenous construct R².',
+        };
+      case 'collinearity':
+        return {
+          title: 'Collinearity Statistics (VIF)',
+          badge: 'Variance Inflation Factor',
+          subtitle: 'Variance Inflation Factor (VIF) evaluating multicollinearity among predictors. Ideal VIF < 3.3.',
+        };
+      case 'construct_scores':
+        return {
+          title: 'Latent Variable Scores',
+          badge: 'Standardized Scores',
+          subtitle: 'Calculated standardized case scores for each latent variable in the model.',
+        };
+      case 'model_fit':
+        return {
+          title: 'Model Fit (SRMR)',
+          badge: 'Global Fit',
+          subtitle: 'Standardized Root Mean Square Residual (SRMR) measuring global model fit. Values < 0.08 indicate good fit.',
+        };
+      default:
+        return {
+          title: activeResultTab.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+          badge: 'Results',
+          subtitle: `Saved snapshot calculation results for ${snapshot?.name || 'Model'}.`,
+        };
+    }
+  }, [activeResultTab, snapshot?.name]);
+
+  const resultConstructs = useMemo(() => {
+    if (!results) return [];
+    const struct = results.structural || {};
+    const fromR2 = Object.keys(struct.r_squared || {});
+    const fromPaths: string[] = [];
+    if (struct.path_coefficients) {
+      Object.keys(struct.path_coefficients).forEach(target => {
+        fromPaths.push(target);
+        Object.keys(struct.path_coefficients[target] || {}).forEach(src => fromPaths.push(src));
+      });
+    }
+    const combined = Array.from(new Set([...fromR2, ...fromPaths]));
+    return combined.sort();
+  }, [results]);
+
+  const constructPalette: Record<string, string> = useMemo(() => {
+    const defaultColors = ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6'];
+    const p: Record<string, string> = {};
+    resultConstructs.forEach((c, idx) => {
+      p[c] = defaultColors[idx % defaultColors.length];
+    });
+    return p;
+  }, [resultConstructs]);
+
+  const getConstructName = (key: string) => {
+    if (!key) return '';
+    if (results?.construct_names?.[key]) return results.construct_names[key];
+    return key;
+  };
+
+  const handleCreateModel = async () => {
+    if (!activeStudy?.path || !snapshot?.id) return;
+    try {
+      setIsCreatingModel(true);
+      const newModelId = `model_${Date.now()}`;
+      const name = newModelName.trim() || `${snapshot.name} (Editable)`;
+      const res = await api.createModelFromSnapshot(activeStudy.path, snapshot.id, newModelId, name);
+      if (res.error) {
+        alert('Failed to create model from snapshot: ' + res.error);
+        return;
+      }
+
+      // Add new model into Zustand store
+      addModel({
+        id: newModelId,
+        studyId: activeStudy.id,
+        name,
+        type: 'PLS-SEM',
+        lastModified: 'Just now',
+      });
+      useStore.getState().setActiveModel(newModelId);
+
+      setIsEditModalOpen(false);
+
+      // Open new model tab
+      openTab({
+        type: 'model',
+        title: name,
+        modelId: newModelId,
+        studyId: activeStudy.id,
+        workspaceId: activeWorkspace?.id,
+      });
+    } catch (err: any) {
+      alert('Error creating editable model: ' + err?.message);
+    } finally {
+      setIsCreatingModel(false);
+    }
+  };
+
+  const handleExportJSON = () => {
+    if (!snapshot) return;
+    const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${snapshot.name.replace(/\s+/g, '_')}_snapshot.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleCopyTable = () => {
+    const table = document.querySelector('.scientific-table');
+    if (!table) return;
+    let tsv = '';
+    const rows = table.querySelectorAll('tr');
+    rows.forEach(r => {
+      const cells = r.querySelectorAll('th, td');
+      const rowVals: string[] = [];
+      cells.forEach(c => rowVals.push(c.textContent?.trim() || ''));
+      tsv += rowVals.join('\t') + '\n';
+    });
+    navigator.clipboard.writeText(tsv).then(() => {
+      setCopyToast('Table copied to clipboard');
+      setTimeout(() => setCopyToast(null), 2500);
+    });
+  };
+
+  const handleExportCSV = () => {
+    const table = document.querySelector('.scientific-table');
+    if (!table) return;
+    let csv = '';
+    const rows = table.querySelectorAll('tr');
+    rows.forEach(r => {
+      const cells = r.querySelectorAll('th, td');
+      const rowVals: string[] = [];
+      cells.forEach(c => {
+        let text = c.textContent?.trim() || '';
+        if (text.includes(',') || text.includes('"')) {
+          text = `"${text.replace(/"/g, '""')}"`;
+        }
+        rowVals.push(text);
+      });
+      csv += rowVals.join(',') + '\n';
+    });
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${snapshot.name}_${activeResultTab}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  if (loading) {
+    return (
+      <div className="app-body" style={{ width: '100%', height: '100%', overflow: 'hidden' }}>
+        <AppSidebar activeNav="workspace" />
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)' }}>
+          <div style={{ textAlign: 'center' }}>
+            <History size={32} style={{ margin: '0 auto 12px', opacity: 0.6 }} />
+            <div>Loading snapshot data...</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !snapshot) {
+    return (
+      <div className="app-body" style={{ width: '100%', height: '100%', overflow: 'hidden' }}>
+        <AppSidebar activeNav="workspace" />
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ef4444' }}>
+          <div style={{ textAlign: 'center', maxWidth: '420px', padding: '24px' }}>
+            <AlertCircle size={36} style={{ margin: '0 auto 12px' }} />
+            <h3 style={{ margin: '0 0 8px', fontSize: '16px' }}>Snapshot Load Error</h3>
+            <p style={{ margin: 0, fontSize: '13px', color: 'var(--color-text-secondary)' }}>{error || 'Unable to find snapshot details.'}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="app-body" style={{ width: '100%', height: '100%', overflow: 'hidden' }}>
+      <AppSidebar activeNav="workspace" />
+      <div style={{ flex: 1, minWidth: 0, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+
+        {/* ═══ SUB-HEADER / CONTROL BAR ═══ */}
+        <div className="subheader">
+          <div className="subheader__breadcrumb">
+            <span
+              className="subheader__breadcrumb-link"
+              onClick={() => {
+                if (activeWorkspace) {
+                  openTab({ type: 'workspace', title: activeWorkspace.name, workspaceId: activeWorkspace.id });
+                }
+              }}
+            >
+              {activeWorkspace?.name || 'Workspace'}
+            </span>
+            <span className="subheader__breadcrumb-sep">/</span>
+            <span
+              className="subheader__breadcrumb-link"
+              onClick={() => {
+                if (activeWorkspace) {
+                  openTab({ type: 'workspace', title: activeWorkspace.name, workspaceId: activeWorkspace.id });
+                }
+              }}
+            >
+              {activeStudy?.name || 'Study'}
+            </span>
+            <span className="subheader__breadcrumb-sep">/</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <History size={13} style={{ color: 'var(--color-accent)' }} />
+              <span className="subheader__breadcrumb-link" style={{ color: 'var(--color-accent)', fontWeight: 600 }}>
+                {snapshot.name}
+              </span>
+            </div>
+            <div className="subheader__divider" style={{ margin: '0 8px' }} />
+            <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+              Captured {new Date(snapshot.created_at).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+            </span>
+          </div>
+
+          <div className="subheader__actions">
+            {/* View Switcher: Diagram vs Results */}
+            <div className="subheader__switcher">
+              <button
+                type="button"
+                className={`subheader__switcher-btn ${currentView === 'diagram' ? 'active' : ''}`}
+                onClick={() => setCurrentView('diagram')}
+              >
+                Model
+              </button>
+              <button
+                type="button"
+                className={`subheader__switcher-btn ${currentView === 'results' ? 'active' : ''}`}
+                onClick={() => setCurrentView('results')}
+              >
+                Results
+              </button>
+            </div>
+
+            {/* Edit Model Action */}
+            <button
+              className="subheader__btn subheader__btn--primary"
+              type="button"
+              onClick={() => setIsEditModalOpen(true)}
+              style={{ gap: 6, fontWeight: 500 }}
+              title="Create a new editable model initialized from this snapshot"
+            >
+              <Edit3 size={13} />
+              <span>Edit Model</span>
+            </button>
+          </div>
+        </div>
+
+        {/* ═══ APP BODY ═══ */}
+        {currentView === 'results' ? (
+          <div id="view-results" className="view-panel" style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+            <div className="app-body" style={{ width: '100%', height: '100%' }}>
+              {/* Left Navigation Tree */}
+              <aside className="results-sidebar" id="results-sidebar">
+                <div className="results-sidebar__search">
+                  <div className="results-sidebar__search-wrap">
+                    <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text-secondary)' }}>
+                      Snapshot Tables
+                    </span>
+                  </div>
+                </div>
+                <div className="results-sidebar__tree">
+                  {/* Final Results Section */}
+                  <div className="tree-section">
+                    <div className="tree-section__header">
+                      <span>Final results</span>
+                    </div>
+                    <div className="tree-section__items">
+                      <a
+                        href="#"
+                        className={`tree-item ${activeResultTab === 'path_coefficients' ? 'active' : ''}`}
+                        onClick={(e) => { e.preventDefault(); setActiveResultTab('path_coefficients'); }}
+                      >
+                        Path coefficients
+                      </a>
+                      <a
+                        href="#"
+                        className={`tree-item ${activeResultTab === 'total_indirect_effects' ? 'active' : ''}`}
+                        onClick={(e) => { e.preventDefault(); setActiveResultTab('total_indirect_effects'); }}
+                      >
+                        Total indirect effects
+                      </a>
+                      <a
+                        href="#"
+                        className={`tree-item ${activeResultTab === 'total_effects' ? 'active' : ''}`}
+                        onClick={(e) => { e.preventDefault(); setActiveResultTab('total_effects'); }}
+                      >
+                        Total effects
+                      </a>
+                      <a
+                        href="#"
+                        className={`tree-item ${activeResultTab === 'outer_loadings' ? 'active' : ''}`}
+                        onClick={(e) => { e.preventDefault(); setActiveResultTab('outer_loadings'); }}
+                      >
+                        Outer loadings
+                      </a>
+                      <a
+                        href="#"
+                        className={`tree-item ${activeResultTab === 'outer_weights' ? 'active' : ''}`}
+                        onClick={(e) => { e.preventDefault(); setActiveResultTab('outer_weights'); }}
+                      >
+                        Outer weights
+                      </a>
+                      <a
+                        href="#"
+                        className={`tree-item ${activeResultTab === 'construct_scores' ? 'active' : ''}`}
+                        onClick={(e) => { e.preventDefault(); setActiveResultTab('construct_scores'); }}
+                      >
+                        Latent variable scores
+                      </a>
+                    </div>
+                  </div>
+
+                  {/* Quality Criteria Section */}
+                  <div className="tree-section">
+                    <div className="tree-section__header">
+                      <span>Quality criteria</span>
+                    </div>
+                    <div className="tree-section__items">
+                      <a
+                        href="#"
+                        className={`tree-item ${activeResultTab === 'r_squared' ? 'active' : ''}`}
+                        onClick={(e) => { e.preventDefault(); setActiveResultTab('r_squared'); }}
+                      >
+                        R-square (R²)
+                      </a>
+                      <a
+                        href="#"
+                        className={`tree-item ${activeResultTab === 'construct_reliability' ? 'active' : ''}`}
+                        onClick={(e) => { e.preventDefault(); setActiveResultTab('construct_reliability'); }}
+                      >
+                        Construct reliability & validity
+                      </a>
+                      <a
+                        href="#"
+                        className={`tree-item ${activeResultTab === 'htmt' ? 'active' : ''}`}
+                        onClick={(e) => { e.preventDefault(); setActiveResultTab('htmt'); }}
+                      >
+                        Discriminant validity (HTMT)
+                      </a>
+                      <a
+                        href="#"
+                        className={`tree-item ${activeResultTab === 'fornell_larcker' ? 'active' : ''}`}
+                        onClick={(e) => { e.preventDefault(); setActiveResultTab('fornell_larcker'); }}
+                      >
+                        Fornell-Larcker criterion
+                      </a>
+                      <a
+                        href="#"
+                        className={`tree-item ${activeResultTab === 'f_squared' ? 'active' : ''}`}
+                        onClick={(e) => { e.preventDefault(); setActiveResultTab('f_squared'); }}
+                      >
+                        f-square (f²) effect sizes
+                      </a>
+                      <a
+                        href="#"
+                        className={`tree-item ${activeResultTab === 'collinearity' ? 'active' : ''}`}
+                        onClick={(e) => { e.preventDefault(); setActiveResultTab('collinearity'); }}
+                      >
+                        Collinearity (VIF)
+                      </a>
+                      <a
+                        href="#"
+                        className={`tree-item ${activeResultTab === 'model_fit' ? 'active' : ''}`}
+                        onClick={(e) => { e.preventDefault(); setActiveResultTab('model_fit'); }}
+                      >
+                        Model fit (SRMR)
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              </aside>
+
+              {/* Main Content Area */}
+              <main className="results-main" style={{ flex: 1, minWidth: 0, overflow: 'auto' }}>
+                {/* Secondary Header inline with search */}
+                <div className="results-secondary-header">
+                  <button
+                    className="results-tool-btn results-tool-btn--accent"
+                    type="button"
+                    onClick={() => setIsEditModalOpen(true)}
+                    title="Create a new editable model from this snapshot"
+                  >
+                    <Edit3 size={13} />
+                    <span>Edit Model</span>
+                  </button>
+                  <button
+                    className="results-tool-btn"
+                    type="button"
+                    onClick={handleExportCSV}
+                    title="Export CSV"
+                  >
+                    <FileSpreadsheet size={13} />
+                    <span>Excel</span>
+                  </button>
+                  <button
+                    className="results-tool-btn"
+                    type="button"
+                    onClick={() => window.print()}
+                    title="Print or create report"
+                  >
+                    <FileCheck size={13} />
+                    <span>Create Report</span>
+                  </button>
+                  <button
+                    className="results-tool-btn"
+                    type="button"
+                    onClick={handleExportJSON}
+                    title="Download snapshot JSON"
+                  >
+                    <Download size={13} />
+                    <span>Export JSON</span>
+                  </button>
+                </div>
+
+                {/* Header Area with Inline Title and Table Actions */}
+                <div className="report-header">
+                  <div className="report-header__top">
+                    <div>
+                      <h1 className="report-header__title">
+                        {reportTabDetails.title}
+                        <span className="report-header__title-sub">{reportTabDetails.badge}</span>
+                      </h1>
+                      <p className="report-header__subtitle">
+                        {reportTabDetails.subtitle}
+                      </p>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                      <button
+                        className="results-tool-btn"
+                        type="button"
+                        onClick={handleCopyTable}
+                        title="Copy table to clipboard"
+                      >
+                        <Copy size={13} />
+                        <span>Copy Table</span>
+                      </button>
+                      <button
+                        className="results-tool-btn"
+                        type="button"
+                        onClick={handleExportCSV}
+                        title="Export CSV"
+                      >
+                        <Download size={13} />
+                        <span>Export CSV</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Table Container */}
+                <div className="table-container">
+                  <div className="scientific-table-wrap">
+                    {activeResultTab === 'path_coefficients' ? (
+                      getTableMode('path_coefficients') === 'matrix' ? (
+                        <table className="scientific-table">
+                          <thead>
+                            <tr>
+                              <th>
+                                <TableHeaderToggle
+                                  label="Source \ Target"
+                                  mode={getTableMode('path_coefficients')}
+                                  onToggle={(m) => setTableMode('path_coefficients', m)}
+                                />
+                              </th>
+                              {resultConstructs.map(c => (
+                                <th key={c}>{getConstructName(c)}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {resultConstructs.map(sourceC => (
+                              <tr key={sourceC}>
+                                <td>
+                                  <div className="construct-label">
+                                    <div className="construct-dot" style={{ background: constructPalette[sourceC] || '#6366f1' }} />
+                                    <span className="construct-name">{getConstructName(sourceC)}</span>
+                                  </div>
+                                </td>
+                                {resultConstructs.map(targetC => {
+                                  const val = results?.structural?.path_coefficients?.[targetC]?.[sourceC];
+                                  if (val !== undefined && val !== null) {
+                                    return (
+                                      <td key={targetC} className="cell-sig">
+                                        <div className="cell-value">{fmt(val, 4)}</div>
+                                      </td>
+                                    );
+                                  }
+                                  return <td key={targetC} className="cell-empty">—</td>;
+                                })}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      ) : (
+                        <table className="scientific-table">
+                          <thead>
+                            <tr>
+                              <th>
+                                <TableHeaderToggle
+                                  label="Predictor (From)"
+                                  mode={getTableMode('path_coefficients')}
+                                  onToggle={(m) => setTableMode('path_coefficients', m)}
+                                />
+                              </th>
+                              <th>Target (To)</th>
+                              <th>Path Coefficient (β)</th>
+                              <th>f² Effect Size</th>
+                              <th>Inner VIF</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {Object.entries(results?.structural?.path_coefficients || {}).flatMap(([target, preds]: [string, any]) =>
+                              Object.entries(preds || {}).map(([pred, val]: [string, any]) => {
+                                const f2 = results?.quality_criteria?.f_squared?.[target]?.[pred] ?? results?.structural?.f_squared?.[target]?.[pred];
+                                const vif = results?.quality_criteria?.inner_vif?.[target]?.[pred] ?? results?.structural?.inner_vif?.[target]?.[pred];
+                                return (
+                                  <tr key={`${pred}->${target}`}>
+                                    <td>
+                                      <div className="construct-label">
+                                        <div className="construct-dot" style={{ background: constructPalette[pred] || '#6366f1' }} />
+                                        <span className="construct-name">{getConstructName(pred)}</span>
+                                      </div>
+                                    </td>
+                                    <td>
+                                      <div className="construct-label">
+                                        <div className="construct-dot" style={{ background: constructPalette[target] || '#0ea5e9' }} />
+                                        <span className="construct-name">{getConstructName(target)}</span>
+                                      </div>
+                                    </td>
+                                    <td className="cell-sig">
+                                      <div className="cell-value">{fmt(val, 4)}</div>
+                                    </td>
+                                    <td>{fmt(f2, 4)}</td>
+                                    <td>{vif !== undefined ? fmt(vif, 4) : '—'}</td>
+                                  </tr>
+                                );
+                              })
+                            )}
+                          </tbody>
+                        </table>
+                      )
+                    ) : activeResultTab === 'total_indirect_effects' ? (
+                      getTableMode('total_indirect_effects') === 'matrix' ? (
+                        <table className="scientific-table">
+                          <thead>
+                            <tr>
+                              <th>
+                                <TableHeaderToggle
+                                  label="Source \ Target"
+                                  mode={getTableMode('total_indirect_effects')}
+                                  onToggle={(m) => setTableMode('total_indirect_effects', m)}
+                                />
+                              </th>
+                              {resultConstructs.map(c => (
+                                <th key={c}>{getConstructName(c)}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {resultConstructs.map(sourceC => (
+                              <tr key={sourceC}>
+                                <td>
+                                  <div className="construct-label">
+                                    <div className="construct-dot" style={{ background: constructPalette[sourceC] || '#6366f1' }} />
+                                    <span className="construct-name">{getConstructName(sourceC)}</span>
+                                  </div>
+                                </td>
+                                {resultConstructs.map(targetC => {
+                                  if (sourceC === targetC) return <td key={targetC} className="cell-empty">—</td>;
+                                  const eff = (results?.structural?.effects || []).find((e: any) => e.from === sourceC && e.to === targetC);
+                                  if (eff && eff.indirect !== undefined && eff.indirect !== null) {
+                                    return (
+                                      <td key={targetC} className="cell-sig">
+                                        <div className="cell-value">{fmt(eff.indirect, 4)}</div>
+                                      </td>
+                                    );
+                                  }
+                                  return <td key={targetC} className="cell-empty">—</td>;
+                                })}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      ) : (
+                        <table className="scientific-table">
+                          <thead>
+                            <tr>
+                              <th>
+                                <TableHeaderToggle
+                                  label="Source (From)"
+                                  mode={getTableMode('total_indirect_effects')}
+                                  onToggle={(m) => setTableMode('total_indirect_effects', m)}
+                                />
+                              </th>
+                              <th>Target (To)</th>
+                              <th>Indirect Effect</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(results?.structural?.effects || []).map((eff: any, idx: number) => (
+                              <tr key={idx}>
+                                <td>
+                                  <div className="construct-label">
+                                    <div className="construct-dot" style={{ background: constructPalette[eff.from] || '#6366f1' }} />
+                                    <span className="construct-name">{getConstructName(eff.from)}</span>
+                                  </div>
+                                </td>
+                                <td>
+                                  <div className="construct-label">
+                                    <div className="construct-dot" style={{ background: constructPalette[eff.to] || '#0ea5e9' }} />
+                                    <span className="construct-name">{getConstructName(eff.to)}</span>
+                                  </div>
+                                </td>
+                                <td className="cell-sig">
+                                  <div className="cell-value">{fmt(eff.indirect, 4)}</div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )
+                    ) : activeResultTab === 'total_effects' ? (
+                      getTableMode('total_effects') === 'matrix' ? (
+                        <table className="scientific-table">
+                          <thead>
+                            <tr>
+                              <th>
+                                <TableHeaderToggle
+                                  label="Source \ Target"
+                                  mode={getTableMode('total_effects')}
+                                  onToggle={(m) => setTableMode('total_effects', m)}
+                                />
+                              </th>
+                              {resultConstructs.map(c => (
+                                <th key={c}>{getConstructName(c)}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {resultConstructs.map(sourceC => (
+                              <tr key={sourceC}>
+                                <td>
+                                  <div className="construct-label">
+                                    <div className="construct-dot" style={{ background: constructPalette[sourceC] || '#6366f1' }} />
+                                    <span className="construct-name">{getConstructName(sourceC)}</span>
+                                  </div>
+                                </td>
+                                {resultConstructs.map(targetC => {
+                                  if (sourceC === targetC) return <td key={targetC} className="cell-empty">—</td>;
+                                  const eff = (results?.structural?.effects || []).find((e: any) => e.from === sourceC && e.to === targetC);
+                                  const val = eff?.total ?? results?.structural?.total_effects?.[targetC]?.[sourceC];
+                                  if (val !== undefined && val !== null) {
+                                    return (
+                                      <td key={targetC} className="cell-sig">
+                                        <div className="cell-value">{fmt(val, 4)}</div>
+                                      </td>
+                                    );
+                                  }
+                                  return <td key={targetC} className="cell-empty">—</td>;
+                                })}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      ) : (
+                        <table className="scientific-table">
+                          <thead>
+                            <tr>
+                              <th>
+                                <TableHeaderToggle
+                                  label="Source (From)"
+                                  mode={getTableMode('total_effects')}
+                                  onToggle={(m) => setTableMode('total_effects', m)}
+                                />
+                              </th>
+                              <th>Target (To)</th>
+                              <th>Direct Effect</th>
+                              <th>Indirect Effect</th>
+                              <th>Total Effect</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(results?.structural?.effects || []).map((eff: any, idx: number) => (
+                              <tr key={idx}>
+                                <td>
+                                  <div className="construct-label">
+                                    <div className="construct-dot" style={{ background: constructPalette[eff.from] || '#6366f1' }} />
+                                    <span className="construct-name">{getConstructName(eff.from)}</span>
+                                  </div>
+                                </td>
+                                <td>
+                                  <div className="construct-label">
+                                    <div className="construct-dot" style={{ background: constructPalette[eff.to] || '#0ea5e9' }} />
+                                    <span className="construct-name">{getConstructName(eff.to)}</span>
+                                  </div>
+                                </td>
+                                <td>{fmt(eff.direct, 4)}</td>
+                                <td>{fmt(eff.indirect, 4)}</td>
+                                <td className="cell-sig">
+                                  <div className="cell-value">{fmt(eff.total, 4)}</div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )
+                    ) : activeResultTab === 'outer_loadings' ? (
+                      getTableMode('outer_loadings') === 'matrix' ? (
+                        <table className="scientific-table">
+                          <thead>
+                            <tr>
+                              <th>
+                                <TableHeaderToggle
+                                  label="Indicator \ Construct"
+                                  mode={getTableMode('outer_loadings')}
+                                  onToggle={(m) => setTableMode('outer_loadings', m)}
+                                />
+                              </th>
+                              {resultConstructs.map(c => (
+                                <th key={c}>{getConstructName(c)}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {allIndicators.map(iid => (
+                              <tr key={iid}>
+                                <td><strong>{getIndicatorName(iid)}</strong></td>
+                                {resultConstructs.map(cid => {
+                                  const val = results?.measurement?.outer_loadings?.[cid]?.[iid];
+                                  if (val !== undefined && val !== null) {
+                                    const num = Number(val);
+                                    const isHigh = num >= 0.708;
+                                    return (
+                                      <td key={cid} className={isHigh ? 'cell-sig' : 'cell-ns'}>
+                                        <div className="cell-value">{fmt(num, 4)}</div>
+                                      </td>
+                                    );
+                                  }
+                                  return <td key={cid} className="cell-empty">—</td>;
+                                })}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      ) : (
+                        <table className="scientific-table">
+                          <thead>
+                            <tr>
+                              <th>
+                                <TableHeaderToggle
+                                  label="Construct"
+                                  mode={getTableMode('outer_loadings')}
+                                  onToggle={(m) => setTableMode('outer_loadings', m)}
+                                />
+                              </th>
+                              <th>Indicator</th>
+                              <th>Outer Loading (λ)</th>
+                              <th>Indicator Reliability (λ²)</th>
+                              <th>Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {Object.entries(results?.measurement?.outer_loadings || {}).flatMap(([cid, loads]: [string, any]) =>
+                              Object.entries(loads || {}).map(([iid, val]: [string, any]) => {
+                                const loadNum = Number(val);
+                                const rel = results?.measurement?.indicator_reliability?.[cid]?.[iid] ?? (loadNum * loadNum);
+                                const isHigh = loadNum >= 0.708;
+                                return (
+                                  <tr key={`${cid}-${iid}`}>
+                                    <td>
+                                      <div className="construct-label">
+                                        <div className="construct-dot" style={{ background: constructPalette[cid] || '#6366f1' }} />
+                                        <span className="construct-name">{getConstructName(cid)}</span>
+                                      </div>
+                                    </td>
+                                    <td><strong>{getIndicatorName(iid)}</strong></td>
+                                    <td className={isHigh ? 'cell-sig' : 'cell-ns'}>
+                                      <div className="cell-value">{fmt(loadNum, 4)}</div>
+                                    </td>
+                                    <td>{fmt(rel, 4)}</td>
+                                    <td>
+                                      <span style={{
+                                        padding: '2px 8px',
+                                        borderRadius: '4px',
+                                        fontSize: '11px',
+                                        fontWeight: 600,
+                                        backgroundColor: isHigh ? '#dcfce7' : (loadNum >= 0.6 ? '#fef3c7' : '#fee2e2'),
+                                        color: isHigh ? '#166534' : (loadNum >= 0.6 ? '#92400e' : '#991b1b')
+                                      }}>
+                                        {isHigh ? 'Established (λ ≥ 0.708)' : (loadNum >= 0.6 ? 'Acceptable' : 'Low (< 0.60)')}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            )}
+                          </tbody>
+                        </table>
+                      )
+                    ) : activeResultTab === 'outer_weights' ? (
+                      getTableMode('outer_weights') === 'matrix' ? (
+                        <table className="scientific-table">
+                          <thead>
+                            <tr>
+                              <th>
+                                <TableHeaderToggle
+                                  label="Indicator \ Construct"
+                                  mode={getTableMode('outer_weights')}
+                                  onToggle={(m) => setTableMode('outer_weights', m)}
+                                />
+                              </th>
+                              {resultConstructs.map(c => (
+                                <th key={c}>{getConstructName(c)}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {allIndicators.map(iid => (
+                              <tr key={iid}>
+                                <td><strong>{getIndicatorName(iid)}</strong></td>
+                                {resultConstructs.map(cid => {
+                                  const val = results?.measurement?.outer_weights?.[cid]?.[iid];
+                                  if (val !== undefined && val !== null) {
+                                    return (
+                                      <td key={cid} className="cell-sig">
+                                        <div className="cell-value">{fmt(val, 4)}</div>
+                                      </td>
+                                    );
+                                  }
+                                  return <td key={cid} className="cell-empty">—</td>;
+                                })}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      ) : (
+                        <table className="scientific-table">
+                          <thead>
+                            <tr>
+                              <th>
+                                <TableHeaderToggle
+                                  label="Construct"
+                                  mode={getTableMode('outer_weights')}
+                                  onToggle={(m) => setTableMode('outer_weights', m)}
+                                />
+                              </th>
+                              <th>Indicator</th>
+                              <th>Outer Weight (w)</th>
+                              <th>Outer VIF</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {Object.entries(results?.measurement?.outer_weights || {}).flatMap(([cid, weights]: [string, any]) =>
+                              Object.entries(weights || {}).map(([iid, val]: [string, any]) => {
+                                const vif = results?.measurement?.outer_vif?.[cid]?.[iid];
+                                return (
+                                  <tr key={`${cid}-${iid}`}>
+                                    <td>
+                                      <div className="construct-label">
+                                        <div className="construct-dot" style={{ background: constructPalette[cid] || '#6366f1' }} />
+                                        <span className="construct-name">{getConstructName(cid)}</span>
+                                      </div>
+                                    </td>
+                                    <td><strong>{getIndicatorName(iid)}</strong></td>
+                                    <td className="cell-sig">
+                                      <div className="cell-value">{fmt(val, 4)}</div>
+                                    </td>
+                                    <td>{vif !== undefined ? fmt(vif, 4) : '1.0000'}</td>
+                                  </tr>
+                                );
+                              })
+                            )}
+                          </tbody>
+                        </table>
+                      )
+                    ) : activeResultTab === 'r_squared' ? (
+                      <table className="scientific-table">
+                        <thead>
+                          <tr>
+                            <th>Endogenous Construct</th>
+                            <th>R² (Variance Explained)</th>
+                            <th>R² Adjusted</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {Object.entries(results?.structural?.r_squared || {}).map(([c, r2]: [string, any]) => (
+                            <tr key={c}>
+                              <td>{getConstructName(c)}</td>
+                              <td><strong>{fmt(r2, 4)}</strong></td>
+                              <td>{fmt(results?.structural?.r_squared_adj?.[c], 4)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : activeResultTab === 'construct_reliability' ? (
+                      <table className="scientific-table">
+                        <thead>
+                          <tr>
+                            <th>Construct</th>
+                            <th>Cronbach's Alpha (α)</th>
+                            <th>Composite Reliability (rho_a)</th>
+                            <th>Composite Reliability (rho_c)</th>
+                            <th>Average Variance Extracted (AVE)</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {resultConstructs.map(c => {
+                            const rel = results?.reliability_and_validity || {};
+                            return (
+                              <tr key={c}>
+                                <td>{getConstructName(c)}</td>
+                                <td>{fmt(rel.cronbach_alpha?.[c] ?? rel.cronbachs_alpha?.[c], 4)}</td>
+                                <td>{fmt(rel.rho_a?.[c], 4)}</td>
+                                <td>{fmt(rel.composite_reliability?.[c], 4)}</td>
+                                <td>{fmt(rel.ave?.[c], 4)}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    ) : activeResultTab === 'htmt' ? (
+                      getTableMode('htmt') === 'matrix' ? (
+                        <table className="scientific-table">
+                          <thead>
+                            <tr>
+                              <th>
+                                <TableHeaderToggle
+                                  label="Construct"
+                                  mode={getTableMode('htmt')}
+                                  onToggle={(m) => setTableMode('htmt', m)}
+                                />
+                              </th>
+                              {resultConstructs.map(c => (
+                                <th key={c}>{getConstructName(c)}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {resultConstructs.map(r => (
+                              <tr key={r}>
+                                <td>{getConstructName(r)}</td>
+                                {resultConstructs.map(col => {
+                                  if (r === col) return <td key={col} className="cell-empty">—</td>;
+                                  const val = results?.reliability_and_validity?.htmt?.[r]?.[col];
+                                  if (val !== undefined && val !== null) {
+                                    const num = Number(val);
+                                    const ok = num < 0.85;
+                                    return (
+                                      <td key={col} className={ok ? 'cell-sig' : 'cell-ns'}>
+                                        <div className="cell-value">{fmt(num, 4)}</div>
+                                      </td>
+                                    );
+                                  }
+                                  return <td key={col} className="cell-empty">—</td>;
+                                })}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      ) : (
+                        <table className="scientific-table">
+                          <thead>
+                            <tr>
+                              <th>
+                                <TableHeaderToggle
+                                  label="Construct 1"
+                                  mode={getTableMode('htmt')}
+                                  onToggle={(m) => setTableMode('htmt', m)}
+                                />
+                              </th>
+                              <th>Construct 2</th>
+                              <th>HTMT Ratio</th>
+                              <th>Evaluation</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {resultConstructs.flatMap((c1, i) =>
+                              resultConstructs.slice(i + 1).map(c2 => {
+                                const val = results?.reliability_and_validity?.htmt?.[c1]?.[c2] ??
+                                  results?.reliability_and_validity?.htmt?.[c2]?.[c1];
+                                const num = val !== undefined && val !== null ? Number(val) : NaN;
+                                const isStrict = !isNaN(num) && num < 0.85;
+                                const isLiberal = !isNaN(num) && num < 0.90;
+                                return (
+                                  <tr key={`${c1}-${c2}`}>
+                                    <td>
+                                      <div className="construct-label">
+                                        <div className="construct-dot" style={{ background: constructPalette[c1] || '#6366f1' }} />
+                                        <span className="construct-name">{getConstructName(c1)}</span>
+                                      </div>
+                                    </td>
+                                    <td>
+                                      <div className="construct-label">
+                                        <div className="construct-dot" style={{ background: constructPalette[c2] || '#0ea5e9' }} />
+                                        <span className="construct-name">{getConstructName(c2)}</span>
+                                      </div>
+                                    </td>
+                                    <td className={isStrict ? 'cell-sig' : 'cell-ns'}>
+                                      <div className="cell-value">{fmt(val, 4)}</div>
+                                    </td>
+                                    <td>
+                                      <span style={{
+                                        padding: '2px 8px',
+                                        borderRadius: '4px',
+                                        fontSize: '11px',
+                                        fontWeight: 600,
+                                        backgroundColor: isStrict ? '#dcfce7' : (isLiberal ? '#fef3c7' : '#fee2e2'),
+                                        color: isStrict ? '#166534' : (isLiberal ? '#92400e' : '#991b1b')
+                                      }}>
+                                        {isStrict ? 'Distinct (HTMT < 0.85)' : (isLiberal ? 'Acceptable (< 0.90)' : 'Discriminant Issue (≥ 0.90)')}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            )}
+                          </tbody>
+                        </table>
+                      )
+                    ) : activeResultTab === 'fornell_larcker' ? (
+                      <table className="scientific-table">
+                        <thead>
+                          <tr>
+                            <th>Construct</th>
+                            {resultConstructs.map(c => (
+                              <th key={c}>{getConstructName(c)}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {resultConstructs.map(r => (
+                            <tr key={r}>
+                              <td>{getConstructName(r)}</td>
+                              {resultConstructs.map(col => {
+                                const val = results?.reliability_and_validity?.fornell_larcker?.[r]?.[col];
+                                return <td key={col}>{fmt(val, 4)}</td>;
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : activeResultTab === 'f_squared' ? (
+                      getTableMode('f_squared') === 'matrix' ? (
+                        <table className="scientific-table">
+                          <thead>
+                            <tr>
+                              <th>
+                                <TableHeaderToggle
+                                  label="Predictor \ Target"
+                                  mode={getTableMode('f_squared')}
+                                  onToggle={(m) => setTableMode('f_squared', m)}
+                                />
+                              </th>
+                              {resultConstructs.map(c => (
+                                <th key={c}>{getConstructName(c)}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {resultConstructs.map(pred => (
+                              <tr key={pred}>
+                                <td>
+                                  <div className="construct-label">
+                                    <div className="construct-dot" style={{ background: constructPalette[pred] || '#6366f1' }} />
+                                    <span className="construct-name">{getConstructName(pred)}</span>
+                                  </div>
+                                </td>
+                                {resultConstructs.map(tgt => {
+                                  const val = results?.quality_criteria?.f_squared?.[tgt]?.[pred] ?? results?.structural?.f_squared?.[tgt]?.[pred];
+                                  if (val !== undefined && val !== null) {
+                                    const f2 = Number(val);
+                                    const isHigh = f2 >= 0.15;
+                                    return (
+                                      <td key={tgt} className={isHigh ? 'cell-sig' : ''}>
+                                        <div className="cell-value">{fmt(f2, 4)}</div>
+                                      </td>
+                                    );
+                                  }
+                                  return <td key={tgt} className="cell-empty">—</td>;
+                                })}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      ) : (
+                        <table className="scientific-table">
+                          <thead>
+                            <tr>
+                              <th>
+                                <TableHeaderToggle
+                                  label="Predictor (From)"
+                                  mode={getTableMode('f_squared')}
+                                  onToggle={(m) => setTableMode('f_squared', m)}
+                                />
+                              </th>
+                              <th>Target (To)</th>
+                              <th>f² Value</th>
+                              <th>Effect Size Interpretation</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {Object.entries(results?.quality_criteria?.f_squared || results?.structural?.f_squared || {}).flatMap(([target, preds]: [string, any]) =>
+                              Object.entries(preds || {}).map(([pred, val]: [string, any]) => {
+                                const f2 = Number(val);
+                                const interp = f2 >= 0.35 ? 'Large effect (≥ 0.35)' : (f2 >= 0.15 ? 'Medium effect (≥ 0.15)' : (f2 >= 0.02 ? 'Small effect (≥ 0.02)' : 'Negligible (< 0.02)'));
+                                return (
+                                  <tr key={`${pred}->${target}`}>
+                                    <td>
+                                      <div className="construct-label">
+                                        <div className="construct-dot" style={{ background: constructPalette[pred] || '#6366f1' }} />
+                                        <span className="construct-name">{getConstructName(pred)}</span>
+                                      </div>
+                                    </td>
+                                    <td>
+                                      <div className="construct-label">
+                                        <div className="construct-dot" style={{ background: constructPalette[target] || '#0ea5e9' }} />
+                                        <span className="construct-name">{getConstructName(target)}</span>
+                                      </div>
+                                    </td>
+                                    <td className="cell-sig">
+                                      <div className="cell-value">{fmt(f2, 4)}</div>
+                                    </td>
+                                    <td>
+                                      <span style={{
+                                        padding: '2px 8px',
+                                        borderRadius: '4px',
+                                        fontSize: '11px',
+                                        fontWeight: 600,
+                                        backgroundColor: f2 >= 0.15 ? '#dcfce7' : (f2 >= 0.02 ? '#fef3c7' : '#f1f5f9'),
+                                        color: f2 >= 0.15 ? '#166534' : (f2 >= 0.02 ? '#92400e' : '#475569')
+                                      }}>
+                                        {interp}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            )}
+                          </tbody>
+                        </table>
+                      )
+                    ) : activeResultTab === 'collinearity' ? (
+                      <table className="scientific-table">
+                        <thead>
+                          <tr>
+                            <th>Construct / Indicator</th>
+                            <th>Inner VIF</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {Object.entries(results?.quality_criteria?.inner_vif || results?.structural?.inner_vif || {}).map(([pair, vif]: [string, any]) => (
+                            <tr key={pair}>
+                              <td>{pair}</td>
+                              <td><strong>{fmt(vif, 3)}</strong></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : activeResultTab === 'construct_scores' ? (
+                      <table className="scientific-table">
+                        <thead>
+                          <tr>
+                            <th>Case #</th>
+                            {resultConstructs.map(c => (
+                              <th key={c}>{getConstructName(c)}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {Array.from({ length: Math.min(results?.n_samples || 20, 25) }).map((_, idx) => (
+                            <tr key={idx}>
+                              <td>{idx + 1}</td>
+                              {resultConstructs.map(c => {
+                                const score = results?.construct_scores?.[c]?.[idx];
+                                return <td key={c}>{fmt(score, 4)}</td>;
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : activeResultTab === 'model_fit' ? (
+                      <table className="scientific-table">
+                        <thead>
+                          <tr>
+                            <th>Fit Criterion</th>
+                            <th>Saturated Model</th>
+                            <th>Estimated Model</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr>
+                            <td>SRMR (Standardized Root Mean Square Residual)</td>
+                            <td><strong>{fmt(results?.model_fit?.srmr, 4)}</strong></td>
+                            <td>{fmt(results?.model_fit?.srmr, 4)}</td>
+                          </tr>
+                          <tr>
+                            <td>d_ULS (Squared Euclidean distance)</td>
+                            <td>{fmt(results?.model_fit?.d_uls, 4)}</td>
+                            <td>{fmt(results?.model_fit?.d_uls, 4)}</td>
+                          </tr>
+                          <tr>
+                            <td>d_G (Geodesic distance)</td>
+                            <td>{fmt(results?.model_fit?.d_g, 4)}</td>
+                            <td>{fmt(results?.model_fit?.d_g, 4)}</td>
+                          </tr>
+                          <tr>
+                            <td>NFI (Normed Fit Index)</td>
+                            <td>{fmt(results?.model_fit?.nfi, 4)}</td>
+                            <td>{fmt(results?.model_fit?.nfi, 4)}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    ) : null}
+                  </div>
+                </div>
+              </main>
+            </div>
+          </div>
+        ) : (
+          /* ═══ MODEL DIAGRAM PREVIEW VIEW ═══ */
+          <div
+            ref={containerRef}
+            style={{
+              flex: 1,
+              position: 'relative',
+              backgroundColor: 'var(--color-bg-base)',
+              overflow: 'hidden',
+              cursor: isPanning ? 'grabbing' : (draggingNodeId ? 'move' : 'grab')
+            }}
+            onMouseDown={(e) => {
+              if (e.button === 0 && !draggingNodeId) {
+                setIsPanning(true);
+                panStartRef.current = { x: e.clientX - panOffset.x, y: e.clientY - panOffset.y };
+              }
+            }}
+            onMouseMove={handleCanvasMouseMove}
+            onMouseUp={handleCanvasMouseUp}
+            onMouseLeave={handleCanvasMouseUp}
+            onWheel={(e) => {
+              e.preventDefault();
+              const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
+              setZoomLevel(prev => Math.max(0.2, Math.min(3, prev * zoomFactor)));
+            }}
+          >
+            {/* Diagram HUD Floating Bar docked on bottom left */}
+            <div
+              className="canvas-hud"
+              style={{
+                position: 'absolute',
+                bottom: '16px',
+                left: '24px',
+                right: 'auto',
+                width: 'fit-content',
+                transform: 'none',
+                zIndex: 10,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}
+            >
+              <div className="hud-zoom">
+                <div
+                  className="hud-zoom__btn"
+                  onClick={() => setZoomLevel(z => Math.max(0.2, z - 0.1))}
+                  title="Zoom Out"
+                >
+                  −
+                </div>
+                <div
+                  className="hud-zoom__level"
+                  onClick={() => {
+                    setZoomLevel(1);
+                    centerDiagram(layoutNodes.length > 0 ? layoutNodes : (layout?.nodes || []));
+                  }}
+                  title="Reset Zoom"
+                >
+                  {Math.round(zoomLevel * 100)}%
+                </div>
+                <div
+                  className="hud-zoom__btn"
+                  onClick={() => setZoomLevel(z => Math.min(3, z + 0.1))}
+                  title="Zoom In"
+                >
+                  +
+                </div>
+              </div>
+              <div
+                className="hud-btn"
+                onClick={() => {
+                  setZoomLevel(1);
+                  centerDiagram(layoutNodes.length > 0 ? layoutNodes : (layout?.nodes || []));
+                }}
+                title="Fit to Center"
+              >
+                <Maximize2 size={13} />
+                <span>Fit</span>
+              </div>
+              <div
+                className="hud-btn"
+                onClick={handleAutoAlign}
+                title="Auto-Align Layout"
+              >
+                <LayoutGrid size={13} />
+                <span>Auto Align</span>
+              </div>
+              <div
+                className="hud-btn"
+                onClick={handleDownloadPNG}
+                title="Download PNG"
+              >
+                <Download size={13} />
+                <span>Download PNG</span>
+              </div>
+            </div>
+
+            {/* Interactive SVG Renderer */}
+            {(() => {
+              const displayNodes = layoutNodes.length > 0 ? layoutNodes : (layout?.nodes || []);
+              return (
+                <svg
+                  ref={svgRef}
+                  width="100%"
+                  height="100%"
+                  style={{ display: 'block', width: '100%', height: '100%' }}
+                >
+                  <defs>
+                    <pattern id="dot-grid-snap" width={20} height={20} patternUnits="userSpaceOnUse">
+                      <circle cx={2} cy={2} r={1} fill="var(--canvas-dot-color, rgba(100, 116, 139, 0.25))" />
+                    </pattern>
+                    <marker id="snap-arrowhead" markerWidth={10} markerHeight={7} refX={9} refY="3.5" orient="auto">
+                      <polygon points="0 0, 10 3.5, 0 7" fill="var(--canvas-edge-stroke, #64748b)" />
+                    </marker>
+                  </defs>
+                  <rect width="100%" height="100%" fill="url(#dot-grid-snap)" />
+
+                  <g transform={`translate(${panOffset.x}, ${panOffset.y}) scale(${zoomLevel})`}>
+                    {/* 1. Measurement Indicator Lines (Parent Latent to Indicator) */}
+                    {displayNodes.filter((n: any) => !n.isLatent && n.parentId).map((indNode: any) => {
+                      const parentNode = displayNodes.find((n: any) => n.id === indNode.parentId);
+                      if (!parentNode) return null;
+                      const isFormative = parentNode.type === 'formative';
+                      const x1 = isFormative ? indNode.x : parentNode.x;
+                      const y1 = isFormative ? indNode.y : parentNode.y;
+                      const x2 = isFormative ? parentNode.x : indNode.x;
+                      const y2 = isFormative ? parentNode.y : indNode.y;
+                      return (
+                        <g key={`ind-link-${indNode.id}`}>
+                          <line
+                            x1={x1}
+                            y1={y1}
+                            x2={x2}
+                            y2={y2}
+                            stroke="var(--canvas-edge-stroke, #64748b)"
+                            strokeWidth="1.5"
+                            markerEnd="url(#snap-arrowhead)"
+                          />
+                        </g>
+                      );
+                    })}
+
+                    {/* 2. Structural Paths (Latent to Latent Edges) */}
+                    {layout?.edges?.map((edge: any) => {
+                      const srcNode = displayNodes.find((n: any) => n.id === edge.sourceId);
+                      const tgtNode = displayNodes.find((n: any) => n.id === edge.targetId);
+                      if (!srcNode || !tgtNode) return null;
+
+                      const x1 = srcNode.x;
+                      const y1 = srcNode.y;
+                      const x2 = tgtNode.x;
+                      const y2 = tgtNode.y;
+                      const midX = (x1 + x2) / 2;
+                      const midY = (y1 + y2) / 2;
+
+                      // Find beta coefficient if structural
+                      const beta = results?.structural?.path_coefficients?.[tgtNode.label]?.[srcNode.label] ??
+                        results?.structural?.path_coefficients?.[tgtNode.id]?.[srcNode.id];
+
+                      return (
+                        <g key={edge.id || `${edge.sourceId}-${edge.targetId}`}>
+                          <line
+                            x1={x1}
+                            y1={y1}
+                            x2={x2}
+                            y2={y2}
+                            stroke="var(--canvas-edge-stroke, #64748b)"
+                            strokeWidth="1.8"
+                            markerEnd="url(#snap-arrowhead)"
+                          />
+                          {beta !== undefined && (
+                            <g transform={`translate(${midX}, ${midY - 8})`}>
+                              <rect
+                                x="-22"
+                                y="-10"
+                                width="44"
+                                height="18"
+                                rx="4"
+                                fill="var(--canvas-badge-bg, #ffffff)"
+                                stroke="var(--canvas-badge-border, #cbd5e1)"
+                                strokeWidth="1"
+                              />
+                              <text
+                                x="0"
+                                y="3"
+                                textAnchor="middle"
+                                fontSize="11"
+                                fontWeight="600"
+                                fill="var(--color-accent, #6366f1)"
+                              >
+                                {fmt(beta, 3)}
+                              </text>
+                            </g>
+                          )}
+                        </g>
+                      );
+                    })}
+
+                    {/* 3. Nodes */}
+                    {displayNodes.map((node: any) => {
+                      const isLatent = node.isLatent !== false && !node.isText;
+                      const isText = !!node.isText;
+                      const r2 = results?.structural?.r_squared?.[node.label] ?? results?.structural?.r_squared?.[node.id];
+
+                      if (isText) {
+                        return (
+                          <g
+                            key={node.id}
+                            transform={`translate(${node.x}, ${node.y})`}
+                            onMouseDown={(e) => handleNodeMouseDown(e, node.id)}
+                            style={{ cursor: 'move', pointerEvents: 'all' }}
+                          >
+                            <text
+                              fontSize={node.fontSize || 13}
+                              fill="var(--color-text-primary)"
+                              style={{ userSelect: 'none' }}
+                            >
+                              {node.label || node.text}
+                            </text>
+                          </g>
+                        );
+                      }
+
+                      if (isLatent) {
+                        return (
+                          <g
+                            key={node.id}
+                            transform={`translate(${node.x}, ${node.y})`}
+                            onMouseDown={(e) => handleNodeMouseDown(e, node.id)}
+                            style={{ cursor: 'move', pointerEvents: 'all' }}
+                          >
+                            <circle
+                              r={node.r || 36}
+                              fill={node.fill || "var(--canvas-latent-fill, #334155)"}
+                              stroke={node.stroke || "var(--canvas-latent-stroke, #1e293b)"}
+                              strokeWidth="2"
+                            />
+                            <text
+                              textAnchor="middle"
+                              y={r2 !== undefined ? -4 : 4}
+                              fontSize="12"
+                              fontWeight="600"
+                              fill={node.textColor || "var(--canvas-latent-text, #ffffff)"}
+                              style={{ userSelect: 'none' }}
+                            >
+                              {node.label}
+                            </text>
+                            {r2 !== undefined && (
+                              <text
+                                textAnchor="middle"
+                                y="14"
+                                fontSize="10"
+                                fontWeight="500"
+                                fill="var(--color-accent, #6366f1)"
+                                style={{ userSelect: 'none' }}
+                              >
+                                R² = {fmt(r2, 3)}
+                              </text>
+                            )}
+                          </g>
+                        );
+                      }
+
+                      // Indicator (Manifest variable)
+                      return (
+                        <g
+                          key={node.id}
+                          transform={`translate(${node.x - 35}, ${node.y - 14})`}
+                          onMouseDown={(e) => handleNodeMouseDown(e, node.id)}
+                          style={{ cursor: 'move', pointerEvents: 'all' }}
+                        >
+                          <rect
+                            width="70"
+                            height="28"
+                            rx="4"
+                            fill={node.fill || "var(--canvas-manifest-fill, #fef08a)"}
+                            stroke={node.stroke || "var(--canvas-manifest-stroke, #ca8a04)"}
+                            strokeWidth="1.5"
+                          />
+                          <text
+                            x="35"
+                            y="18"
+                            textAnchor="middle"
+                            fontSize="11"
+                            fontWeight="500"
+                            fill={node.textColor || "var(--canvas-manifest-text, #422006)"}
+                            style={{ userSelect: 'none' }}
+                          >
+                            {node.label}
+                          </text>
+                        </g>
+                      );
+                    })}
+                  </g>
+                </svg>
+              );
+            })()}
+          </div>
+        )}
+
+        {/* ═══ EDIT MODEL MODAL ═══ */}
+        {isEditModalOpen && (
+          <div style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+          }}>
+            <div style={{
+              backgroundColor: 'var(--color-bg-base)',
+              color: 'var(--color-text-primary)',
+              borderRadius: '12px',
+              width: '440px',
+              maxWidth: '92vw',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.08)',
+              overflow: 'hidden',
+              border: '1px solid var(--color-border-subtle)',
+            }}>
+              <div style={{
+                padding: '18px 20px',
+                borderBottom: '1px solid var(--color-border-subtle)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+              }}>
+                <div style={{
+                  width: '36px',
+                  height: '36px',
+                  borderRadius: '8px',
+                  backgroundColor: 'var(--color-accent-subtle)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--color-accent)',
+                  flexShrink: 0,
+                }}>
+                  <Edit3 size={18} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
+                    Create Editable Model from Snapshot
+                  </h3>
+                  <p style={{ margin: '2px 0 0', fontSize: '12px', color: 'var(--color-text-secondary)' }}>
+                    Creates a new model in this study initialized with this snapshot's diagram
+                  </p>
+                </div>
+              </div>
+
+              <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: '6px' }}>
+                    New Model Name
+                  </label>
+                  <input
+                    type="text"
+                    value={newModelName}
+                    onChange={(e) => setNewModelName(e.target.value)}
+                    placeholder="Enter model name..."
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px',
+                      fontSize: '13px',
+                      borderRadius: '6px',
+                      border: '1px solid var(--color-border-default)',
+                      background: 'var(--color-bg-raised)',
+                      color: 'var(--color-text-primary)',
+                      outline: 'none',
+                      boxSizing: 'border-box'
+                    }}
+                    autoFocus
+                  />
+                </div>
+
+                <div style={{
+                  padding: '10px 12px',
+                  borderRadius: '6px',
+                  backgroundColor: 'var(--color-bg-raised)',
+                  border: '1px solid var(--color-border-subtle)',
+                  fontSize: '12px',
+                  color: 'var(--color-text-secondary)'
+                }}>
+                  Target Study: <strong style={{ color: 'var(--color-text-primary)' }}>{activeStudy?.name}</strong>
+                </div>
+              </div>
+
+              <div style={{
+                padding: '12px 20px',
+                backgroundColor: 'var(--color-bg-raised)',
+                borderTop: '1px solid var(--color-border-subtle)',
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: '10px',
+              }}>
+                <button
+                  type="button"
+                  onClick={() => setIsEditModalOpen(false)}
+                  disabled={isCreatingModel}
+                  style={{
+                    padding: '7px 14px',
+                    backgroundColor: 'transparent',
+                    color: 'var(--color-text-primary)',
+                    border: '1px solid var(--color-border-default)',
+                    borderRadius: '6px',
+                    fontSize: '13px',
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCreateModel}
+                  disabled={isCreatingModel || !newModelName.trim()}
+                  style={{
+                    padding: '7px 16px',
+                    backgroundColor: 'var(--color-accent)',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    fontSize: '13px',
+                    fontWeight: 500,
+                    cursor: isCreatingModel || !newModelName.trim() ? 'not-allowed' : 'pointer',
+                    opacity: isCreatingModel || !newModelName.trim() ? 0.6 : 1,
+                  }}
+                >
+                  {isCreatingModel ? 'Creating...' : 'Create & Open Model'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ═══ Copy Toast Notification ═══ */}
+        {copyToast && (
+          <div style={{
+            position: 'fixed',
+            bottom: '24px',
+            right: '24px',
+            backgroundColor: '#0f172a',
+            color: '#ffffff',
+            padding: '10px 18px',
+            borderRadius: '8px',
+            fontSize: '13px',
+            fontWeight: 500,
+            boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            zIndex: 9999,
+          }}>
+            <span style={{ color: '#10b981' }}>✓</span> {copyToast}
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+};
+
+export default SnapshotView;

@@ -5,7 +5,8 @@
 /* ─── Sub-header / Control Bar ───────────────────────────────────────────── */
 
 .subheader {
-  height: 38px;
+  height: 44px;
+  box-sizing: border-box;
   background-color: var(--color-bg-base);
   border-bottom: 1px solid var(--color-border-subtle);
   padding: 0 14px;
@@ -324,6 +325,12 @@
 /* Variable items */
 .var-items { background: var(--color-bg-base); }
 .var-items.hidden { display: none; }
+.var-cat__header {
+  cursor: grab;
+}
+.var-cat__header:active {
+  cursor: grabbing;
+}
 .var-item {
   height: 26px;
   padding: 0 12px 0 24px;
@@ -331,8 +338,14 @@
   cursor: grab;
   transition: background-color var(--transition-fast), color var(--transition-fast);
   color: var(--color-text-secondary);
+  user-select: none;
 }
 .var-item:hover { background: var(--color-accent-subtle); color: var(--color-text-primary); }
+.var-item.selected {
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+  font-weight: 600;
+}
 .var-item:active { cursor: grabbing; }
 .var-item__name { font-family: var(--font-mono); font-size: var(--text-xs); }
 .var-item__type {
@@ -341,7 +354,11 @@
   padding: 1px 4px; border-radius: 3px;
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
-.var-item:hover .var-item__type { background: var(--color-accent-subtle); color: var(--color-accent); }
+[data-theme="dark"] .var-item__type {
+  background: rgba(255, 255, 255, 0.08);
+}
+.var-item:hover .var-item__type,
+.var-item.selected .var-item__type { background: var(--color-accent-subtle); color: var(--color-accent); }
 
 
 /* ─── Canvas Area ─────────────────────────────────────────────────────────── */
@@ -684,4 +701,49 @@
 
 .latent-r2-display .r2-sublabel {
   fill: rgba(255, 255, 255, 0.82);
+}
+
+/* ─── Canvas Theme Support (Dark & Light) ─────────────────────────────────── */
+:root {
+  --canvas-dot-color: rgba(100, 116, 139, 0.25);
+  --canvas-latent-fill: #334155;
+  --canvas-latent-stroke: #1e293b;
+  --canvas-latent-text: #ffffff;
+  --canvas-manifest-fill: #fef08a;
+  --canvas-manifest-stroke: #ca8a04;
+  --canvas-manifest-text: #422006;
+  --canvas-edge-stroke: #64748b;
+  --canvas-badge-bg: #ffffff;
+  --canvas-badge-border: #cbd5e1;
+  --canvas-badge-text: #334155;
+}
+
+[data-theme="dark"] {
+  --canvas-dot-color: rgba(255, 255, 255, 0.15);
+  --canvas-latent-fill: #e2e8f0;
+  --canvas-latent-stroke: #94a3b8;
+  --canvas-latent-text: #0f172a;
+  --canvas-manifest-fill: #451a03;
+  --canvas-manifest-stroke: #b45309;
+  --canvas-manifest-text: #fef08a;
+  --canvas-edge-stroke: #94a3b8;
+  --canvas-badge-bg: #27272a;
+  --canvas-badge-border: #52525b;
+  --canvas-badge-text: #f8fafc;
+}
+
+.hud-zoom__level-input {
+  width: 42px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  text-align: center;
+  padding: 0;
+  margin: 0;
+  outline: none;
+  box-shadow: none;
 }

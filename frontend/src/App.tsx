@@ -14,6 +14,7 @@ import DocsView from './pages/DocsView';
 import SamplesView from './pages/SamplesView';
 import FeedbackView from './pages/FeedbackView';
 import ChangelogView from './pages/ChangelogView';
+import SnapshotView from './pages/SnapshotView';
 
 import { api } from './utils/api';
 import { applyAccentColor } from './utils/theme';
@@ -135,6 +136,9 @@ function App() {
     }
     if (activeTab.type === 'changelog') {
       return <ChangelogView key={activeTab.id} />;
+    }
+    if (activeTab.type === 'snapshot') {
+      return <SnapshotView key={activeTab.id} />;
     }
     return <GetStarted />;
   };

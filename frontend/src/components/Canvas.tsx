@@ -24,28 +24,28 @@ const Canvas = () => {
           </marker>
           {/* User Defined Markers */}
           <marker id="arrow-solid" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
-            <polygon points="1 2, 9 5, 1 8" fill="#1e293b"/>
+            <polygon points="1 2, 9 5, 1 8" fill="var(--color-text-primary)"/>
           </marker>
           <marker id="arrow-solid-selected" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
             <polygon points="1 2, 9 5, 1 8" fill="var(--color-accent)"/>
           </marker>
           
           <marker id="arrow-open" markerWidth="10" markerHeight="10" refX="7" refY="5" orient="auto">
-            <path d="M 2 2 L 8 5 L 2 8" fill="none" stroke="#1e293b" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M 2 2 L 8 5 L 2 8" fill="none" stroke="var(--color-text-primary)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
           </marker>
           <marker id="arrow-open-selected" markerWidth="10" markerHeight="10" refX="7" refY="5" orient="auto">
             <path d="M 2 2 L 8 5 L 2 8" fill="none" stroke="var(--color-accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
           </marker>
 
           <marker id="arrow-diamond" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
-            <polygon points="5 1.5, 8.5 5, 5 8.5, 1.5 5" fill="#1e293b"/>
+            <polygon points="5 1.5, 8.5 5, 5 8.5, 1.5 5" fill="var(--color-text-primary)"/>
           </marker>
           <marker id="arrow-diamond-selected" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
             <polygon points="5 1.5, 8.5 5, 5 8.5, 1.5 5" fill="var(--color-accent)"/>
           </marker>
 
           <marker id="arrow-circle" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
-            <circle cx="5" cy="5" r="3" fill="#1e293b"/>
+            <circle cx="5" cy="5" r="3" fill="var(--color-text-primary)"/>
           </marker>
           <marker id="arrow-circle-selected" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
             <circle cx="5" cy="5" r="3" fill="var(--color-accent)"/>

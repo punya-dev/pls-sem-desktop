@@ -18,6 +18,7 @@ const Dashboard = () => {
     datasetsByStudy, setStudyDataset, touchStudy, archiveWorkspace, restoreWorkspace, renameWorkspace,
     deleteWorkspace, deleteStudy, deleteModel, deleteDataset, requestDelete,
     renameStudy, duplicateStudy, renameModel, duplicateModel, openTab,
+    snapshotsByStudy, setStudySnapshots, removeStudySnapshot,
     isSidebarCollapsed, toggleSidebar
   } = useStore();
   
@@ -26,6 +27,18 @@ const Dashboard = () => {
       setActiveWorkspace(workspaces[0].id);
     }
   }, [activeWorkspaceId, workspaces, setActiveWorkspace]);
+
+  useEffect(() => {
+    studies.forEach(study => {
+      if (study.path) {
+        api.listSnapshots(study.path).then(snaps => {
+          if (Array.isArray(snaps)) {
+            setStudySnapshots(study.path, snaps);
+          }
+        }).catch(() => {});
+      }
+    });
+  }, [studies]);
 
   const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = useState(false);
   const [isWorkspaceSearchOpen, setIsWorkspaceSearchOpen] = useState(false);
@@ -313,7 +326,7 @@ const Dashboard = () => {
                           }
                         },
                         {
-                          id: 'duplicate', label: 'Duplicate Workspace', icon: 'content_copy', action: () => useStore.getState().addWorkspace({ ...ws, id: `ws_${Date.now()}`, name: `${ws.name} copy` })
+                          id: 'duplicate', label: 'Duplicate Workspace', icon: 'content_copy', action: () => useStore.getState().duplicateWorkspace(ws.id)
                         },
                         {
                           id: 'archive', label: 'Archive Workspace', icon: 'inventory_2', action: () => archiveWorkspace(ws.id)
@@ -573,7 +586,9 @@ const Dashboard = () => {
                 {sortedStudies.map(study => {
                   const studyModels = models.filter(m => m.studyId === study.id);
                   const studyDataset = datasetsByStudy[study.id];
-                  const isEmpty = studyModels.length === 0 && !studyDataset;
+                  const studySnapshots = (study.path ? snapshotsByStudy[study.path] : null) || snapshotsByStudy[study.id] || [];
+                  const totalItems = studyModels.length + (studyDataset ? 1 : 0) + studySnapshots.length;
+                  const isEmpty = totalItems === 0;
                   const isExpanded = expandedStudies.has(study.id);
                   
                   return (
@@ -644,7 +659,7 @@ const Dashboard = () => {
                             </span>
                           )}
                           <span className="study-row__count">
-                            {isEmpty ? 'Empty' : `${studyModels.length + (studyDataset ? 1 : 0)} item${studyModels.length + (studyDataset ? 1 : 0) === 1 ? '' : 's'}`}
+                            {isEmpty ? 'Empty' : `${totalItems} item${totalItems === 1 ? '' : 's'}`}
                           </span>
                           {isEmpty && (
                             <div className="study-row__actions">
@@ -812,6 +827,72 @@ const Dashboard = () => {
                                 <div className="file-row__meta">
                                   <span className="file-row__time">{model.lastModified}</span>
                                   <span style={{width: '16px'}}></span>
+                                </div>
+                              </div>
+                            ))}
+                            {studySnapshots.map(snapshot => (
+                              <div
+                                key={snapshot.id}
+                                className="file-row"
+                                onClick={() => {
+                                  setActiveStudy(study.id);
+                                  openTab({
+                                    type: 'snapshot',
+                                    title: snapshot.name,
+                                    snapshotId: snapshot.id,
+                                    studyId: study.id,
+                                    workspaceId: activeWorkspaceId,
+                                  });
+                                }}
+                                onContextMenu={e => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  useStore.getState().openContextMenu(e.clientX, e.clientY, [
+                                    {
+                                      id: 'open-snapshot',
+                                      label: 'Open Snapshot',
+                                      icon: 'visibility',
+                                      action: () => {
+                                        setActiveStudy(study.id);
+                                        openTab({
+                                          type: 'snapshot',
+                                          title: snapshot.name,
+                                          snapshotId: snapshot.id,
+                                          studyId: study.id,
+                                          workspaceId: activeWorkspaceId,
+                                        });
+                                      }
+                                    },
+                                    {
+                                      id: 'delete-snapshot',
+                                      label: 'Delete Snapshot',
+                                      icon: 'delete',
+                                      danger: true,
+                                      action: () => {
+                                        requestDelete({
+                                          title: 'Delete Snapshot',
+                                          itemName: snapshot.name,
+                                          message: 'Are you sure? This snapshot will be permanently deleted.',
+                                          onConfirm: async () => {
+                                            if (study.path) {
+                                              await api.deleteSnapshot(study.path, snapshot.id);
+                                              removeStudySnapshot(study.path, snapshot.id);
+                                            }
+                                          }
+                                        });
+                                      }
+                                    }
+                                  ]);
+                                }}
+                              >
+                                <div className="file-row__left">
+                                  <span className="material-symbols-outlined" style={{ color: 'var(--color-accent)' }}>history</span>
+                                  <span>{snapshot.name}</span>
+                                  <span className="file-badge file-badge--accent" style={{ fontSize: '10px' }}>Snapshot</span>
+                                </div>
+                                <div className="file-row__meta">
+                                  <span className="file-row__time">{new Date(snapshot.created_at).toLocaleDateString()}</span>
+                                  <span style={{ width: '16px' }}></span>
                                 </div>
                               </div>
                             ))}

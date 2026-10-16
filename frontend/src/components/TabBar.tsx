@@ -251,6 +251,8 @@ export const TabBar: React.FC = () => {
         return 'science';
       case 'feedback':
         return 'feedback';
+      case 'snapshot':
+        return 'history';
       default:
         return null;
     }

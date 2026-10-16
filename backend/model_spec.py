@@ -54,6 +54,7 @@ class SaveModelRequest(BaseModel):
     project_path: str
     spec: ModelSpec
     diagram_layout: Optional[Dict[str, Any]] = None
+    model_id: Optional[str] = None
 
 
 class RunPlsRequest(BaseModel):
@@ -71,6 +72,8 @@ class RunPlsRequest(BaseModel):
     n_boot: int = 500
     missing_treatment: str = "mean"
     missing_values: Optional[List[str]] = None
+    model_id: Optional[str] = None
+    diagram_layout: Optional[Dict[str, Any]] = None
 
 
 class BootstrapStartRequest(BaseModel):
@@ -89,5 +92,7 @@ class BootstrapStartRequest(BaseModel):
     sign_alignment: bool = True
     missing_treatment: str = "mean"
     missing_values: Optional[List[str]] = None
+    model_id: Optional[str] = None
+    diagram_layout: Optional[Dict[str, Any]] = None
 
 
