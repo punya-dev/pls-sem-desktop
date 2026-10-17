@@ -136,7 +136,7 @@ def analyze_fimix(
     """
     Main entry point for FIMIX-PLS unobserved heterogeneity analysis (LAT-01 to LAT-05).
     """
-    spec_dict = spec.model_dump(by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
+    spec_dict = spec.model_dump(mode="json", by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
     cfg = settings or PipelineSettings()
 
     # Step 1: Global PLS estimation to obtain latent construct scores

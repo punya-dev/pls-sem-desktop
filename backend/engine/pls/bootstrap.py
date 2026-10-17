@@ -289,7 +289,7 @@ class ParallelBootstrapper:
             sign_change = "construct" if sign_alignment else "none"
         from engine.pls.algorithm import PLSAlgorithm
 
-        spec_dict = model_spec.model_dump(by_alias=True) if hasattr(model_spec, "model_dump") else (model_spec if isinstance(model_spec, dict) else {})
+        spec_dict = model_spec.model_dump(mode="json", by_alias=True) if hasattr(model_spec, "model_dump") else (model_spec if isinstance(model_spec, dict) else {})
 
         base_algo = PLSAlgorithm(
             scheme=scheme,

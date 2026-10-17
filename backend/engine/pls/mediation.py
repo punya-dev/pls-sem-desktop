@@ -117,7 +117,7 @@ def analyze_mediation(
     source_construct = src
     target_construct = tgt
 
-    spec_dict = spec.model_dump(by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
+    spec_dict = spec.model_dump(mode="json", by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
     cfg = settings or PipelineSettings()
 
     # 1. Main model estimation

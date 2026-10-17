@@ -222,7 +222,7 @@ def run_blindfolding(
     Main entry point for Blindfolding analysis (BLI-01 to BLI-10).
     Computes Q^2 redundancy & communality, and q^2 effect sizes.
     """
-    spec_dict = spec.model_dump(by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
+    spec_dict = spec.model_dump(mode="json", by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
     cfg = settings or PipelineSettings()
 
     # Identify reflective constructs & indicators

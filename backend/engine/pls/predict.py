@@ -45,7 +45,7 @@ def run_pls_predict(
     """
     Executes PLSpredict with k-fold cross-validation and LM benchmark comparison.
     """
-    spec_dict = model_spec.model_dump(by_alias=True) if hasattr(model_spec, "model_dump") else (
+    spec_dict = model_spec.model_dump(mode="json", by_alias=True) if hasattr(model_spec, "model_dump") else (
         model_spec if isinstance(model_spec, dict) else {}
     )
 

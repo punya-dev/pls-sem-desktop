@@ -244,7 +244,7 @@ def analyze_hcm(
     """
     Main entry point for Hierarchical Component Model analysis (HCM-01 to HCM-08).
     """
-    spec_dict = spec.model_dump(by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
+    spec_dict = spec.model_dump(mode="json", by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
     cfg = settings or PipelineSettings()
 
     # Blocking centroid weighting with HCM (HCM-06)

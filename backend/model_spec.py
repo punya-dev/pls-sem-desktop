@@ -7,6 +7,9 @@ class ConstructType(str, Enum):
     REFLECTIVE = "reflective"
     FORMATIVE = "formative"
 
+    def __str__(self) -> str:
+        return str(self.value)
+
 
 class Construct(BaseModel):
     model_config = ConfigDict(populate_by_name=True)

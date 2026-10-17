@@ -131,7 +131,7 @@ def analyze_mga(
     """
     Executes comprehensive Multigroup Analysis (MGA-01 to MGA-09).
     """
-    spec_dict = spec.model_dump(by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
+    spec_dict = spec.model_dump(mode="json", by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
     cfg = settings or PipelineSettings()
 
     # 1. Group definition & sample size checks (MGA-01, MGA-02)

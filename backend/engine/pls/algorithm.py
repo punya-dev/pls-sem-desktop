@@ -77,7 +77,7 @@ def calculate_vif(X: np.ndarray) -> List[float]:
 def parse_model_spec(model_spec: Any) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, str], List[Tuple[str, str]]]:
     """Parses model_spec into constructs dict, indicator_col_map, and paths list."""
     if hasattr(model_spec, "model_dump"):
-        spec_dict = model_spec.model_dump(by_alias=True)
+        spec_dict = model_spec.model_dump(mode="json", by_alias=True)
     elif isinstance(model_spec, dict):
         spec_dict = model_spec
     else:
@@ -86,7 +86,20 @@ def parse_model_spec(model_spec: Any) -> Tuple[Dict[str, Dict[str, Any]], Dict[s
     constructs = {}
     for c in spec_dict.get("constructs", []):
         cid = str(c["id"])
-        c_type = str(c.get("type", "reflective")).lower()
+        c_raw = c.get("type", "reflective")
+        if hasattr(c_raw, "value"):
+            c_val = str(c_raw.value).lower()
+        else:
+            c_val = str(c_raw).lower()
+        c_type = "formative" if "formative" in c_val else "reflective"
+
+        raw_mode = c.get("outer_mode")
+        if raw_mode:
+            raw_mode_str = str(raw_mode).upper()
+            c_mode = "B" if "B" in raw_mode_str else "A"
+        else:
+            c_mode = "B" if c_type == "formative" else "A"
+
         constructs[cid] = {
             "id": cid,
             "name": c.get("name", cid),
@@ -94,7 +107,7 @@ def parse_model_spec(model_spec: Any) -> Tuple[Dict[str, Dict[str, Any]], Dict[s
             "indicators": list(c.get("indicators", [])),
             "weighting": c.get("weighting", "estimated"),
             "predefined_weights": c.get("predefined_weights", {}),
-            "outer_mode": c.get("outer_mode", None),
+            "outer_mode": c_mode,
         }
 
     indicator_col_map = {}
@@ -662,7 +675,7 @@ def run_pipeline(
     )
 
     # 7. Consistent PLS (PLSc) disattenuation if requested (Section 23)
-    spec_dict = model_spec.model_dump(by_alias=True) if hasattr(model_spec, "model_dump") else (model_spec if isinstance(model_spec, dict) else {})
+    spec_dict = model_spec.model_dump(mode="json", by_alias=True) if hasattr(model_spec, "model_dump") else (model_spec if isinstance(model_spec, dict) else {})
     if cfg.consistent:
         from engine.pls.plsc import apply_plsc_correction
         raw_results = apply_plsc_correction(raw_results, spec_dict=spec_dict, n_samples=n_samples)

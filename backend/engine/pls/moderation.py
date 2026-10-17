@@ -129,7 +129,7 @@ def analyze_moderation(
     3. Bootstraps interaction significance and simple slopes
     4. Computes Kenny (2016) moderation effect size f^2
     """
-    spec_dict = spec.model_dump(by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
+    spec_dict = spec.model_dump(mode="json", by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
     cfg = settings or PipelineSettings()
 
     # Step 1: Main effects model (without interaction term)

@@ -79,7 +79,7 @@ def run_micom(
     """
     Executes the full 3-step MICOM procedure (MIC-01 to MIC-05).
     """
-    spec_dict = spec.model_dump(by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
+    spec_dict = spec.model_dump(mode="json", by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
     cfg = settings or PipelineSettings()
 
     # Split groups

@@ -25,7 +25,7 @@ def analyze_ipma(
     """
     Executes Importance-Performance Map Analysis on a target endogenous construct.
     """
-    spec_dict = spec.model_dump(by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
+    spec_dict = spec.model_dump(mode="json", by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
     cfg = settings or PipelineSettings()
     bounds = scale_bounds or {}
 

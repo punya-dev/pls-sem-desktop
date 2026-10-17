@@ -1319,7 +1319,7 @@ def run_project_pls(req: RunPlsRequest):
             res["significance"] = algo.bootstrap(df, spec, n_boot=req.n_boot)
 
         # 5. Persist results in project file scoped to model_id
-        spec_dict = spec.model_dump(by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else None)
+        spec_dict = spec.model_dump(mode="json", by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else None)
         project_io.save_results(
             req.project_path,
             "pls",
@@ -1470,7 +1470,7 @@ async def start_bootstrap_job(req: BootstrapStartRequest):
             base_res["significance"] = boot_res
 
             # Save full results with significance to project scoped to model_id
-            spec_dict = spec.model_dump(by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else None)
+            spec_dict = spec.model_dump(mode="json", by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else None)
             project_io.save_results(
                 req.project_path,
                 "pls",

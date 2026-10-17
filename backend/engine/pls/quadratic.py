@@ -29,7 +29,7 @@ def analyze_quadratic_effect(
     """
     Evaluates quadratic non-linear effect: target ~ source + (source)^2.
     """
-    spec_dict = spec.model_dump(by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
+    spec_dict = spec.model_dump(mode="json", by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
     cfg = settings or PipelineSettings()
 
     # Step 1: Main linear model

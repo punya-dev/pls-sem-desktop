@@ -27,7 +27,7 @@ def analyze_pos(
     """
     Executes Prediction-Oriented Segmentation (PLS-POS) (LAT-06, LAT-07).
     """
-    spec_dict = spec.model_dump(by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
+    spec_dict = spec.model_dump(mode="json", by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
     cfg = settings or PipelineSettings()
     S = n_segments
     N = len(df)

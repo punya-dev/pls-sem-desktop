@@ -149,7 +149,7 @@ def run_cta_pls(
     """
     Executes Confirmatory Tetrad Analysis (CTA-PLS) (CTA-01 to CTA-06).
     """
-    spec_dict = spec.model_dump(by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
+    spec_dict = spec.model_dump(mode="json", by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
     constructs = spec_dict.get("constructs", [])
 
     # Filter constructs to analyze
