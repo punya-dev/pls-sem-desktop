@@ -39,6 +39,7 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
 
   const wsRef = useRef<WebSocket | null>(null);
   const pollIntervalRef = useRef<any>(null);
+  const hasCompletedRef = useRef<boolean>(false);
 
   useEffect(() => {
     if (!isOpen) {
@@ -48,6 +49,7 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
       setPercent(0);
       setElapsedSec(0);
       setErrorMsg(null);
+      hasCompletedRef.current = false;
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;
@@ -61,6 +63,7 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
 
   const handleStart = async () => {
     try {
+      hasCompletedRef.current = false;
       setStage('running');
       setCurrent(0);
       setTotal(nBoot);
@@ -88,27 +91,39 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
       const currentJobId = startRes.job_id;
       setJobId(currentJobId);
 
+      const markJobCompleted = (data: { total?: number; elapsed_sec?: number; results?: any }) => {
+        if (hasCompletedRef.current) return;
+        hasCompletedRef.current = true;
+        if (pollIntervalRef.current) {
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+        }
+        if (wsRef.current) {
+          try { wsRef.current.close(); } catch {}
+          wsRef.current = null;
+        }
+        setCurrent(data.total || nBoot);
+        setPercent(100);
+        setElapsedSec(data.elapsed_sec || 0);
+        setStage('completed');
+        if (data.results) {
+          onComplete(data.results);
+        }
+      };
+
       // Connect WebSocket
       const ws = api.createBootstrapWebSocket(
         currentJobId,
         (msg: any) => {
           if (msg.type === 'progress') {
-            setCurrent(msg.current);
-            setTotal(msg.total);
-            setPercent(msg.percent);
-            setElapsedSec(msg.elapsed_sec || 0);
+            if (!hasCompletedRef.current) {
+              if (typeof msg.current === 'number') setCurrent(msg.current);
+              if (typeof msg.total === 'number') setTotal(msg.total);
+              if (typeof msg.percent === 'number') setPercent(msg.percent);
+              if (typeof msg.elapsed_sec === 'number') setElapsedSec(msg.elapsed_sec);
+            }
           } else if (msg.type === 'completed') {
-            if (pollIntervalRef.current) {
-              clearInterval(pollIntervalRef.current);
-              pollIntervalRef.current = null;
-            }
-            setCurrent(msg.total || nBoot);
-            setPercent(100);
-            setElapsedSec(msg.elapsed_sec || 0);
-            setStage('completed');
-            if (msg.results) {
-              onComplete(msg.results);
-            }
+            markJobCompleted(msg);
           } else if (msg.type === 'cancelled') {
             if (pollIntervalRef.current) {
               clearInterval(pollIntervalRef.current);
@@ -134,43 +149,42 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
 
       wsRef.current = ws;
 
-      // Status polling fallback to ensure modal completes even if WS drops final packet
+      // Status polling fallback to ensure modal completes even if WS drops packets
       if (pollIntervalRef.current) {
         clearInterval(pollIntervalRef.current);
       }
       pollIntervalRef.current = setInterval(async () => {
         try {
           const statusRes = await api.getBootstrapStatus(currentJobId);
-          if (statusRes && statusRes.status === 'completed') {
-            if (pollIntervalRef.current) {
-              clearInterval(pollIntervalRef.current);
-              pollIntervalRef.current = null;
-            }
-            setCurrent(statusRes.total || nBoot);
-            setPercent(100);
-            setElapsedSec(statusRes.elapsed_sec || 0);
-            setStage('completed');
-            if (statusRes.results) {
-              onComplete(statusRes.results);
-            }
-          } else if (statusRes && statusRes.status === 'failed') {
+          if (!statusRes) return;
+
+          if (statusRes.status === 'completed') {
+            markJobCompleted(statusRes);
+          } else if (statusRes.status === 'failed') {
             if (pollIntervalRef.current) {
               clearInterval(pollIntervalRef.current);
               pollIntervalRef.current = null;
             }
             setStage('error');
             setErrorMsg(statusRes.error || 'Bootstrapping process encountered an error.');
-          } else if (statusRes && statusRes.status === 'cancelled') {
+          } else if (statusRes.status === 'cancelled') {
             if (pollIntervalRef.current) {
               clearInterval(pollIntervalRef.current);
               pollIntervalRef.current = null;
             }
             setStage('cancelled');
+          } else if (statusRes.status === 'running') {
+            if (!hasCompletedRef.current) {
+              if (typeof statusRes.current === 'number') setCurrent(statusRes.current);
+              if (typeof statusRes.total === 'number') setTotal(statusRes.total);
+              if (typeof statusRes.percent === 'number') setPercent(statusRes.percent);
+              if (typeof statusRes.elapsed_sec === 'number') setElapsedSec(statusRes.elapsed_sec);
+            }
           }
         } catch {
           // ignore network polling hiccups
         }
-      }, 600);
+      }, 500);
     } catch (err: any) {
       setStage('error');
       setErrorMsg(err?.message || 'Failed to start bootstrapping.');

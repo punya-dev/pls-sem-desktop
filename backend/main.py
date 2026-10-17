@@ -1,9 +1,11 @@
-from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect, Response
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List, Any, Dict, Set
 import pandas as pd
 import io
+import json
 import asyncio
 import uuid
 import threading
@@ -1356,6 +1358,10 @@ active_bootstrap_jobs: Dict[str, Dict[str, Any]] = {}
 def _ws_json_default(obj):
     if isinstance(obj, np.ndarray):
         return obj.tolist()
+    if hasattr(obj, "tolist"):
+        return obj.tolist()
+    if hasattr(obj, "to_dict"):
+        return obj.to_dict()
     if isinstance(obj, (np.floating, float)):
         return float(obj)
     if isinstance(obj, (np.integer, int)):
@@ -1498,13 +1504,14 @@ async def start_bootstrap_job(req: BootstrapStartRequest):
                 diagram_layout=getattr(req, "diagram_layout", None),
             )
 
+            clean_res = json.loads(json.dumps(base_res, default=_ws_json_default))
             job["status"] = "completed"
-            job["results"] = base_res
+            job["results"] = clean_res
             job["elapsed_sec"] = round(time.time() - job["start_time"], 1)
             msg = {
                 "type": "completed",
                 "job_id": job_id,
-                "results": base_res,
+                "results": clean_res,
                 "elapsed_sec": job["elapsed_sec"],
             }
             _broadcast_ws(job, msg)
@@ -1514,6 +1521,8 @@ async def start_bootstrap_job(req: BootstrapStartRequest):
             msg = {"type": "cancelled", "job_id": job_id, "elapsed_sec": job["elapsed_sec"]}
             _broadcast_ws(job, msg)
         except Exception as exc:
+            import traceback
+            traceback.print_exc()
             job["status"] = "failed"
             job["error"] = str(exc)
             job["elapsed_sec"] = round(time.time() - job["start_time"], 1)
@@ -1567,6 +1576,12 @@ async def ws_bootstrap_progress(websocket: WebSocket, job_id: str):
         return
 
     job["websockets"].add(websocket)
+
+    initial_type = (
+        "completed"
+        if job["status"] == "completed"
+        else ("failed" if job["status"] == "failed" else ("cancelled" if job["status"] == "cancelled" else "progress"))
+    )
 
     # Immediately send current state upon connection
     initial_payload = json.dumps({
