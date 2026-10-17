@@ -260,11 +260,16 @@ def analyze_mga(
         p_names_1 = boot_g1.get("parameter_names", [])
         p_names_2 = boot_g2.get("parameter_names", [])
         if pk in p_names_1 and pk in p_names_2 and samples_mat_g1 is not None and samples_mat_g2 is not None:
-            col_idx_1 = p_names_1.index(pk)
-            col_idx_2 = p_names_2.index(pk)
-            s_g1 = samples_mat_g1[:, col_idx_1]
-            s_g2 = samples_mat_g2[:, col_idx_2]
-            henseler_res = compute_henseler_pls_mga(s_g1, s_g2)
+            mat_g1 = np.asarray(samples_mat_g1)
+            mat_g2 = np.asarray(samples_mat_g2)
+            if mat_g1.ndim == 2 and mat_g2.ndim == 2 and mat_g1.shape[0] > 0 and mat_g2.shape[0] > 0:
+                col_idx_1 = p_names_1.index(pk)
+                col_idx_2 = p_names_2.index(pk)
+                s_g1 = mat_g1[:, col_idx_1]
+                s_g2 = mat_g2[:, col_idx_2]
+                henseler_res = compute_henseler_pls_mga(s_g1, s_g2)
+            else:
+                henseler_res = {"p_value_one_tailed": None, "p_value_two_tailed": None, "is_significant": False}
         else:
             henseler_res = {"p_value_one_tailed": None, "p_value_two_tailed": None, "is_significant": False}
 

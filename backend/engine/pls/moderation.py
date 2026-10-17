@@ -50,11 +50,13 @@ def compute_simple_slopes(
         ci_upper = None
 
         if boot_samples is not None and source_idx is not None and int_idx is not None:
-            # Replicate slopes
-            rep_source = boot_samples[:, source_idx]
-            rep_int = boot_samples[:, int_idx]
-            rep_slopes = rep_source + rep_int * m_val
-            se_slope = float(np.std(rep_slopes, ddof=1))
+            boot_samples_arr = np.asarray(boot_samples)
+            if boot_samples_arr.ndim == 2 and boot_samples_arr.shape[0] > 0:
+                # Replicate slopes
+                rep_source = boot_samples_arr[:, source_idx]
+                rep_int = boot_samples_arr[:, int_idx]
+                rep_slopes = rep_source + rep_int * m_val
+                se_slope = float(np.std(rep_slopes, ddof=1))
             t_slope = (slope / se_slope) if se_slope > 1e-12 else 0.0
             p_slope = 2.0 * (1.0 - stats.norm.cdf(abs(t_slope)))
             ci_lower = float(np.percentile(rep_slopes, 100 * (alpha / 2)))

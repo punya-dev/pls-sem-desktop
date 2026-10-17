@@ -1353,13 +1353,31 @@ def load_project_results(path: str, algorithm: str = "pls", model_id: Optional[s
 active_bootstrap_jobs: Dict[str, Dict[str, Any]] = {}
 
 
+def _ws_json_default(obj):
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, (np.floating, float)):
+        return float(obj)
+    if isinstance(obj, (np.integer, int)):
+        return int(obj)
+    if isinstance(obj, (np.bool_, bool)):
+        return bool(obj)
+    return str(obj)
+
+
 def _broadcast_ws(job: dict, msg: dict):
     loop = job.get("loop")
     if not loop or loop.is_closed():
         return
+    try:
+        payload = json.dumps(msg, default=_ws_json_default)
+    except Exception as e:
+        print(f"Error serializing bootstrap WS message: {e}")
+        return
+
     for ws in list(job.get("websockets", [])):
         try:
-            asyncio.run_coroutine_threadsafe(ws.send_json(msg), loop)
+            asyncio.run_coroutine_threadsafe(ws.send_text(payload), loop)
         except Exception:
             pass
 
@@ -1551,8 +1569,7 @@ async def ws_bootstrap_progress(websocket: WebSocket, job_id: str):
     job["websockets"].add(websocket)
 
     # Immediately send current state upon connection
-    initial_type = "progress" if job["status"] == "running" else job["status"]
-    await websocket.send_json({
+    initial_payload = json.dumps({
         "type": initial_type,
         "job_id": job_id,
         "current": job["current"],
@@ -1561,7 +1578,8 @@ async def ws_bootstrap_progress(websocket: WebSocket, job_id: str):
         "elapsed_sec": round(time.time() - job["start_time"], 1),
         "results": job.get("results"),
         "error": job.get("error"),
-    })
+    }, default=_ws_json_default)
+    await websocket.send_text(initial_payload)
 
     try:
         while True:

@@ -38,6 +38,7 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
+  const pollIntervalRef = useRef<any>(null);
 
   useEffect(() => {
     if (!isOpen) {
@@ -50,6 +51,10 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;
+      }
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
       }
     }
   }, [isOpen]);
@@ -93,6 +98,10 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
             setPercent(msg.percent);
             setElapsedSec(msg.elapsed_sec || 0);
           } else if (msg.type === 'completed') {
+            if (pollIntervalRef.current) {
+              clearInterval(pollIntervalRef.current);
+              pollIntervalRef.current = null;
+            }
             setCurrent(msg.total || nBoot);
             setPercent(100);
             setElapsedSec(msg.elapsed_sec || 0);
@@ -101,8 +110,16 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
               onComplete(msg.results);
             }
           } else if (msg.type === 'cancelled') {
+            if (pollIntervalRef.current) {
+              clearInterval(pollIntervalRef.current);
+              pollIntervalRef.current = null;
+            }
             setStage('cancelled');
           } else if (msg.type === 'failed') {
+            if (pollIntervalRef.current) {
+              clearInterval(pollIntervalRef.current);
+              pollIntervalRef.current = null;
+            }
             setStage('error');
             setErrorMsg(msg.error || 'Bootstrapping process encountered an error.');
           }
@@ -116,6 +133,44 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
       );
 
       wsRef.current = ws;
+
+      // Status polling fallback to ensure modal completes even if WS drops final packet
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
+      pollIntervalRef.current = setInterval(async () => {
+        try {
+          const statusRes = await api.getBootstrapStatus(currentJobId);
+          if (statusRes && statusRes.status === 'completed') {
+            if (pollIntervalRef.current) {
+              clearInterval(pollIntervalRef.current);
+              pollIntervalRef.current = null;
+            }
+            setCurrent(statusRes.total || nBoot);
+            setPercent(100);
+            setElapsedSec(statusRes.elapsed_sec || 0);
+            setStage('completed');
+            if (statusRes.results) {
+              onComplete(statusRes.results);
+            }
+          } else if (statusRes && statusRes.status === 'failed') {
+            if (pollIntervalRef.current) {
+              clearInterval(pollIntervalRef.current);
+              pollIntervalRef.current = null;
+            }
+            setStage('error');
+            setErrorMsg(statusRes.error || 'Bootstrapping process encountered an error.');
+          } else if (statusRes && statusRes.status === 'cancelled') {
+            if (pollIntervalRef.current) {
+              clearInterval(pollIntervalRef.current);
+              pollIntervalRef.current = null;
+            }
+            setStage('cancelled');
+          }
+        } catch {
+          // ignore network polling hiccups
+        }
+      }, 600);
     } catch (err: any) {
       setStage('error');
       setErrorMsg(err?.message || 'Failed to start bootstrapping.');
@@ -123,6 +178,10 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
   };
 
   const handleCancel = async () => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       try {
         wsRef.current.send(JSON.stringify({ action: 'cancel' }));

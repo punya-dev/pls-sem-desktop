@@ -5,11 +5,13 @@ and job status queries.
 """
 
 import asyncio
+import json
 import os
 import threading
 import time
 import uuid
 from typing import Any, Callable, Dict, Optional, Set, List
+import numpy as np
 from fastapi import WebSocket, WebSocketDisconnect
 
 
@@ -87,9 +89,26 @@ class Job:
     def broadcast(self, msg: Dict[str, Any]):
         if not self.loop or self.loop.is_closed():
             return
+
+        def _json_default(obj):
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            if isinstance(obj, (np.floating, float)):
+                return float(obj)
+            if isinstance(obj, (np.integer, int)):
+                return int(obj)
+            if isinstance(obj, (np.bool_, bool)):
+                return bool(obj)
+            return str(obj)
+
+        try:
+            payload = json.dumps(msg, default=_json_default)
+        except Exception:
+            return
+
         for ws in list(self.websockets):
             try:
-                asyncio.run_coroutine_threadsafe(ws.send_json(msg), self.loop)
+                asyncio.run_coroutine_threadsafe(ws.send_text(payload), self.loop)
             except Exception:
                 pass
 

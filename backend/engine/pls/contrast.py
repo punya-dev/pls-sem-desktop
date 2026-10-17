@@ -25,17 +25,19 @@ def compute_contrast(
     """
     Computes a linear contrast theta_c = sum c_p * theta_p across stored bootstrap samples.
     """
-    # If samples_matrix is a numpy 2D array, convert to dictionary by parameter name
-    if isinstance(samples_matrix, np.ndarray):
-        if parameter_names is None:
-            if len(original_parameters) == samples_matrix.shape[1]:
-                parameter_names = list(original_parameters.keys())
-            else:
-                raise ValueError("parameter_names must be provided when samples_matrix is a numpy array.")
-        samples_dict = {
-            name: samples_matrix[:, i].tolist() for i, name in enumerate(parameter_names)
-        }
-        samples_matrix = samples_dict
+    # If samples_matrix is a numpy 2D array or list of lists, convert to dictionary by parameter name
+    if (isinstance(samples_matrix, (np.ndarray, list)) and not isinstance(samples_matrix, dict)):
+        samples_arr = np.asarray(samples_matrix)
+        if samples_arr.ndim == 2:
+            if parameter_names is None:
+                if len(original_parameters) == samples_arr.shape[1]:
+                    parameter_names = list(original_parameters.keys())
+                else:
+                    raise ValueError("parameter_names must be provided when samples_matrix is a numpy array.")
+            samples_dict = {
+                name: samples_arr[:, i].tolist() for i, name in enumerate(parameter_names)
+            }
+            samples_matrix = samples_dict
 
     # 1. Original contrast value
     orig_c = 0.0
