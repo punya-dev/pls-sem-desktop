@@ -60,8 +60,8 @@ function App() {
     };
     window.addEventListener('focus', handleFocus);
 
-    // Periodic safety check every 5 seconds
-    const interval = setInterval(syncWorkspaces, 5000);
+    // Periodic safety check every 60 seconds
+    const interval = setInterval(syncWorkspaces, 60000);
 
     return () => {
       isMounted = false;

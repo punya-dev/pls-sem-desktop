@@ -6,6 +6,7 @@ interface DataScreeningPanelProps {
   projectPath: string;
   datasetId?: string;
   modelId?: string;
+  availableModels?: Array<{ id: string; name: string }>;
   datasetName: string;
   totalRows: number;
   variables: Array<{ name: string; scaleType?: string }>;
@@ -16,6 +17,7 @@ export const DataScreeningPanel: React.FC<DataScreeningPanelProps> = ({
   projectPath,
   datasetId,
   modelId,
+  availableModels = [],
   datasetName,
   totalRows,
   variables,
@@ -24,6 +26,17 @@ export const DataScreeningPanel: React.FC<DataScreeningPanelProps> = ({
   const [activeScreeningTab, setActiveScreeningTab] = useState<'missing' | 'patterns' | 'outliers' | 'distributions' | 'directionality'>('missing');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Model selection for directionality
+  const [selectedModelId, setSelectedModelId] = useState<string>(modelId || availableModels[0]?.id || '');
+
+  useEffect(() => {
+    if (modelId) {
+      setSelectedModelId(modelId);
+    } else if (availableModels.length > 0 && !selectedModelId) {
+      setSelectedModelId(availableModels[0].id);
+    }
+  }, [modelId, availableModels]);
 
   // Data states
   const [missingData, setMissingData] = useState<any>(null);
@@ -61,12 +74,17 @@ export const DataScreeningPanel: React.FC<DataScreeningPanelProps> = ({
         if (res.error) setError(res.error);
         else setDistData(res);
       } else if (tab === 'directionality') {
-        if (!modelId) {
-          setError('A model must be active to assess construct indicator directionality.');
+        const targetModel = selectedModelId || modelId || availableModels[0]?.id;
+        if (!targetModel) {
+          // Do not treat lack of model as an error
+          setDirectionalityData(null);
         } else {
-          const res = await api.getScreeningDirectionality(projectPath, modelId, datasetId);
-          if (res.error) setError(res.error);
-          else setDirectionalityData(res);
+          const res = await api.getScreeningDirectionality(projectPath, targetModel, datasetId);
+          if (res.error) {
+            setDirectionalityData(null);
+          } else {
+            setDirectionalityData(res);
+          }
         }
       }
     } catch (err: any) {
@@ -78,7 +96,7 @@ export const DataScreeningPanel: React.FC<DataScreeningPanelProps> = ({
 
   useEffect(() => {
     fetchTabScreening(activeScreeningTab);
-  }, [activeScreeningTab, projectPath, datasetId, modelId]);
+  }, [activeScreeningTab, projectPath, datasetId, modelId, selectedModelId]);
 
   // Load histogram when selected column changes
   useEffect(() => {
@@ -562,11 +580,67 @@ export const DataScreeningPanel: React.FC<DataScreeningPanelProps> = ({
             {/* 5. INDICATOR DIRECTIONALITY TAB */}
             {activeScreeningTab === 'directionality' && (
               <div>
-                <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--color-text-muted)' }}>
-                  Evaluates correlation matrices for indicators within each reflective construct. Negative correlations often indicate reverse-coded items that require recoding before PLS estimation.
-                </p>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+                  <div>
+                    <h4 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 600 }}>Reflective Indicator Directionality</h4>
+                    <p style={{ margin: 0, fontSize: 12, color: 'var(--color-text-muted)' }}>
+                      Evaluates inter-indicator correlation within reflective constructs to identify reverse-coded items.
+                    </p>
+                  </div>
+                  {availableModels && availableModels.length > 0 && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 12, color: 'var(--color-text-secondary)', fontWeight: 500 }}>Model:</span>
+                      <select
+                        value={selectedModelId}
+                        onChange={e => {
+                          const newMId = e.target.value;
+                          setSelectedModelId(newMId);
+                          if (newMId) {
+                            setIsLoading(true);
+                            api.getScreeningDirectionality(projectPath, newMId, datasetId)
+                              .then(res => {
+                                if (!res.error) setDirectionalityData(res);
+                              })
+                              .finally(() => setIsLoading(false));
+                          }
+                        }}
+                        style={{
+                          padding: '4px 10px',
+                          fontSize: 12,
+                          background: 'var(--color-bg-base)',
+                          border: '1px solid var(--color-border-subtle)',
+                          borderRadius: 6,
+                          color: 'var(--color-text-primary)'
+                        }}
+                      >
+                        <option value="">-- Choose a Model --</option>
+                        {availableModels.map(m => (
+                          <option key={m.id} value={m.id}>{m.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
 
-                {directionalityData?.flagged_pairs?.length === 0 ? (
+                {!selectedModelId && (!availableModels || availableModels.length === 0) ? (
+                  <div style={{ padding: '40px 24px', textAlign: 'center', background: 'var(--color-bg-surface)', border: '1px solid var(--color-border-subtle)', borderRadius: 8 }}>
+                    <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'var(--color-accent-subtle)', color: 'var(--color-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
+                      <span className="material-symbols-outlined" style={{ fontSize: 24 }}>account_tree</span>
+                    </div>
+                    <h4 style={{ margin: '0 0 6px', fontSize: 15, fontWeight: 600, color: 'var(--color-text-primary)' }}>
+                      No Model Created in this Study Yet
+                    </h4>
+                    <p style={{ margin: '0 auto 16px', maxWidth: 480, fontSize: 12.5, color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+                      Indicator directionality checks whether items assigned to the same reflective construct are positively correlated. Create or open a model in the model editor to link indicators to constructs.
+                    </p>
+                  </div>
+                ) : !selectedModelId ? (
+                  <div style={{ padding: '36px 24px', textAlign: 'center', background: 'var(--color-bg-surface)', border: '1px solid var(--color-border-subtle)', borderRadius: 8 }}>
+                    <p style={{ margin: 0, fontSize: 13, color: 'var(--color-text-muted)' }}>
+                      Select a model from the dropdown above to analyze indicator directionality.
+                    </p>
+                  </div>
+                ) : directionalityData?.flagged_pairs?.length === 0 ? (
                   <div style={{ padding: 24, textAlign: 'center', background: 'var(--color-bg-surface)', border: '1px solid var(--color-border-subtle)', borderRadius: 8, color: '#16a34a' }}>
                     <CheckCircle size={24} style={{ margin: '0 auto 8px' }} />
                     <div style={{ fontWeight: 600 }}>All indicator inter-correlations are positive. Directionality is verified.</div>

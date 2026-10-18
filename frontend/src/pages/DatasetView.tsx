@@ -14,6 +14,7 @@ export const DatasetView: React.FC = () => {
     activeWorkspaceId,
     studies,
     activeStudyId,
+    models,
     datasetsByStudy,
     setStudyDataset,
     touchStudy,
@@ -24,6 +25,7 @@ export const DatasetView: React.FC = () => {
   const currentStudyId = activeTab?.studyId || activeStudyId || '';
   const activeWorkspace = workspaces.find(w => w.id === (activeTab?.workspaceId || activeWorkspaceId));
   const activeStudy = studies.find(s => s.id === currentStudyId);
+  const studyModels = useMemo(() => models.filter(m => m.studyId === currentStudyId), [models, currentStudyId]);
 
   const initialDataset = currentStudyId ? datasetsByStudy[currentStudyId] : null;
   const [dataset, setDataset] = useState<ParsedDataset | null>(initialDataset);
@@ -361,7 +363,8 @@ export const DatasetView: React.FC = () => {
             <DataScreeningPanel
               projectPath={activeStudy?.path || ''}
               datasetId={dataset.id || dataset.filename}
-              modelId={undefined}
+              modelId={studyModels[0]?.id || undefined}
+              availableModels={studyModels}
               datasetName={dataset.filename}
               totalRows={dataset.rows.length}
               variables={dataset.variables}
