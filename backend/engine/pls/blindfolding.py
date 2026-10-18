@@ -45,6 +45,8 @@ def _run_single_blindfold_pass(
     settings: PipelineSettings,
     progress_callback: Optional[Any] = None,
     cancel_event: Optional[Any] = None,
+    col_to_iid: Optional[Dict[str, str]] = None,
+    construct_names: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
     Runs the D rounds of blindfolding and computes SSE and SSO for redundancy and communality.
@@ -131,7 +133,9 @@ def _run_single_blindfold_pass(
             sigma_k = float(np.std(col_retained, ddof=0)) if len(col_retained) > 0 else 1.0
             sigma_k = max(1e-6, sigma_k)
 
-            lam_k = float(loadings.get(cid, {}).get(ind_col, 0.0))
+            iid = col_to_iid.get(ind_col, ind_col) if col_to_iid else ind_col
+            c_loadings = loadings.get(cid, {})
+            lam_k = float(c_loadings.get(iid, c_loadings.get(ind_col, 0.0)))
             y_scores = np.asarray(scores.get(cid, np.zeros(N)), dtype=float)
 
             # Predecessor constructs for redundancy prediction
@@ -171,9 +175,15 @@ def _run_single_blindfold_pass(
         q2_red = (1.0 - (c_sse_red / c_sso_red)) if c_sso_red > 1e-12 and is_endo else None
         q2_comm = (1.0 - (c_sse_comm / c_sso_comm)) if c_sso_comm > 1e-12 else None
 
+        c_name = construct_names.get(cid, cid) if construct_names else cid
+
         construct_results[cid] = {
             "construct_id": cid,
+            "construct_name": c_name,
             "is_endogenous": is_endo,
+            "sso": round(float(c_sso_red), 4) if is_endo else round(float(c_sso_comm), 4),
+            "sse": round(float(c_sse_red), 4) if is_endo else round(float(c_sse_comm), 4),
+            "q2": round(float(q2_red), 4) if q2_red is not None else round(float(q2_comm), 4) if q2_comm is not None else None,
             "sso_redundancy": round(float(c_sso_red), 4) if is_endo else None,
             "sse_redundancy": round(float(c_sse_red), 4) if is_endo else None,
             "q2_redundancy": round(float(q2_red), 4) if q2_red is not None else None,
@@ -183,17 +193,19 @@ def _run_single_blindfold_pass(
             "q2_communality": round(float(q2_comm), 4) if q2_comm is not None else None,
         }
 
-        for iid in inds:
-            i_sso_r = sso_red[iid]
-            i_sse_r = sse_red[iid]
-            i_sso_c = sso_comm[iid]
-            i_sse_c = sse_comm[iid]
+        for ind_col in inds:
+            iid = col_to_iid.get(ind_col, ind_col) if col_to_iid else ind_col
+            i_sso_r = sso_red[ind_col]
+            i_sse_r = sse_red[ind_col]
+            i_sso_c = sso_comm[ind_col]
+            i_sse_c = sse_comm[ind_col]
 
             iq2_red = (1.0 - (i_sse_r / i_sso_r)) if i_sso_r > 1e-12 and is_endo else None
             iq2_comm = (1.0 - (i_sse_c / i_sso_c)) if i_sso_c > 1e-12 else None
 
             ind_results.append({
-                "indicator": iid,
+                "indicator": ind_col,
+                "indicator_id": iid,
                 "construct_id": cid,
                 "sso_redundancy": round(float(i_sso_r), 4) if is_endo else None,
                 "sse_redundancy": round(float(i_sse_r), 4) if is_endo else None,
@@ -225,34 +237,52 @@ def run_blindfolding(
     spec_dict = spec.model_dump(mode="json", by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
     cfg = settings or PipelineSettings()
 
-    # Identify reflective constructs & indicators
-    constructs = spec_dict.get("constructs", [])
-    paths = spec_dict.get("paths", [])
+    constructs_dict, ind_col_map, paths_list = parse_model_spec(spec_dict)
+    col_to_iid = {col: iid for iid, col in ind_col_map.items()}
+    construct_names = {cid: c.get("name", cid) for cid, c in constructs_dict.items()}
+
+    # Map each column to actual column in df, supporting case-insensitivity
+    df_cols_lookup = {str(col).strip().lower(): col for col in df.columns}
+    def get_actual_col(c_name: str) -> Optional[str]:
+        if c_name in df.columns:
+            return c_name
+        return df_cols_lookup.get(str(c_name).strip().lower())
 
     construct_indicator_map: Dict[str, List[str]] = {}
-    for c in constructs:
-        cid = c["id"]
-        c_type = c.get("type", "reflective")
+    for cid, c_info in constructs_dict.items():
+        c_type = c_info.get("type", "reflective")
         if c_type == "reflective":
-            if "indicators" in c and c["indicators"]:
-                inds = [i for i in c["indicators"] if i in df.columns]
-            else:
-                inds = [
-                    (ind.get("name") or ind.get("column") or ind.get("id"))
-                    for ind in spec_dict.get("indicators", [])
-                    if (ind.get("construct_id") or ind.get("construct")) == cid and (ind.get("name") or ind.get("column") or ind.get("id")) in df.columns
-                ]
-            if inds:
-                construct_indicator_map[cid] = inds
+            cols = []
+            for iid in c_info.get("indicators", []):
+                col_name = ind_col_map.get(iid, iid)
+                act_col = get_actual_col(col_name)
+                if act_col and act_col not in cols:
+                    cols.append(act_col)
+            if cols:
+                construct_indicator_map[cid] = cols
+
+    if not construct_indicator_map:
+        raise ValueError("No reflective constructs with matching dataset columns found for blindfolding.")
 
     all_indicators = []
     for inds in construct_indicator_map.values():
-        all_indicators.extend(inds)
+        for col in inds:
+            if col not in all_indicators:
+                all_indicators.append(col)
 
-    # Clean and treat missing data
+    # Collect all columns required by the entire model
+    all_model_cols = []
+    for c_info in constructs_dict.values():
+        for iid in c_info.get("indicators", []):
+            col_name = ind_col_map.get(iid, iid)
+            act_col = get_actual_col(col_name)
+            if act_col and act_col not in all_model_cols:
+                all_model_cols.append(act_col)
+
+    # Clean and treat missing data across all model columns
     clean_df = df.copy()
     missing_codes = cfg.missing_codes if cfg.missing_codes is not None else [-99, "-99"]
-    for col in all_indicators:
+    for col in all_model_cols:
         if col in clean_df.columns:
             clean_df[col] = pd.to_numeric(clean_df[col], errors="coerce")
             for m in missing_codes:
@@ -261,20 +291,25 @@ def run_blindfolding(
                 except (ValueError, TypeError):
                     clean_df[col] = clean_df[col].replace(m, np.nan)
 
+    # Coerce to float to prevent TypeError/LossySetitemError in Pandas during imputation
+    for col in all_model_cols:
+        if col in clean_df.columns:
+            clean_df[col] = clean_df[col].astype(float)
+
     if cfg.missing_treatment == "mean":
-        for col in all_indicators:
+        for col in all_model_cols:
             if col in clean_df.columns:
                 m_val = clean_df[col].mean()
                 clean_df[col] = clean_df[col].fillna(m_val)
     else:
         clean_df = clean_df.dropna(subset=all_indicators).reset_index(drop=True)
 
-    sub_df = clean_df[all_indicators]
+    sub_df = clean_df[all_model_cols]
     N = len(sub_df)
     D = validate_omission_distance(N, omission_distance)
 
     # Identify endogenous constructs
-    targets = set(p.get("to") or p.get("to_node") for p in paths)
+    targets = set(to_c for from_c, to_c in paths_list)
     endogenous_constructs = [c for c in construct_indicator_map.keys() if c in targets]
 
     # Baseline blindfold pass
@@ -288,6 +323,8 @@ def run_blindfolding(
         settings=cfg,
         progress_callback=progress_callback,
         cancel_event=cancel_event,
+        col_to_iid=col_to_iid,
+        construct_names=construct_names,
     )
 
     q2_effects: List[Dict[str, Any]] = []
@@ -295,9 +332,7 @@ def run_blindfolding(
     # Calculate q^2 effect sizes: q^2 = (Q^2_incl - Q^2_excl) / (1 - Q^2_incl)
     if compute_q2_effects:
         preds_per_target: Dict[str, List[str]] = {}
-        for p in paths:
-            fc = p.get("from") or p.get("from_node")
-            tc = p.get("to") or p.get("to_node")
+        for fc, tc in paths_list:
             if tc in endogenous_constructs:
                 if tc not in preds_per_target:
                     preds_per_target[tc] = []
@@ -314,7 +349,7 @@ def run_blindfolding(
             for pred_cid in preds:
                 # Build reduced model with pred_cid -> target_cid path excluded
                 red_paths = [
-                    p for p in paths
+                    p for p in spec_dict.get("paths", [])
                     if not ((p.get("from") or p.get("from_node")) == pred_cid and (p.get("to") or p.get("to_node")) == target_cid)
                 ]
                 red_spec = dict(spec_dict)
@@ -329,6 +364,8 @@ def run_blindfolding(
                     omission_distance=D,
                     settings=cfg,
                     cancel_event=cancel_event,
+                    col_to_iid=col_to_iid,
+                    construct_names=construct_names,
                 )
 
                 q2_excl = red_res["constructs"].get(target_cid, {}).get("q2_redundancy", 0.0) or 0.0
@@ -345,13 +382,21 @@ def run_blindfolding(
                 else:
                     label = "none"
 
+                p_source_name = construct_names.get(pred_cid, pred_cid)
+                p_target_name = construct_names.get(target_cid, target_cid)
+
                 q2_effects.append({
-                    "target": target_cid,
-                    "predictor": pred_cid,
+                    "target": p_target_name,
+                    "target_id": target_cid,
+                    "source": p_source_name,
+                    "predictor": p_source_name,
+                    "predictor_id": pred_cid,
                     "q2_included": round(float(q2_incl), 4),
                     "q2_excluded": round(float(q2_excl), 4),
                     "q2_effect_size": round(q2_val, 4),
+                    "q2_effect": round(q2_val, 4),
                     "magnitude": label,
+                    "rating": label.capitalize(),
                 })
 
     return {
@@ -359,6 +404,7 @@ def run_blindfolding(
         "n_samples": N,
         "constructs": list(base_res["constructs"].values()),
         "indicators": base_res["indicators"],
+        "q2_effects": q2_effects,
         "q2_effect_sizes": q2_effects,
         "thresholds": THRESHOLDS.get("effect_size", {}),
         "notes": [

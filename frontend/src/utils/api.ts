@@ -621,6 +621,9 @@ export const api = {
     datasetId?: string;
     omissionDistance?: number;
     computeQ2Effects?: boolean;
+    spec?: any;
+    columns?: string[];
+    rows?: any[][];
   }): Promise<any> {
     try {
       const res = await fetch(`${API_BASE}/blindfolding/run`, {
@@ -632,6 +635,9 @@ export const api = {
           dataset_id: data.datasetId,
           omission_distance: data.omissionDistance || 7,
           compute_q2_effects: data.computeQ2Effects !== false,
+          spec: data.spec,
+          columns: data.columns,
+          rows: data.rows,
         }),
       });
       return await res.json();
@@ -650,6 +656,9 @@ export const api = {
     seed?: number;
     alpha?: number;
     includeSobel?: boolean;
+    spec?: any;
+    columns?: string[];
+    rows?: any[][];
   }): Promise<any> {
     try {
       const res = await fetch(`${API_BASE}/analysis/mediation`, {
@@ -665,6 +674,9 @@ export const api = {
           seed: data.seed ?? 42,
           alpha: data.alpha || 0.05,
           include_sobel: !!data.includeSobel,
+          spec: data.spec,
+          columns: data.columns,
+          rows: data.rows,
         }),
       });
       return await res.json();
@@ -684,6 +696,9 @@ export const api = {
     nBoot?: number;
     seed?: number;
     alpha?: number;
+    spec?: any;
+    columns?: string[];
+    rows?: any[][];
   }): Promise<any> {
     try {
       const res = await fetch(`${API_BASE}/analysis/moderation`, {
@@ -700,6 +715,9 @@ export const api = {
           n_boot: data.nBoot || 500,
           seed: data.seed ?? 42,
           alpha: data.alpha || 0.05,
+          spec: data.spec,
+          columns: data.columns,
+          rows: data.rows,
         }),
       });
       return await res.json();
@@ -717,6 +735,9 @@ export const api = {
     nBoot?: number;
     seed?: number;
     alpha?: number;
+    spec?: any;
+    columns?: string[];
+    rows?: any[][];
   }): Promise<any> {
     try {
       const res = await fetch(`${API_BASE}/analysis/quadratic`, {
@@ -731,6 +752,9 @@ export const api = {
           n_boot: data.nBoot || 500,
           seed: data.seed ?? 42,
           alpha: data.alpha || 0.05,
+          spec: data.spec,
+          columns: data.columns,
+          rows: data.rows,
         }),
       });
       return await res.json();
@@ -746,6 +770,9 @@ export const api = {
     datasetId?: string;
     scaleBounds?: Record<string, any>;
     level?: string;
+    spec?: any;
+    columns?: string[];
+    rows?: any[][];
   }): Promise<any> {
     try {
       const res = await fetch(`${API_BASE}/analysis/ipma`, {
@@ -758,6 +785,9 @@ export const api = {
           dataset_id: data.datasetId,
           scale_bounds: data.scaleBounds,
           level: data.level || 'both',
+          spec: data.spec,
+          columns: data.columns,
+          rows: data.rows,
         }),
       });
       return await res.json();
@@ -774,6 +804,9 @@ export const api = {
     datasetId?: string;
     hocType?: string;
     approach?: string;
+    spec?: any;
+    columns?: string[];
+    rows?: any[][];
   }): Promise<any> {
     try {
       const res = await fetch(`${API_BASE}/analysis/hcm`, {
@@ -787,6 +820,9 @@ export const api = {
           dataset_id: data.datasetId,
           hoc_type: data.hocType || 'RR',
           approach: data.approach || 'repeated_indicators',
+          spec: data.spec,
+          columns: data.columns,
+          rows: data.rows,
         }),
       });
       return await res.json();
@@ -803,6 +839,9 @@ export const api = {
     nBoot?: number;
     seed?: number;
     alpha?: number;
+    spec?: any;
+    columns?: string[];
+    rows?: any[][];
   }): Promise<any> {
     try {
       const res = await fetch(`${API_BASE}/analysis/cta`, {
@@ -816,6 +855,9 @@ export const api = {
           n_boot: data.nBoot || 500,
           seed: data.seed ?? 42,
           alpha: data.alpha || 0.05,
+          spec: data.spec,
+          columns: data.columns,
+          rows: data.rows,
         }),
       });
       return await res.json();
@@ -833,6 +875,9 @@ export const api = {
     nPermutations?: number;
     alpha?: number;
     seed?: number;
+    spec?: any;
+    columns?: string[];
+    rows?: any[][];
   }): Promise<any> {
     try {
       const res = await fetch(`${API_BASE}/analysis/micom`, {
@@ -847,6 +892,9 @@ export const api = {
           n_permutations: data.nPermutations || 500,
           alpha: data.alpha || 0.05,
           seed: data.seed ?? 42,
+          spec: data.spec,
+          columns: data.columns,
+          rows: data.rows,
         }),
       });
       return await res.json();
@@ -865,6 +913,9 @@ export const api = {
     nPermutations?: number;
     seed?: number;
     alpha?: number;
+    spec?: any;
+    columns?: string[];
+    rows?: any[][];
   }): Promise<any> {
     try {
       const res = await fetch(`${API_BASE}/analysis/mga`, {
@@ -880,6 +931,9 @@ export const api = {
           n_permutations: data.nPermutations || 500,
           seed: data.seed ?? 42,
           alpha: data.alpha || 0.05,
+          spec: data.spec,
+          columns: data.columns,
+          rows: data.rows,
         }),
       });
       return await res.json();
@@ -895,6 +949,9 @@ export const api = {
     maxSegments?: number;
     datasetId?: string;
     seed?: number;
+    spec?: any;
+    columns?: string[];
+    rows?: any[][];
   }): Promise<any> {
     try {
       const res = await fetch(`${API_BASE}/analysis/fimix`, {
@@ -907,6 +964,9 @@ export const api = {
           max_segments: data.maxSegments || 4,
           dataset_id: data.datasetId,
           seed: data.seed ?? 42,
+          spec: data.spec,
+          columns: data.columns,
+          rows: data.rows,
         }),
       });
       return await res.json();
@@ -923,6 +983,9 @@ export const api = {
     minSegmentSize?: number;
     datasetId?: string;
     seed?: number;
+    spec?: any;
+    columns?: string[];
+    rows?: any[][];
   }): Promise<any> {
     try {
       const res = await fetch(`${API_BASE}/analysis/pos`, {
@@ -936,6 +999,9 @@ export const api = {
           min_segment_size: data.minSegmentSize || 15,
           dataset_id: data.datasetId,
           seed: data.seed ?? 42,
+          spec: data.spec,
+          columns: data.columns,
+          rows: data.rows,
         }),
       });
       return await res.json();
@@ -993,6 +1059,9 @@ export const api = {
     nBoot?: number;
     seed?: number;
     alpha?: number;
+    spec?: any;
+    columns?: string[];
+    rows?: any[][];
   }): Promise<any> {
     try {
       const res = await fetch(`${API_BASE}/analysis/copula`, {
@@ -1007,6 +1076,9 @@ export const api = {
           n_boot: data.nBoot || 200,
           seed: data.seed ?? 42,
           alpha: data.alpha || 0.05,
+          spec: data.spec,
+          columns: data.columns,
+          rows: data.rows,
         }),
       });
       return await res.json();
@@ -1024,6 +1096,9 @@ export const api = {
     nPermutations?: number;
     seed?: number;
     alpha?: number;
+    spec?: any;
+    columns?: string[];
+    rows?: any[][];
   }): Promise<any> {
     try {
       const res = await fetch(`${API_BASE}/analysis/nca`, {
@@ -1038,6 +1113,9 @@ export const api = {
           n_permutations: data.nPermutations || 500,
           seed: data.seed ?? 42,
           alpha: data.alpha || 0.05,
+          spec: data.spec,
+          columns: data.columns,
+          rows: data.rows,
         }),
       });
       return await res.json();
@@ -1054,6 +1132,9 @@ export const api = {
     repetitions?: number;
     seed?: number;
     antecedents?: string;
+    spec?: any;
+    columns?: string[];
+    rows?: any[][];
   }): Promise<any> {
     try {
       const res = await fetch(`${API_BASE}/analysis/predict`, {
@@ -1067,6 +1148,9 @@ export const api = {
           repetitions: data.repetitions || 10,
           seed: data.seed ?? 42,
           antecedents: data.antecedents || 'direct',
+          spec: data.spec,
+          columns: data.columns,
+          rows: data.rows,
         }),
       });
       return await res.json();

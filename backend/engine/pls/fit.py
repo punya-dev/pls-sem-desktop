@@ -117,39 +117,30 @@ def calculate_rms_theta(
     Evaluates correlation of outer residuals across all reflective indicators.
     Threshold: < 0.12 (Hair et al.).
     """
-    reflective_constructs = [
-        c["id"] for c in spec_dict.get("constructs", [])
-        if c.get("type") == "reflective"
-    ]
+    from engine.pls.algorithm import parse_model_spec
+    constructs, ind_col_map, _ = parse_model_spec(spec_dict)
+    reflective_constructs = {cid for cid, c in constructs.items() if c["type"] == "reflective"}
     if not reflective_constructs:
         return None
 
     residuals = {}
-    for c in spec_dict.get("constructs", []):
-        cid = c["id"]
-        if cid not in reflective_constructs:
-            continue
+    for cid in reflective_constructs:
         c_score_raw = construct_scores.get(cid)
         if c_score_raw is None:
             continue
         c_score = np.asarray(c_score_raw, dtype=float)
 
-        c_inds = []
-        if "indicators" in c and c["indicators"]:
-            c_inds = [ind for ind in c["indicators"] if ind in df.columns]
-        else:
-            for ind in spec_dict.get("indicators", []):
-                i_cid = ind.get("construct_id") or ind.get("construct")
-                i_name = ind.get("name") or ind.get("column") or ind.get("id")
-                if i_cid == cid and i_name in df.columns:
-                    c_inds.append(i_name)
-        for iid in c_inds:
-            col_vals = df[iid].dropna().values.astype(float)
+        for iid in constructs[cid]["indicators"]:
+            col = ind_col_map.get(iid, iid)
+            if col not in df.columns:
+                continue
+            col_vals = df[col].dropna().values.astype(float)
             if len(col_vals) != len(c_score):
                 continue
             # Standardize indicator
-            x_norm = (col_vals - np.mean(col_vals)) / (np.std(col_vals, ddof=0) or 1.0)
-            lam = loadings.get(cid, {}).get(iid, 0.0)
+            std_c = np.std(col_vals, ddof=0)
+            x_norm = (col_vals - np.mean(col_vals)) / (std_c if std_c > 1e-12 else 1.0)
+            lam = float(loadings.get(cid, {}).get(iid, loadings.get(cid, {}).get(col, 0.0)))
             # Outer residual: e = x - lambda * Y
             e = x_norm - lam * c_score
             residuals[f"{cid}_{iid}"] = e
@@ -237,27 +228,34 @@ def evaluate_model_fit(
     meas = results.get("measurement", {})
     struct = results.get("structural", {})
 
+    from engine.pls.algorithm import parse_model_spec
+    constructs, ind_col_map, _ = parse_model_spec(spec_dict)
+
     # Collect indicators used
     construct_indicator_map = {}
-    for c in spec_dict.get("constructs", []):
-        cid = c["id"]
-        # Try both c["indicators"] and spec_dict["indicators"]
-        c_inds = []
-        if "indicators" in c and c["indicators"]:
-            c_inds = [ind for ind in c["indicators"] if ind in df.columns]
-        else:
-            for ind in spec_dict.get("indicators", []):
-                i_cid = ind.get("construct_id") or ind.get("construct")
-                i_name = ind.get("name") or ind.get("column") or ind.get("id")
-                if i_cid == cid and i_name in df.columns:
-                    c_inds.append(i_name)
+    loadings_by_col = {}
+    raw_loadings = meas.get("outer_loadings", {})
 
-        if c_inds:
-            construct_indicator_map[cid] = c_inds
+    for cid, c_info in constructs.items():
+        c_cols = []
+        c_lmap = {}
+        for iid in c_info["indicators"]:
+            col = ind_col_map.get(iid, iid)
+            if col in df.columns:
+                if col not in c_cols:
+                    c_cols.append(col)
+                l_val = float(raw_loadings.get(cid, {}).get(iid, raw_loadings.get(cid, {}).get(col, 0.0)))
+                c_lmap[col] = l_val
+                c_lmap[iid] = l_val
+        if c_cols:
+            construct_indicator_map[cid] = c_cols
+            loadings_by_col[cid] = c_lmap
 
     all_indicators = []
     for inds in construct_indicator_map.values():
-        all_indicators.extend(inds)
+        for col in inds:
+            if col not in all_indicators:
+                all_indicators.append(col)
 
     if len(all_indicators) < 2:
         return {"note": "Model fit requires at least two valid indicators across constructs."}
@@ -265,7 +263,7 @@ def evaluate_model_fit(
     sub_df = df[all_indicators].dropna()
     X = sub_df.values.astype(float)
 
-    loadings = meas.get("outer_loadings", {})
+    loadings = loadings_by_col
     construct_corrs = results.get("construct_correlations") or meas.get("construct_correlations", {})
     paths = struct.get("path_coefficients", {})
 

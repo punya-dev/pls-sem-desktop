@@ -1747,90 +1747,121 @@ async def ws_generic_jobs(websocket: WebSocket, job_id: str):
 
 # --- Phase 4 Advanced Analysis Endpoints ---
 
-class BlindfoldingRunRequest(BaseModel):
+class BaseAnalysisRequest(BaseModel):
     project_path: str
     model_id: str = "default"
     dataset_id: Optional[str] = None
+    spec: Optional[Dict[str, Any]] = None
+    columns: Optional[List[str]] = None
+    rows: Optional[List[List[Any]]] = None
+
+
+class BlindfoldingRunRequest(BaseAnalysisRequest):
     omission_distance: int = 7
     compute_q2_effects: bool = True
 
 
-class MediationAnalysisRequest(BaseModel):
-    project_path: str
-    model_id: str = "default"
+class MediationAnalysisRequest(BaseAnalysisRequest):
     source: str
     target: str
-    dataset_id: Optional[str] = None
     n_boot: int = 500
     seed: Optional[int] = 42
     alpha: float = 0.05
     include_sobel: bool = False
 
 
-class ModerationAnalysisRequest(BaseModel):
-    project_path: str
-    model_id: str = "default"
+class ModerationAnalysisRequest(BaseAnalysisRequest):
     source: str
     moderator: str
     target: str
-    dataset_id: Optional[str] = None
     method: str = "two_stage"
     n_boot: int = 500
     seed: Optional[int] = 42
     alpha: float = 0.05
 
 
-class QuadraticAnalysisRequest(BaseModel):
-    project_path: str
-    model_id: str = "default"
+class QuadraticAnalysisRequest(BaseAnalysisRequest):
     source: str
     target: str
-    dataset_id: Optional[str] = None
     n_boot: int = 500
     seed: Optional[int] = 42
     alpha: float = 0.05
 
 
-class IPMAAnalysisRequest(BaseModel):
-    project_path: str
-    model_id: str = "default"
+class IPMAAnalysisRequest(BaseAnalysisRequest):
     target: str
-    dataset_id: Optional[str] = None
     scale_bounds: Optional[Dict[str, Any]] = None
     level: str = "both"
 
 
-class HCMAnalysisRequest(BaseModel):
-    project_path: str
-    model_id: str = "default"
+class HCMAnalysisRequest(BaseAnalysisRequest):
     hoc_id: str
     loc_ids: List[str]
-    dataset_id: Optional[str] = None
     hoc_type: str = "RR"
     approach: str = "repeated_indicators"
 
 
-def _load_data_and_spec(project_path: str, model_id: str, dataset_id: Optional[str] = None):
+def _load_data_and_spec(
+    project_path: str,
+    model_id: str = "default",
+    dataset_id: Optional[str] = None,
+    spec: Optional[Dict[str, Any]] = None,
+    columns: Optional[List[str]] = None,
+    rows: Optional[List[List[Any]]] = None,
+):
     if not os.path.exists(project_path):
         raise ValueError(f"Project file '{project_path}' does not exist")
-    data_dict = project_io.load_data(project_path, dataset_id=dataset_id)
-    if not data_dict or not data_dict.get("rows"):
-        raise ValueError("No dataset found in project.")
-    df = pd.DataFrame(data_dict["rows"], columns=data_dict["columns"])
+
+    df = None
+    if columns and rows:
+        try:
+            df = pd.DataFrame(rows, columns=columns)
+        except Exception:
+            df = None
+
+    if df is None:
+        data_dict = project_io.load_data(project_path, dataset_id=dataset_id)
+        if not data_dict or not data_dict.get("rows"):
+            raise ValueError("No dataset found in project.")
+        df = pd.DataFrame(data_dict["rows"], columns=data_dict["columns"])
+
     for col in df.columns:
         converted = pd.to_numeric(df[col], errors='coerce')
         if converted.notnull().sum() > 0:
             df[col] = converted
-    saved_model = project_io.load_model_spec(project_path, model_id)
-    if not saved_model or not saved_model.get("spec"):
+
+    resolved_spec = spec
+    if not resolved_spec or not resolved_spec.get("constructs"):
+        saved_model = project_io.load_model_spec(project_path, model_id)
+        if saved_model and saved_model.get("spec") and saved_model["spec"].get("constructs"):
+            resolved_spec = saved_model["spec"]
+        else:
+            # Fallback: check all models in project file
+            try:
+                conn = sqlite3.connect(project_path)
+                cur = conn.cursor()
+                cur.execute("SELECT spec_json FROM model_spec WHERE spec_json IS NOT NULL")
+                for r in cur.fetchall():
+                    try:
+                        cand = json.loads(r[0])
+                        if cand.get("constructs") and len(cand["constructs"]) > 0:
+                            resolved_spec = cand
+                            break
+                    except Exception:
+                        pass
+                conn.close()
+            except Exception:
+                pass
+
+    if not resolved_spec or not resolved_spec.get("constructs"):
         raise ValueError(f"No path model found for model '{model_id}'.")
-    return df, saved_model["spec"]
+    return df, resolved_spec
 
 
 @app.post("/blindfolding/run")
 def api_run_blindfolding(req: BlindfoldingRunRequest):
     try:
-        df, spec = _load_data_and_spec(req.project_path, req.model_id, req.dataset_id)
+        df, spec = _load_data_and_spec(req.project_path, req.model_id, req.dataset_id, req.spec, req.columns, req.rows)
         res = run_blindfolding(
             df=df,
             spec=spec,
@@ -1854,7 +1885,7 @@ def api_run_blindfolding(req: BlindfoldingRunRequest):
 @app.post("/analysis/mediation")
 def api_analyze_mediation(req: MediationAnalysisRequest):
     try:
-        df, spec = _load_data_and_spec(req.project_path, req.model_id, req.dataset_id)
+        df, spec = _load_data_and_spec(req.project_path, req.model_id, req.dataset_id, req.spec, req.columns, req.rows)
         res = analyze_mediation(
             df=df,
             spec=spec,
@@ -1882,7 +1913,7 @@ def api_analyze_mediation(req: MediationAnalysisRequest):
 @app.post("/analysis/moderation")
 def api_analyze_moderation(req: ModerationAnalysisRequest):
     try:
-        df, spec = _load_data_and_spec(req.project_path, req.model_id, req.dataset_id)
+        df, spec = _load_data_and_spec(req.project_path, req.model_id, req.dataset_id, req.spec, req.columns, req.rows)
         res = analyze_moderation(
             df=df,
             spec=spec,
@@ -1911,7 +1942,7 @@ def api_analyze_moderation(req: ModerationAnalysisRequest):
 @app.post("/analysis/quadratic")
 def api_analyze_quadratic(req: QuadraticAnalysisRequest):
     try:
-        df, spec = _load_data_and_spec(req.project_path, req.model_id, req.dataset_id)
+        df, spec = _load_data_and_spec(req.project_path, req.model_id, req.dataset_id, req.spec, req.columns, req.rows)
         res = analyze_quadratic_effect(
             df=df,
             spec=spec,
@@ -1938,7 +1969,7 @@ def api_analyze_quadratic(req: QuadraticAnalysisRequest):
 @app.post("/analysis/ipma")
 def api_analyze_ipma(req: IPMAAnalysisRequest):
     try:
-        df, spec = _load_data_and_spec(req.project_path, req.model_id, req.dataset_id)
+        df, spec = _load_data_and_spec(req.project_path, req.model_id, req.dataset_id, req.spec, req.columns, req.rows)
         res = analyze_ipma(
             df=df,
             spec=spec,
@@ -1963,7 +1994,7 @@ def api_analyze_ipma(req: IPMAAnalysisRequest):
 @app.post("/analysis/hcm")
 def api_analyze_hcm(req: HCMAnalysisRequest):
     try:
-        df, spec = _load_data_and_spec(req.project_path, req.model_id, req.dataset_id)
+        df, spec = _load_data_and_spec(req.project_path, req.model_id, req.dataset_id, req.spec, req.columns, req.rows)
         res = analyze_hcm(
             df=df,
             spec=spec,
@@ -1988,62 +2019,47 @@ def api_analyze_hcm(req: HCMAnalysisRequest):
 
 # --- Phase 5 Multi-Group, Invariance, and Latent Class Endpoints ---
 
-class CTAAnalysisRequest(BaseModel):
-    project_path: str
-    model_id: str = "default"
+class CTAAnalysisRequest(BaseAnalysisRequest):
     construct_id: Optional[str] = None
-    dataset_id: Optional[str] = None
     n_boot: int = 500
     seed: Optional[int] = 42
     alpha: float = 0.05
 
 
-class MICOMAnalysisRequest(BaseModel):
-    project_path: str
-    model_id: str = "default"
+class MICOMAnalysisRequest(BaseAnalysisRequest):
     group_col: str
     group_values: Optional[List[Any]] = None
-    dataset_id: Optional[str] = None
     n_permutations: int = 500
     alpha: float = 0.05
     seed: Optional[int] = 42
 
 
-class MGAAnalysisRequest(BaseModel):
-    project_path: str
-    model_id: str = "default"
+class MGAAnalysisRequest(BaseAnalysisRequest):
     group_col: str
     group_values: Optional[List[Any]] = None
-    dataset_id: Optional[str] = None
     n_boot: int = 500
     n_permutations: int = 500
     seed: Optional[int] = 42
     alpha: float = 0.05
 
 
-class FIMIXAnalysisRequest(BaseModel):
-    project_path: str
-    model_id: str = "default"
+class FIMIXAnalysisRequest(BaseAnalysisRequest):
     min_segments: int = 1
     max_segments: int = 4
-    dataset_id: Optional[str] = None
     seed: Optional[int] = 42
 
 
-class POSAnalysisRequest(BaseModel):
-    project_path: str
-    model_id: str = "default"
+class POSAnalysisRequest(BaseAnalysisRequest):
     n_segments: int = 2
     max_iter: int = 50
     min_segment_size: int = 15
-    dataset_id: Optional[str] = None
     seed: Optional[int] = 42
 
 
 @app.post("/analysis/cta")
 def api_analyze_cta(req: CTAAnalysisRequest):
     try:
-        df, spec = _load_data_and_spec(req.project_path, req.model_id, req.dataset_id)
+        df, spec = _load_data_and_spec(req.project_path, req.model_id, req.dataset_id, req.spec, req.columns, req.rows)
         res = run_cta_pls(
             df=df,
             spec=spec,
@@ -2069,7 +2085,7 @@ def api_analyze_cta(req: CTAAnalysisRequest):
 @app.post("/analysis/micom")
 def api_analyze_micom(req: MICOMAnalysisRequest):
     try:
-        df, spec = _load_data_and_spec(req.project_path, req.model_id, req.dataset_id)
+        df, spec = _load_data_and_spec(req.project_path, req.model_id, req.dataset_id, req.spec, req.columns, req.rows)
         g_vals = tuple(req.group_values) if req.group_values and len(req.group_values) == 2 else None
         res = run_micom(
             df=df,
@@ -2097,7 +2113,7 @@ def api_analyze_micom(req: MICOMAnalysisRequest):
 @app.post("/analysis/mga")
 def api_analyze_mga(req: MGAAnalysisRequest):
     try:
-        df, spec = _load_data_and_spec(req.project_path, req.model_id, req.dataset_id)
+        df, spec = _load_data_and_spec(req.project_path, req.model_id, req.dataset_id, req.spec, req.columns, req.rows)
         g_vals = tuple(req.group_values) if req.group_values and len(req.group_values) == 2 else None
         res = analyze_mga(
             df=df,
@@ -2126,7 +2142,7 @@ def api_analyze_mga(req: MGAAnalysisRequest):
 @app.post("/analysis/fimix")
 def api_analyze_fimix(req: FIMIXAnalysisRequest):
     try:
-        df, spec = _load_data_and_spec(req.project_path, req.model_id, req.dataset_id)
+        df, spec = _load_data_and_spec(req.project_path, req.model_id, req.dataset_id, req.spec, req.columns, req.rows)
         res = analyze_fimix(
             df=df,
             spec=spec,
@@ -2151,7 +2167,7 @@ def api_analyze_fimix(req: FIMIXAnalysisRequest):
 @app.post("/analysis/pos")
 def api_analyze_pos(req: POSAnalysisRequest):
     try:
-        df, spec = _load_data_and_spec(req.project_path, req.model_id, req.dataset_id)
+        df, spec = _load_data_and_spec(req.project_path, req.model_id, req.dataset_id, req.spec, req.columns, req.rows)
         res = analyze_pos(
             df=df,
             spec=spec,
@@ -2187,32 +2203,23 @@ class PowerCalculationRequest(BaseModel):
     max_paths_into_construct: Optional[int] = 1
 
 
-class CopulaAnalysisRequest(BaseModel):
-    project_path: str
-    model_id: str
+class CopulaAnalysisRequest(BaseAnalysisRequest):
     candidate_predictor: str
     target_construct: str
-    dataset_id: Optional[str] = None
     n_boot: Optional[int] = 200
     seed: Optional[int] = 42
     alpha: Optional[float] = 0.05
 
 
-class NcaAnalysisRequest(BaseModel):
-    project_path: str
-    model_id: str
+class NcaAnalysisRequest(BaseAnalysisRequest):
     predictor: str
     outcome: str
-    dataset_id: Optional[str] = None
     n_permutations: Optional[int] = 500
     seed: Optional[int] = 42
     alpha: Optional[float] = 0.05
 
 
-class PlsPredictRequest(BaseModel):
-    project_path: str
-    model_id: str
-    dataset_id: Optional[str] = None
+class PlsPredictRequest(BaseAnalysisRequest):
     k_folds: Optional[int] = 10
     repetitions: Optional[int] = 10
     seed: Optional[int] = 42
@@ -2280,7 +2287,7 @@ def api_get_power_table(target_power: float = 0.80, alpha: float = 0.05):
 @app.post("/analysis/copula")
 def api_analyze_copula(req: CopulaAnalysisRequest):
     try:
-        df, spec = _load_data_and_spec(req.project_path, req.model_id, req.dataset_id)
+        df, spec = _load_data_and_spec(req.project_path, req.model_id, req.dataset_id, req.spec, req.columns, req.rows)
         res = analyze_gaussian_copula(
             df=df,
             spec=spec,
@@ -2307,7 +2314,7 @@ def api_analyze_copula(req: CopulaAnalysisRequest):
 @app.post("/analysis/nca")
 def api_analyze_nca(req: NcaAnalysisRequest):
     try:
-        df, spec = _load_data_and_spec(req.project_path, req.model_id, req.dataset_id)
+        df, spec = _load_data_and_spec(req.project_path, req.model_id, req.dataset_id, req.spec, req.columns, req.rows)
         res = analyze_nca(
             df=df,
             spec=spec,
@@ -2334,7 +2341,7 @@ def api_analyze_nca(req: NcaAnalysisRequest):
 @app.post("/analysis/predict")
 def api_analyze_predict(req: PlsPredictRequest):
     try:
-        df, spec = _load_data_and_spec(req.project_path, req.model_id, req.dataset_id)
+        df, spec = _load_data_and_spec(req.project_path, req.model_id, req.dataset_id, req.spec, req.columns, req.rows)
         res = run_pls_predict(
             df=df,
             model_spec=spec,

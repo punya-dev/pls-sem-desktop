@@ -52,43 +52,50 @@ def analyze_ipma(
     rescaled_indicators: Dict[str, np.ndarray] = {}
     indicator_raw_stats: Dict[str, Dict[str, float]] = {}
 
+    from engine.pls.algorithm import parse_model_spec
+    constructs_dict, ind_col_map, paths_list = parse_model_spec(spec_dict)
+    col_to_iid = {col: iid for iid, col in ind_col_map.items()}
+
     all_inds = []
     c_to_inds: Dict[str, List[str]] = {}
-    for c in constructs:
-        cid = c["id"]
-        if "indicators" in c and c["indicators"]:
-            inds = [i for i in c["indicators"] if i in df.columns]
-        else:
-            inds = [
-                (ind.get("name") or ind.get("column") or ind.get("id"))
-                for ind in spec_dict.get("indicators", [])
-                if (ind.get("construct_id") or ind.get("construct")) == cid and (ind.get("name") or ind.get("column") or ind.get("id")) in df.columns
-            ]
-        c_to_inds[cid] = inds
-        all_inds.extend(inds)
+    for cid, c_info in constructs_dict.items():
+        cols = []
+        for iid in c_info.get("indicators", []):
+            col = ind_col_map.get(iid, iid)
+            if col in df.columns:
+                if col not in cols:
+                    cols.append(col)
+                if col not in all_inds:
+                    all_inds.append(col)
+        c_to_inds[cid] = cols
 
-    for iid in all_inds:
-        col = df[iid].dropna().values.astype(float)
+    for col_name in all_inds:
+        col_vals = df[col_name].dropna().values.astype(float)
+        iid = col_to_iid.get(col_name, col_name)
         # Bounds: user-specified or observed
-        if iid in bounds:
+        if col_name in bounds:
+            s_min, s_max = bounds[col_name]
+        elif iid in bounds:
             s_min, s_max = bounds[iid]
         else:
-            s_min = float(np.min(col))
-            s_max = float(np.max(col))
+            s_min = float(np.min(col_vals))
+            s_max = float(np.max(col_vals))
 
         denom = max(1e-12, s_max - s_min)
-        rescaled_col = ((col - s_min) / denom) * 100.0
+        rescaled_col = ((col_vals - s_min) / denom) * 100.0
         # Clip to [0, 100]
         rescaled_col = np.clip(rescaled_col, 0.0, 100.0)
+        rescaled_indicators[col_name] = rescaled_col
         rescaled_indicators[iid] = rescaled_col
 
-        indicator_raw_stats[iid] = {
+        indicator_raw_stats[col_name] = {
             "min": s_min,
             "max": s_max,
-            "raw_mean": float(np.mean(col)),
-            "raw_std": float(np.std(col, ddof=0)) or 1.0,
+            "raw_mean": float(np.mean(col_vals)),
+            "raw_std": float(np.std(col_vals, ddof=0)) or 1.0,
             "rescaled_mean": float(np.mean(rescaled_col)),
         }
+        indicator_raw_stats[iid] = indicator_raw_stats[col_name]
 
     # 2. Compute unstandardized outer weights and rescaled construct scores
     # w_tilde_k = w_k / sigma_k, then normalized so sum(w_tilde) = 1 per construct
@@ -100,9 +107,11 @@ def analyze_ipma(
     warnings: List[str] = []
 
     for cid, inds in c_to_inds.items():
+        if not inds:
+            continue
         c_weights = weights.get(cid, {})
-        w_raw = np.array([float(c_weights.get(iid, 0.0)) for iid in inds], dtype=float)
-        sigmas = np.array([indicator_raw_stats[iid]["raw_std"] for iid in inds], dtype=float)
+        w_raw = np.array([float(c_weights.get(col_to_iid.get(col, col), c_weights.get(col, 0.0))) for col in inds], dtype=float)
+        sigmas = np.array([indicator_raw_stats[col]["raw_std"] for col in inds], dtype=float)
 
         w_tilde = w_raw / sigmas
         sum_w_tilde = np.sum(w_tilde)
@@ -111,15 +120,15 @@ def analyze_ipma(
         else:
             w_norm = np.ones(len(inds)) / len(inds)
 
-        unstd_weights[cid] = {iid: float(wn) for iid, wn in zip(inds, w_norm)}
+        unstd_weights[cid] = {col: float(wn) for col, wn in zip(inds, w_norm)}
 
         # Check for negative weights
-        for iid, wn in zip(inds, w_norm):
+        for col, wn in zip(inds, w_norm):
             if wn < 0:
-                warnings.append(f"Indicator '{iid}' in construct '{cid}' has a negative unstandardized weight ({round(wn, 4)}). Verify indicator polarity/coding.")
+                warnings.append(f"Indicator '{col}' in construct '{cid}' has a negative unstandardized weight ({round(wn, 4)}). Verify indicator polarity/coding.")
 
         # Compute rescaled construct score Y' = sum w_norm * x'
-        X_rescaled = np.column_stack([rescaled_indicators[iid] for iid in inds])
+        X_rescaled = np.column_stack([rescaled_indicators[col] for col in inds])
         y_prime = X_rescaled @ w_norm
         y_prime = np.clip(y_prime, 0.0, 100.0)
 
@@ -174,6 +183,7 @@ def analyze_ipma(
 
         construct_quadrants.append({
             "construct_id": cid,
+            "construct_name": constructs_dict.get(cid, {}).get("name", cid),
             "importance": round(imp, 4),
             "performance": round(perf, 4),
             "importance_standardized": round(construct_std_effects.get(cid, 0.0), 4),

@@ -161,7 +161,7 @@ export const AdvancedResultPanels: React.FC<AdvancedResultPanelsProps> = ({
     }
 
     const constructsList = analysisData.constructs || [];
-    const q2Effects = analysisData.q2_effects || [];
+    const q2Effects = analysisData.q2_effects || analysisData.q2_effect_sizes || [];
 
     return (
       <div className="results-content-pane">
@@ -189,20 +189,24 @@ export const AdvancedResultPanels: React.FC<AdvancedResultPanelsProps> = ({
             </thead>
             <tbody>
               {constructsList.map((c: any) => {
-                const q2 = c.q2_redundancy;
-                const isRelevant = q2 > 0;
+                const q2 = c.q2_redundancy ?? c.q2;
+                const isRelevant = q2 !== null && q2 !== undefined && q2 > 0;
                 let strength = 'None';
-                if (q2 >= 0.50) strength = 'Large (≥ 0.50)';
+                if (q2 === null || q2 === undefined) strength = 'Exogenous (N/A)';
+                else if (q2 >= 0.50) strength = 'Large (≥ 0.50)';
                 else if (q2 >= 0.25) strength = 'Medium (≥ 0.25)';
                 else if (q2 > 0) strength = 'Small (> 0)';
+
+                const ssoVal = c.sso ?? c.sso_redundancy ?? c.sso_communality;
+                const sseVal = c.sse ?? c.sse_redundancy ?? c.sse_communality;
 
                 return (
                   <tr key={c.construct_id}>
                     <td style={{ padding: '10px 14px', fontWeight: 600 }}>{c.construct_name || c.construct_id}</td>
-                    <td style={{ padding: '10px 14px' }}>{fmt(c.sso, 1)}</td>
-                    <td style={{ padding: '10px 14px' }}>{fmt(c.sse, 1)}</td>
-                    <td style={{ padding: '10px 14px', fontWeight: 600, color: isRelevant ? '#16a34a' : '#dc2626' }}>
-                      {fmt(q2)}
+                    <td style={{ padding: '10px 14px' }}>{ssoVal != null ? fmt(ssoVal, 1) : '-'}</td>
+                    <td style={{ padding: '10px 14px' }}>{sseVal != null ? fmt(sseVal, 1) : '-'}</td>
+                    <td style={{ padding: '10px 14px', fontWeight: 600, color: isRelevant ? '#16a34a' : q2 != null ? '#dc2626' : 'var(--color-text-muted)' }}>
+                      {q2 != null ? fmt(q2) : '-'}
                     </td>
                     <td style={{ padding: '10px 14px' }}>
                       <span style={{
@@ -210,8 +214,8 @@ export const AdvancedResultPanels: React.FC<AdvancedResultPanelsProps> = ({
                         borderRadius: 6,
                         fontSize: 11,
                         fontWeight: 600,
-                        backgroundColor: isRelevant ? '#dcfce7' : '#fee2e2',
-                        color: isRelevant ? '#166534' : '#991b1b',
+                        backgroundColor: isRelevant ? '#dcfce7' : q2 != null ? '#fee2e2' : '#f1f5f9',
+                        color: isRelevant ? '#166534' : q2 != null ? '#991b1b' : '#64748b',
                       }}>
                         {strength}
                       </span>
@@ -238,25 +242,32 @@ export const AdvancedResultPanels: React.FC<AdvancedResultPanelsProps> = ({
                   </tr>
                 </thead>
                 <tbody>
-                  {q2Effects.map((p: any, idx: number) => (
-                    <tr key={idx}>
-                      <td style={{ padding: '10px 14px', fontWeight: 600 }}>{p.source} → {p.target}</td>
-                      <td style={{ padding: '10px 14px' }}>{p.target}</td>
-                      <td style={{ padding: '10px 14px', fontWeight: 600 }}>{fmt(p.q2_effect)}</td>
-                      <td style={{ padding: '10px 14px' }}>
-                        <span style={{
-                          padding: '3px 8px',
-                          borderRadius: 6,
-                          fontSize: 11,
-                          fontWeight: 600,
-                          backgroundColor: p.q2_effect >= 0.02 ? '#dcfce7' : '#f1f5f9',
-                          color: p.q2_effect >= 0.02 ? '#166534' : '#64748b',
-                        }}>
-                          {p.rating || (p.q2_effect >= 0.35 ? 'Large' : p.q2_effect >= 0.15 ? 'Medium' : p.q2_effect >= 0.02 ? 'Small' : 'None')}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                  {q2Effects.map((p: any, idx: number) => {
+                    const src = p.source || p.predictor;
+                    const tgt = p.target;
+                    const eff = p.q2_effect ?? p.q2_effect_size ?? 0;
+                    const rate = p.rating || p.magnitude || (eff >= 0.35 ? 'Large' : eff >= 0.15 ? 'Medium' : eff >= 0.02 ? 'Small' : 'None');
+
+                    return (
+                      <tr key={idx}>
+                        <td style={{ padding: '10px 14px', fontWeight: 600 }}>{src} → {tgt}</td>
+                        <td style={{ padding: '10px 14px' }}>{tgt}</td>
+                        <td style={{ padding: '10px 14px', fontWeight: 600 }}>{fmt(eff)}</td>
+                        <td style={{ padding: '10px 14px' }}>
+                          <span style={{
+                            padding: '3px 8px',
+                            borderRadius: 6,
+                            fontSize: 11,
+                            fontWeight: 600,
+                            backgroundColor: eff >= 0.02 ? '#dcfce7' : '#f1f5f9',
+                            color: eff >= 0.02 ? '#166534' : '#64748b',
+                          }}>
+                            {rate}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

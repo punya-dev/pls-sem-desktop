@@ -116,19 +116,19 @@ def run_micom(
     weights_g2 = res_g2.get("measurement", {}).get("outer_weights", {})
     weights_pooled = res_pooled.get("measurement", {}).get("outer_weights", {})
 
+    from engine.pls.algorithm import parse_model_spec
+    constructs_dict, ind_col_map, paths_list = parse_model_spec(spec_dict)
+    col_to_iid = {col: iid for iid, col in ind_col_map.items()}
+
     # Map construct indicators
     c_to_inds: Dict[str, List[str]] = {}
-    for c in constructs:
-        cid = c["id"]
-        if "indicators" in c and c["indicators"]:
-            inds = [i for i in c["indicators"] if i in df.columns]
-        else:
-            inds = [
-                (ind.get("name") or ind.get("column") or ind.get("id"))
-                for ind in spec_dict.get("indicators", [])
-                if (ind.get("construct_id") or ind.get("construct")) == cid and (ind.get("name") or ind.get("column") or ind.get("id")) in df.columns
-            ]
-        c_to_inds[cid] = inds
+    for cid, c in constructs_dict.items():
+        cols = []
+        for iid in c.get("indicators", []):
+            col = ind_col_map.get(iid, iid)
+            if col in df.columns and col not in cols:
+                cols.append(col)
+        c_to_inds[cid] = cols
 
     # Original Step 2: Correlation c between composite scores using G1 vs G2 weights on pooled data
     orig_c: Dict[str, float] = {}
@@ -140,9 +140,9 @@ def run_micom(
         if len(inds) == 0:
             continue
 
-        w1_vec = np.array([float(weights_g1.get(cid, {}).get(i, 0.0)) for i in inds], dtype=float)
-        w2_vec = np.array([float(weights_g2.get(cid, {}).get(i, 0.0)) for i in inds], dtype=float)
-        wp_vec = np.array([float(weights_pooled.get(cid, {}).get(i, 0.0)) for i in inds], dtype=float)
+        w1_vec = np.array([float(weights_g1.get(cid, {}).get(col_to_iid.get(i, i), weights_g1.get(cid, {}).get(i, 0.0))) for i in inds], dtype=float)
+        w2_vec = np.array([float(weights_g2.get(cid, {}).get(col_to_iid.get(i, i), weights_g2.get(cid, {}).get(i, 0.0))) for i in inds], dtype=float)
+        wp_vec = np.array([float(weights_pooled.get(cid, {}).get(col_to_iid.get(i, i), weights_pooled.get(cid, {}).get(i, 0.0))) for i in inds], dtype=float)
 
         X_pooled = df_pooled[inds].values.astype(float)
         X_p_norm = _standardize_columns(X_pooled)
@@ -201,9 +201,9 @@ def run_micom(
             inds = c_to_inds.get(cid, [])
             if not inds:
                 continue
-            w1_p = np.array([float(pw1.get(cid, {}).get(i, 0.0)) for i in inds], dtype=float)
-            w2_p = np.array([float(pw2.get(cid, {}).get(i, 0.0)) for i in inds], dtype=float)
-            wp_vec = np.array([float(weights_pooled.get(cid, {}).get(i, 0.0)) for i in inds], dtype=float)
+            w1_p = np.array([float(pw1.get(cid, {}).get(col_to_iid.get(i, i), pw1.get(cid, {}).get(i, 0.0))) for i in inds], dtype=float)
+            w2_p = np.array([float(pw2.get(cid, {}).get(col_to_iid.get(i, i), pw2.get(cid, {}).get(i, 0.0))) for i in inds], dtype=float)
+            wp_vec = np.array([float(weights_pooled.get(cid, {}).get(col_to_iid.get(i, i), weights_pooled.get(cid, {}).get(i, 0.0))) for i in inds], dtype=float)
 
             X_pooled = df_pooled[inds].values.astype(float)
             X_p_norm = _standardize_columns(X_pooled)

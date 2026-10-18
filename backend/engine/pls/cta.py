@@ -150,12 +150,12 @@ def run_cta_pls(
     Executes Confirmatory Tetrad Analysis (CTA-PLS) (CTA-01 to CTA-06).
     """
     spec_dict = spec.model_dump(mode="json", by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
-    constructs = spec_dict.get("constructs", [])
+    from engine.pls.algorithm import parse_model_spec
+    constructs_dict, ind_col_map, paths_list = parse_model_spec(spec_dict)
 
     # Filter constructs to analyze
     target_constructs = []
-    for c in constructs:
-        cid = c["id"]
+    for cid, c in constructs_dict.items():
         c_type = c.get("type", "reflective")
         if construct_id is not None and cid != construct_id:
             continue
@@ -166,22 +166,21 @@ def run_cta_pls(
 
     for c in target_constructs:
         cid = c["id"]
-        if "indicators" in c and c["indicators"]:
-            inds = [i for i in c["indicators"] if i in df.columns]
-        else:
-            inds = [
-                (ind.get("name") or ind.get("column") or ind.get("id"))
-                for ind in spec_dict.get("indicators", [])
-                if (ind.get("construct_id") or ind.get("construct")) == cid and (ind.get("name") or ind.get("column") or ind.get("id")) in df.columns
-            ]
+        c_name = c.get("name", cid)
+        inds = []
+        for iid in c.get("indicators", []):
+            col = ind_col_map.get(iid, iid)
+            if col in df.columns and col not in inds:
+                inds.append(col)
 
         p = len(inds)
         # CTA-01: Eligibility check (>= 4 indicators)
         if p < 4:
             results_per_construct.append({
                 "construct_id": cid,
+                "construct_name": c_name,
                 "applicable": False,
-                "na_reason": f"Construct '{cid}' has {p} indicators. CTA-PLS requires at least 4 indicators to form vanishing tetrads (Hair et al. 2017).",
+                "na_reason": f"Construct '{c_name}' has {p} indicators. CTA-PLS requires at least 4 indicators to form vanishing tetrads (Hair et al. 2017).",
             })
             continue
 

@@ -604,12 +604,18 @@ def run_pipeline(
     construct_ids = list(constructs.keys())
 
     # 1. Collect required columns
+    df_col_map = {str(c).strip().lower(): c for c in df.columns}
     all_required_cols: List[str] = []
     for c in constructs.values():
         for iid in c["indicators"]:
             col = ind_col_map.get(iid, iid)
             if col not in df.columns:
-                raise KeyError(f"Indicator '{iid}' mapped to column '{col}' not found in dataset columns.")
+                matched = df_col_map.get(str(col).strip().lower())
+                if matched:
+                    ind_col_map[iid] = matched
+                    col = matched
+                else:
+                    raise KeyError(f"Indicator '{iid}' mapped to column '{col}' not found in dataset columns.")
             all_required_cols.append(col)
 
     unique_required_cols = list(dict.fromkeys(all_required_cols))

@@ -196,6 +196,9 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({
             datasetId,
             omissionDistance,
             computeQ2Effects,
+            spec,
+            columns: datasetHeaders,
+            rows: datasetRows,
           });
           break;
         }
@@ -213,6 +216,9 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({
             seed,
             alpha,
             includeSobel,
+            spec,
+            columns: datasetHeaders,
+            rows: datasetRows,
           });
           break;
         }
@@ -231,6 +237,9 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({
             nBoot,
             seed,
             alpha,
+            spec,
+            columns: datasetHeaders,
+            rows: datasetRows,
           });
           break;
         }
@@ -247,6 +256,9 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({
             nBoot,
             seed,
             alpha,
+            spec,
+            columns: datasetHeaders,
+            rows: datasetRows,
           });
           break;
         }
@@ -260,6 +272,9 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({
             target,
             datasetId,
             level: 'both',
+            spec,
+            columns: datasetHeaders,
+            rows: datasetRows,
           });
           break;
         }
@@ -275,6 +290,9 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({
             datasetId,
             hocType,
             approach,
+            spec,
+            columns: datasetHeaders,
+            rows: datasetRows,
           });
           break;
         }
@@ -287,6 +305,9 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({
             nBoot,
             seed,
             alpha,
+            spec,
+            columns: datasetHeaders,
+            rows: datasetRows,
           });
           break;
         }
@@ -302,6 +323,9 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({
             nPermutations,
             alpha,
             seed,
+            spec,
+            columns: datasetHeaders,
+            rows: datasetRows,
           });
           break;
         }
@@ -318,6 +342,9 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({
             nPermutations,
             seed,
             alpha,
+            spec,
+            columns: datasetHeaders,
+            rows: datasetRows,
           });
           break;
         }
@@ -329,6 +356,9 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({
             maxSegments,
             datasetId,
             seed,
+            spec,
+            columns: datasetHeaders,
+            rows: datasetRows,
           });
           break;
         }
@@ -339,6 +369,9 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({
             nSegments,
             datasetId,
             seed,
+            spec,
+            columns: datasetHeaders,
+            rows: datasetRows,
           });
           break;
         }
@@ -350,6 +383,9 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({
             kFolds,
             repetitions,
             seed,
+            spec,
+            columns: datasetHeaders,
+            rows: datasetRows,
           });
           break;
         }
@@ -373,6 +409,9 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({
             nBoot: 200,
             seed,
             alpha,
+            spec,
+            columns: datasetHeaders,
+            rows: datasetRows,
           });
           break;
         }
@@ -387,6 +426,9 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({
             nPermutations: 500,
             seed,
             alpha,
+            spec,
+            columns: datasetHeaders,
+            rows: datasetRows,
           });
           break;
         }
