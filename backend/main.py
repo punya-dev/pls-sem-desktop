@@ -58,6 +58,17 @@ from engine.pls.micom import run_micom
 from engine.pls.mga import analyze_mga
 from engine.pls.fimix import analyze_fimix
 from engine.pls.pos import analyze_pos
+from engine.pls.otg import run_otg_analysis
+from engine.pls.ex_post import (
+    compute_crosstab_overlap,
+    run_logistic_segment_regression,
+    compare_explanatory_groups_with_pos,
+)
+from data.groups import (
+    generate_categorical_groups,
+    append_column_to_dataset,
+    seed_corporate_reputation_project,
+)
 from engine.pls.power import (
     calculate_ten_times_rule,
     compute_statistical_power,
@@ -589,6 +600,82 @@ def reverse_code_data(req: ReverseCodeRequest):
         ds_save(conn, req.dataset_id, ds["name"], df, parent_id=ds.get("parent_id"), kind=ds.get("kind", "imported"))
         conn.close()
         return {"status": "updated_in_place", "columns": req.columns}
+
+
+# --- Data Groups & Template Endpoints (A18-DAT-01 to A18-DAT-05, A18-CON-01) ---
+
+class GenerateGroupsRequest(BaseModel):
+    path: str
+    dataset_id: Optional[str] = None
+    column: str
+    min_size: int = 10
+    max_paths_predictors: int = 2
+
+
+class AppendColumnRequest(BaseModel):
+    path: str
+    dataset_id: str
+    column_name: str
+    values: List[Any]
+    role: str = "group"
+    label: Optional[str] = None
+
+
+class LoadTemplateRequest(BaseModel):
+    path: str
+
+
+@app.post("/data/groups/generate")
+def api_generate_groups(req: GenerateGroupsRequest):
+    if not os.path.exists(req.path):
+        return {"error": "Project not found"}
+    conn = sqlite3.connect(req.path)
+    try:
+        ds = ds_load(conn, req.dataset_id)
+        if not ds:
+            return {"error": "Dataset not found"}
+        res = generate_categorical_groups(
+            df=ds["df"],
+            column=req.column,
+            min_size=req.min_size,
+            max_paths_predictors=req.max_paths_predictors,
+        )
+        return {"status": "success", "groups_info": res}
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        conn.close()
+
+
+@app.post("/data/append-column")
+def api_append_column(req: AppendColumnRequest):
+    if not os.path.exists(req.path):
+        return {"error": "Project not found"}
+    conn = sqlite3.connect(req.path)
+    try:
+        res = append_column_to_dataset(
+            conn=conn,
+            dataset_id=req.dataset_id,
+            column_name=req.column_name,
+            values=req.values,
+            role=req.role,
+            label=req.label,
+        )
+        return res
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        conn.close()
+
+
+@app.post("/project/load-template/corporate-reputation")
+def api_load_corporate_reputation_template(req: LoadTemplateRequest):
+    try:
+        res = seed_corporate_reputation_project(req.path)
+        return res
+    except Exception as e:
+        return {"error": str(e)}
+
 
 
 # --- Screening Endpoints (SCR-01 to SCR-10) ---
@@ -2056,6 +2143,24 @@ class POSAnalysisRequest(BaseAnalysisRequest):
     seed: Optional[int] = 42
 
 
+class OTGAnalysisRequest(BaseAnalysisRequest):
+    group_col: str
+    group_values: Optional[List[Any]] = None
+    n_boot: int = 500
+    n_permutations: int = 1000
+    seed: Optional[int] = 42
+    alpha: float = 0.05
+
+
+class ExPostAnalysisRequest(BaseAnalysisRequest):
+    segment_col: str
+    explanatory_cols: List[str]
+    crosstab_cat_col: Optional[str] = None
+    run_pos_comparison: bool = True
+    min_sample_size: int = 54
+
+
+
 @app.post("/analysis/cta")
 def api_analyze_cta(req: CTAAnalysisRequest):
     try:
@@ -2188,6 +2293,87 @@ def api_analyze_pos(req: POSAnalysisRequest):
         return {"status": "success", "results": res}
     except Exception as e:
         return {"error": str(e)}
+
+
+@app.post("/analysis/otg")
+def api_analyze_otg(req: OTGAnalysisRequest):
+    try:
+        df, spec = _load_data_and_spec(req.project_path, req.model_id, req.dataset_id, req.spec, req.columns, req.rows)
+        res = run_otg_analysis(
+            df=df,
+            spec=spec,
+            group_col=req.group_col,
+            group_values=req.group_values,
+            n_boot=req.n_boot,
+            n_permutations=req.n_permutations,
+            seed=req.seed,
+            alpha=req.alpha,
+        )
+        project_io.save_results(
+            path=req.project_path,
+            algorithm="pls",
+            results_dict=res,
+            model_id=req.model_id,
+            analysis_type="otg",
+            dataset_id=req.dataset_id,
+            params={"group_col": req.group_col, "n_boot": req.n_boot, "n_permutations": req.n_permutations},
+        )
+        return {"status": "success", "results": res}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/analysis/ex-post")
+def api_analyze_ex_post(req: ExPostAnalysisRequest):
+    try:
+        df, spec = _load_data_and_spec(req.project_path, req.model_id, req.dataset_id, req.spec, req.columns, req.rows)
+        if req.segment_col not in df.columns:
+            return {"error": f"Segment column '{req.segment_col}' not found in dataset."}
+
+        segment_vals = df[req.segment_col]
+        results: Dict[str, Any] = {
+            "segment_col": req.segment_col,
+            "explanatory_cols": req.explanatory_cols,
+        }
+
+        # 1. Crosstab & Overlap
+        crosstab_col = req.crosstab_cat_col or (req.explanatory_cols[0] if req.explanatory_cols else None)
+        if crosstab_col and crosstab_col in df.columns:
+            crosstab_res = compute_crosstab_overlap(segment_vals, df[crosstab_col])
+            results["crosstab_analysis"] = crosstab_res
+
+        # 2. Logistic Regression
+        if req.explanatory_cols:
+            valid_expl = [c for c in req.explanatory_cols if c in df.columns]
+            if valid_expl:
+                logit_res = run_logistic_segment_regression(segment_vals, df[valid_expl])
+                results["logistic_regression"] = logit_res
+
+        # 3. Explanatory group comparison with POS
+        if req.run_pos_comparison and crosstab_col and crosstab_col in df.columns:
+            pos_res = analyze_pos(df=df, spec=spec, n_segments=2)
+            pos_comp = compare_explanatory_groups_with_pos(
+                df=df,
+                spec=spec,
+                explanatory_col=crosstab_col,
+                pos_results=pos_res,
+                min_sample_size=req.min_sample_size,
+            )
+            results["pos_comparison"] = pos_comp
+
+        project_io.save_results(
+            path=req.project_path,
+            algorithm="pls",
+            results_dict=results,
+            model_id=req.model_id,
+            analysis_type="ex_post",
+            dataset_id=req.dataset_id,
+            params={"segment_col": req.segment_col, "explanatory_cols": req.explanatory_cols},
+        )
+        return {"status": "success", "results": results}
+    except Exception as e:
+        return {"error": str(e)}
+
 
 
 # --- Phase 6: Power, Copula, NCA, PLSpredict, and Reporting Endpoints ---

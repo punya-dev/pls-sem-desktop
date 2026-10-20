@@ -1,13 +1,19 @@
 """
-Confirmatory Tetrad Analysis (CTA-PLS) (Section 19: CTA-01 to CTA-06).
-Source of truth: Hair et al. (2017) Ch. 8 & Gudergan et al. (2008).
-Evaluates whether vanishing tetrads hold for reflective constructs with >= 4 indicators.
-Eliminates redundant tetrads using QR decomposition (keeping p*(p-3)/2 independent tetrads),
-and uses Bonferroni-adjusted bootstrap confidence intervals.
+Confirmatory Tetrad Analysis (CTA-PLS) (A18-CTA-01 to A18-CTA-14).
+Source of truth: Hair et al. (2018) Ch. 3 & Gudergan et al. (2008).
+
+Implements:
+1. Evaluation of vanishing tetrads H0: tau = 0 to empirically test reflective vs formative specifications.
+2. Applies to reflective and formative constructs alike (starts from reflective null).
+3. Nonredundant tetrad selection via QR decomposition with column pivoting (r = p*(p-3)/2).
+4. Bias-corrected Bonferroni adjusted bootstrap confidence intervals (default alpha = 0.10 / 90% adj. CI).
+5. Minimum indicator correlation pre-check table.
+6. Preservation of original tetrad numbering from full combinatorial enumeration.
 """
 
 from typing import List, Dict, Any, Optional, Tuple, Union
 import itertools
+import math
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -19,36 +25,60 @@ def generate_all_tetrads_for_block(
     indicators: List[str],
 ) -> List[Dict[str, Any]]:
     """
-    Generates all candidate tetrad definitions for p indicators.
-    For each combination of 4 indicators (i, j, k, l):
+    Generates all candidate tetrad definitions for p indicators with original 1-based indexing (A18-CTA-03, A18-CTA-05).
+    For each combination of 4 indicators (i < j < k < l):
       tau_1 = sigma_ij * sigma_kl - sigma_ik * sigma_jl
       tau_2 = sigma_ij * sigma_kl - sigma_il * sigma_jk
+      tau_3 = sigma_ik * sigma_jl - sigma_il * sigma_jk
     """
     p = len(indicators)
     if p < 4:
         return []
 
     tetrad_defs = []
-    # Loop over all combinations of 4 distinct indicators
+    tetrad_counter = 1
+
+    # Loop over all combinations of 4 distinct indicators in order
     for combo in itertools.combinations(range(p), 4):
         i, j, k, l = combo
         name_i, name_j, name_k, name_l = indicators[i], indicators[j], indicators[k], indicators[l]
-        # Tetrad 1
+        idx_label = f"{i+1}{j+1}{k+1}{l+1}"
+
+        # Tetrad 1: tau_ijkl = sigma_ij * sigma_kl - sigma_ik * sigma_jl
         tetrad_defs.append({
+            "original_index": tetrad_counter,
             "indices": (i, j, k, l),
             "pair1": (i, j), "pair2": (k, l),
             "pair3": (i, k), "pair4": (j, l),
-            "label": f"({name_i},{name_j})({name_k},{name_l}) - ({name_i},{name_k})({name_j},{name_l})",
+            "tetrad_name": f"τ_{idx_label}",
+            "label": f"τ_{tetrad_counter} ({name_i},{name_j})({name_k},{name_l}) - ({name_i},{name_k})({name_j},{name_l})",
             "names": (name_i, name_j, name_k, name_l),
         })
-        # Tetrad 2
+        tetrad_counter += 1
+
+        # Tetrad 2: tau_iklj = sigma_ij * sigma_kl - sigma_il * sigma_jk
         tetrad_defs.append({
+            "original_index": tetrad_counter,
             "indices": (i, j, k, l),
             "pair1": (i, j), "pair2": (k, l),
             "pair3": (i, l), "pair4": (j, k),
-            "label": f"({name_i},{name_j})({name_k},{name_l}) - ({name_i},{name_l})({name_j},{name_k})",
+            "tetrad_name": f"τ_{i+1}{j+1}{l+1}{k+1}",
+            "label": f"τ_{tetrad_counter} ({name_i},{name_j})({name_k},{name_l}) - ({name_i},{name_l})({name_j},{name_k})",
             "names": (name_i, name_j, name_k, name_l),
         })
+        tetrad_counter += 1
+
+        # Tetrad 3: tau_iljk = sigma_ik * sigma_jl - sigma_il * sigma_jk
+        tetrad_defs.append({
+            "original_index": tetrad_counter,
+            "indices": (i, j, k, l),
+            "pair1": (i, k), "pair2": (j, l),
+            "pair3": (i, l), "pair4": (j, k),
+            "tetrad_name": f"τ_{i+1}{k+1}{l+1}{j+1}",
+            "label": f"τ_{tetrad_counter} ({name_i},{name_k})({name_j},{name_l}) - ({name_i},{name_l})({name_j},{name_k})",
+            "names": (name_i, name_j, name_k, name_l),
+        })
+        tetrad_counter += 1
 
     return tetrad_defs
 
@@ -80,16 +110,14 @@ def select_nonredundant_tetrads(
     p_indicators: int,
 ) -> Tuple[List[Dict[str, Any]], np.ndarray]:
     """
-    Selects a maximal linearly independent set of r = p*(p-3)/2 tetrads (CTA-03).
-    Constructs Jacobian matrix J (derivatives of tetrads wrt unique covariance elements vech(S))
-    and uses QR decomposition with column pivoting.
+    Selects a maximal linearly independent set of r = p*(p-3)/2 nonredundant tetrads (A18-CTA-04, A18-CTA-05).
+    Constructs Jacobian matrix J and performs QR decomposition with column pivoting.
     """
     expected_r = (p_indicators * (p_indicators - 3)) // 2
     if len(all_tetrad_defs) <= expected_r:
         return all_tetrad_defs, np.arange(len(all_tetrad_defs))
 
-    # Compute Jacobians wrt unique off-diagonal covariance elements
-    # Map off-diagonal pairs (u, v) with u < v to index
+    # Map unique off-diagonal pairs (u, v) with u < v
     pair_map = {}
     pair_count = 0
     for u in range(p_indicators):
@@ -125,9 +153,8 @@ def select_nonredundant_tetrads(
         if p4 in pair_map:
             J[t_idx, pair_map[p4]] -= s3
 
-    # QR decomposition with pivoting on J^T to select linearly independent rows of J
     from scipy.linalg import qr
-    # J is (M, N_vars). Transpose J.T is (N_vars, M)
+    # Pivot QR on J^T to find independent rows of J
     _, _, p_indices = qr(J.T, pivoting=True)
 
     selected_indices = sorted(list(p_indices[:expected_r]))
@@ -140,33 +167,32 @@ def run_cta_pls(
     df: pd.DataFrame,
     spec: Union[Dict[str, Any], Any],
     construct_id: Optional[str] = None,
-    n_boot: int = 500,
+    n_boot: int = 5000,
     seed: Optional[int] = 42,
-    alpha: float = 0.05,
+    alpha: float = 0.10,  # A18-CTA-10: recommended alpha is 0.10 (90% adjusted CI)
     progress_callback: Optional[Any] = None,
     cancel_event: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """
-    Executes Confirmatory Tetrad Analysis (CTA-PLS) (CTA-01 to CTA-06).
+    Executes Confirmatory Tetrad Analysis (CTA-PLS) (A18-CTA-01 to A18-CTA-14).
     """
     spec_dict = spec.model_dump(mode="json", by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
     from engine.pls.algorithm import parse_model_spec
     constructs_dict, ind_col_map, paths_list = parse_model_spec(spec_dict)
 
-    # Filter constructs to analyze
+    # A18-CTA-13: Allow CTA on formative-drawn and reflective-drawn constructs alike
     target_constructs = []
     for cid, c in constructs_dict.items():
-        c_type = c.get("type", "reflective")
         if construct_id is not None and cid != construct_id:
             continue
-        if c_type == "reflective":
-            target_constructs.append(c)
+        target_constructs.append(c)
 
     results_per_construct: List[Dict[str, Any]] = []
 
     for c in target_constructs:
         cid = c["id"]
         c_name = c.get("name", cid)
+        c_drawn_type = c.get("type", "reflective")
         inds = []
         for iid in c.get("indicators", []):
             col = ind_col_map.get(iid, iid)
@@ -174,13 +200,15 @@ def run_cta_pls(
                 inds.append(col)
 
         p = len(inds)
-        # CTA-01: Eligibility check (>= 4 indicators)
+
+        # A18-CTA-08: Eligibility check (>= 4 indicators)
         if p < 4:
             results_per_construct.append({
                 "construct_id": cid,
                 "construct_name": c_name,
+                "drawn_type": c_drawn_type,
                 "applicable": False,
-                "na_reason": f"Construct '{c_name}' has {p} indicators. CTA-PLS requires at least 4 indicators to form vanishing tetrads (Hair et al. 2017).",
+                "na_reason": f"Construct '{c_name}' has {p} indicators. CTA-PLS requires at least 4 indicators to form vanishing tetrads (Hair et al. 2018).",
             })
             continue
 
@@ -189,19 +217,31 @@ def run_cta_pls(
         X = sub_df.values.astype(float)
         cov_S = np.cov(X, rowvar=False)
 
+        # Compute indicator correlation matrix and minimum off-diagonal correlation (A18-CTA-08)
+        std_devs = np.sqrt(np.diag(cov_S))
+        std_outer = np.outer(std_devs, std_devs)
+        corr_matrix = np.divide(cov_S, std_outer, out=np.zeros_like(cov_S), where=std_outer != 0)
+        np.fill_diagonal(corr_matrix, 1.0)
+
+        # Minimum off-diagonal correlation
+        off_diag_corrs = []
+        for u in range(p):
+            for v in range(u + 1, p):
+                off_diag_corrs.append(float(corr_matrix[u, v]))
+        min_indicator_corr = min(off_diag_corrs) if off_diag_corrs else 0.0
+
         # Generate candidate tetrads and select r = p*(p-3)/2 nonredundant tetrads
         all_tetrads = generate_all_tetrads_for_block(inds)
+        total_m_tetrads = len(all_tetrads)
         nonred_tetrads, _ = select_nonredundant_tetrads(cov_S, all_tetrads, p)
         r = len(nonred_tetrads)
 
         orig_values = compute_tetrad_values(cov_S, nonred_tetrads)
 
-        # CTA-05: Bonferroni-adjusted alpha
+        # Bonferroni-adjusted alpha (A18-CTA-06)
         alpha_adj = alpha / max(1, r)
-        ci_lower_pct = 100.0 * (alpha_adj / 2.0)
-        ci_upper_pct = 100.0 * (1.0 - alpha_adj / 2.0)
 
-        # CTA-04: Bootstrapping
+        # Bootstrapping (A18-CTA-04)
         rng = np.random.default_rng(seed)
         seeds = spawn_seeds(seed or 42, n_boot)
 
@@ -215,12 +255,13 @@ def run_cta_pls(
             cov_b = np.cov(X_b, rowvar=False)
             boot_matrix[b, :] = compute_tetrad_values(cov_b, nonred_tetrads)
 
-            if progress_callback and b % 50 == 0:
+            if progress_callback and b % 100 == 0:
                 progress_callback(int((b / n_boot) * 100))
 
-        # Summarize tetrads
+        # Summarize tetrads with bias-corrected Bonferroni CIs
         tetrad_rows = []
         any_excludes_zero = False
+        significant_tetrad_numbers = []
 
         for t_idx, tdef in enumerate(nonred_tetrads):
             val = float(orig_values[t_idx])
@@ -229,18 +270,33 @@ def run_cta_pls(
             t_stat = (val / se) if se > 1e-12 else 0.0
             p_val = 2.0 * (1.0 - stats.norm.cdf(abs(t_stat)))
 
-            # Adjusted percentile CI
-            ci_low = float(np.percentile(rep_vals, ci_lower_pct))
-            ci_high = float(np.percentile(rep_vals, ci_upper_pct))
+            # Bias-corrected quantile calculation (A18-CTA-06)
+            prop_below = float(np.mean(rep_vals < val))
+            prop_below = max(1e-5, min(1.0 - 1e-5, prop_below))
+            z0 = stats.norm.ppf(prop_below)
 
-            includes_zero = (ci_low <= 0.0 <= ci_high)
+            z_lower = stats.norm.ppf(alpha_adj / 2.0)
+            z_upper = stats.norm.ppf(1.0 - alpha_adj / 2.0)
+
+            pct_lower = float(stats.norm.cdf(2.0 * z0 + z_lower) * 100.0)
+            pct_upper = float(stats.norm.cdf(2.0 * z0 + z_upper) * 100.0)
+            pct_lower = max(0.01, min(99.99, pct_lower))
+            pct_upper = max(0.01, min(99.99, pct_upper))
+
+            ci_low = float(np.percentile(rep_vals, pct_lower))
+            ci_high = float(np.percentile(rep_vals, pct_upper))
+
+            includes_zero = bool(ci_low <= 0.0 <= ci_high)
             if not includes_zero:
                 any_excludes_zero = True
+                significant_tetrad_numbers.append(tdef["original_index"])
 
             tetrad_rows.append({
+                "tetrad_number": tdef["original_index"],
+                "tetrad_name": tdef["tetrad_name"],
                 "tetrad_label": tdef["label"],
                 "indicators": list(tdef["names"]),
-                "value": round(val, 4),
+                "original_value": round(val, 4),
                 "bootstrap_mean": round(float(np.mean(rep_vals)), 4),
                 "standard_error": round(se, 4),
                 "t_statistic": round(float(t_stat), 4),
@@ -248,37 +304,53 @@ def run_cta_pls(
                 "ci_lower_adjusted": round(ci_low, 4),
                 "ci_upper_adjusted": round(ci_high, 4),
                 "includes_zero": includes_zero,
+                "is_significant": not includes_zero,
             })
 
-        # CTA-06: Decision rule
+        # Decision rule (A18-CTA-07)
         if not any_excludes_zero:
             verdict = "Reflective specification supported"
             interpretation = (
                 f"All {r} nonredundant vanishing tetrads hold (none of the Bonferroni-adjusted {int((1-alpha)*100)}% "
-                f"CIs exclude zero). The empirical data support a reflective measurement model (Hair et al. 2017)."
+                f"CIs exclude zero). The empirical data support a reflective measurement model (Hair et al. 2018)."
             )
         else:
-            verdict = "Reflective specification rejected (consider formative)"
+            verdict = "Formative specification supported (reflective rejected)"
             interpretation = (
-                f"At least one vanishing tetrad is statistically different from zero (Bonferroni-adjusted CI excludes zero). "
-                f"The assumption of a reflective unidimensional construct is rejected. "
-                f"Consider a formative specification or multidimensional structure (Gudergan et al. 2008)."
+                f"Significant vanishing tetrad(s) detected: {significant_tetrad_numbers}. "
+                f"At least one nonredundant tetrad statistically differs from zero at the adjusted {int((1-alpha)*100)}% level. "
+                f"The reflective null is rejected, supporting a formative specification (Hair et al. 2018; Gudergan et al. 2008)."
             )
 
         results_per_construct.append({
             "construct_id": cid,
+            "construct_name": c_name,
+            "drawn_type": c_drawn_type,
             "applicable": True,
             "n_indicators": p,
+            "total_possible_tetrads": total_m_tetrads,
             "n_nonredundant_tetrads": r,
+            "min_indicator_correlation": round(min_indicator_corr, 4),
+            "indicator_correlations_adequate": bool(min_indicator_corr > 0.10),
             "bonferroni_alpha": round(alpha_adj, 6),
             "verdict": verdict,
             "interpretation": interpretation,
+            "has_significant_tetrads": any_excludes_zero,
+            "significant_tetrad_numbers": significant_tetrad_numbers,
             "tetrads": tetrad_rows,
         })
 
     return {
         "constructs": results_per_construct,
         "n_boot": n_boot,
-        "alpha": alpha,
-        "note": "CTA-PLS tests whether vanishing tetrads hold for reflective constructs. Non-vanishing tetrads signal formative or multidimensional structures (Hair et al. 2017; Gudergan et al. 2008).",
+        "nominal_alpha": alpha,
+        "confidence_level": f"{int((1-alpha)*100)}%",
+        "decision_rules_help": {
+            "causality_direction": "Do indicators define the construct (formative) or are they consequences of the construct (reflective)?",
+            "interchangeability": "Are indicators interchangeable with identical content (reflective) or each capturing a unique facet (formative)?",
+            "covariation": "Are indicators expected to covary strongly (reflective) or can they vary independently (formative)?",
+            "nomological_net": "Do indicators share the same antecedents and consequences (reflective) or distinct ones (formative)?",
+            "source": "Jarvis, MacKenzie & Podsakoff (2003) & Bollen & Diamantopoulos (2017).",
+        },
+        "note": "CTA-PLS empirically evaluates vanishing tetrads. Any non-vanishing tetrad rejects reflective measurement in favor of formative, provided theory aligns (Hair et al. 2018).",
     }

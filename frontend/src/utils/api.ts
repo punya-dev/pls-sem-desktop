@@ -1010,6 +1010,147 @@ export const api = {
     }
   },
 
+  async analyzeOtg(data: {
+    projectPath: string;
+    modelId?: string;
+    groupCol: string;
+    groupValues?: any[];
+    nBoot?: number;
+    nPermutations?: number;
+    datasetId?: string;
+    seed?: number;
+    alpha?: number;
+    spec?: any;
+    columns?: string[];
+    rows?: any[][];
+  }): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE}/analysis/otg`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_path: data.projectPath,
+          model_id: data.modelId || 'default',
+          group_col: data.groupCol,
+          group_values: data.groupValues,
+          n_boot: data.nBoot || 500,
+          n_permutations: data.nPermutations || 1000,
+          dataset_id: data.datasetId,
+          seed: data.seed ?? 42,
+          alpha: data.alpha ?? 0.05,
+          spec: data.spec,
+          columns: data.columns,
+          rows: data.rows,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to run OTG analysis' };
+    }
+  },
+
+  async analyzeExPost(data: {
+    projectPath: string;
+    modelId?: string;
+    segmentCol: string;
+    explanatoryCols: string[];
+    crosstabCatCol?: string;
+    runPosComparison?: boolean;
+    minSampleSize?: number;
+    datasetId?: string;
+    spec?: any;
+    columns?: string[];
+    rows?: any[][];
+  }): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE}/analysis/ex-post`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_path: data.projectPath,
+          model_id: data.modelId || 'default',
+          segment_col: data.segmentCol,
+          explanatory_cols: data.explanatoryCols,
+          crosstab_cat_col: data.crosstabCatCol,
+          run_pos_comparison: data.runPosComparison ?? true,
+          min_sample_size: data.minSampleSize ?? 54,
+          dataset_id: data.datasetId,
+          spec: data.spec,
+          columns: data.columns,
+          rows: data.rows,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to run Ex Post segmentation' };
+    }
+  },
+
+  async generateDataGroups(data: {
+    path: string;
+    datasetId?: string;
+    column: string;
+    minSize?: number;
+    maxPathsPredictors?: number;
+  }): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE}/data/groups/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          path: data.path,
+          dataset_id: data.datasetId,
+          column: data.column,
+          min_size: data.minSize ?? 10,
+          max_paths_predictors: data.maxPathsPredictors ?? 2,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to generate data groups' };
+    }
+  },
+
+  async appendDatasetColumn(data: {
+    path: string;
+    datasetId: string;
+    columnName: string;
+    values: any[];
+    role?: string;
+    label?: string;
+  }): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE}/data/append-column`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          path: data.path,
+          dataset_id: data.datasetId,
+          column_name: data.columnName,
+          values: data.values,
+          role: data.role || 'group',
+          label: data.label,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to append column' };
+    }
+  },
+
+  async loadCorporateReputationTemplate(path: string): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE}/project/load-template/corporate-reputation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to load Corporate Reputation template' };
+    }
+  },
+
   async calculatePower(params: {
     nSamples?: number;
     nPredictors?: number;

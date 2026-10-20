@@ -282,12 +282,14 @@ def analyze_mga(
             "difference": round(diff, 4),
             "parametric_test": param_res,
             "welch_test": welch_res,
+            "welch_satterthwaite_test": welch_res,
             "permutation_test": {
                 "p_value": round(p_perm, 4),
                 "is_significant": perm_sig,
             },
             "henseler_pls_mga": henseler_res,
             "consensus_significant": bool(perm_sig or henseler_res["is_significant"]),
+            "consensus": bool(perm_sig or henseler_res["is_significant"]),
         })
 
     return {

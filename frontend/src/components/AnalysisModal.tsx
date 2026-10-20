@@ -64,6 +64,14 @@ const ANALYSIS_TITLES: Record<string, { title: string; subtitle: string }> = {
     title: 'PLS-POS Segmentation',
     subtitle: 'Prediction-oriented segmentation search algorithm',
   },
+  otg: {
+    title: 'Omnibus Test of Group Differences (OTG)',
+    subtitle: 'Simultaneous multigroup testing for K > 2 groups with FWER control (Sarstedt et al. 2011)',
+  },
+  ex_post: {
+    title: 'Ex Post Segmentation Analysis',
+    subtitle: 'Cross-tabulation overlap, logistic regression, and explanatory vs latent class comparison',
+  },
   predict: {
     title: 'PLSpredict (Out-of-Sample)',
     subtitle: 'k-fold cross-validation compared against naive Linear Model benchmark',
@@ -375,6 +383,40 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({
           });
           break;
         }
+        case 'otg': {
+          if (!groupCol) throw new Error('Please select a group variable.');
+          res = await api.analyzeOtg({
+            projectPath,
+            modelId,
+            groupCol,
+            datasetId,
+            nBoot,
+            nPermutations,
+            seed,
+            alpha,
+            spec,
+            columns: datasetHeaders,
+            rows: datasetRows,
+          });
+          break;
+        }
+        case 'ex_post': {
+          if (!groupCol) throw new Error('Please select an explanatory grouping column.');
+          res = await api.analyzeExPost({
+            projectPath,
+            modelId,
+            segmentCol: groupCol,
+            explanatoryCols: datasetHeaders.filter(h => h !== groupCol).slice(0, 5),
+            crosstabCatCol: groupCol,
+            runPosComparison: true,
+            minSampleSize: 54,
+            datasetId,
+            spec,
+            columns: datasetHeaders,
+            rows: datasetRows,
+          });
+          break;
+        }
         case 'predict': {
           res = await api.analyzePredict({
             projectPath,
@@ -547,6 +589,52 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({
               {errorMsg}
             </div>
           )}
+
+          {/* Book 2018 Reference Preset Bar */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '10px 14px',
+            backgroundColor: 'rgba(37, 99, 235, 0.06)',
+            border: '1px solid rgba(37, 99, 235, 0.2)',
+            borderRadius: '8px',
+            marginBottom: '18px',
+          }}>
+            <div>
+              <span style={{ fontSize: '12px', fontWeight: 600, color: '#1e40af' }}>
+                Hair et al. (2018) Benchmark Standards
+              </span>
+              <p style={{ margin: '2px 0 0', fontSize: '11px', color: '#64748b' }}>
+                Quickly apply 5,000 resamples, seed 42, α = 0.05, factor weighting defaults from the textbook.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setNBoot(5000);
+                setNPermutations(5000);
+                setSeed(42);
+                setAlpha(0.05);
+                setMethod('two_stage');
+                setApproach('repeated_indicators');
+              }}
+              style={{
+                backgroundColor: '#2563eb',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '6px',
+                padding: '6px 12px',
+                fontSize: '11px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              Apply Book 2018 Preset
+            </button>
+          </div>
+
 
           {/* Form Controls for Specific Analyses */}
           {analysisType === 'blindfolding' && (
@@ -848,11 +936,11 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({
             </div>
           )}
 
-          {(analysisType === 'micom' || analysisType === 'mga') && (
+          {(analysisType === 'micom' || analysisType === 'mga' || analysisType === 'otg' || analysisType === 'ex_post') && (
             <div>
               <div style={{ marginBottom: '16px' }}>
                 <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>
-                  Group Variable in Dataset
+                  {analysisType === 'ex_post' ? 'Observable Grouping / Segmentation Variable' : 'Group Variable in Dataset'}
                 </label>
                 <select
                   value={groupCol}
@@ -983,7 +1071,7 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({
           )}
 
           {/* Standard Resampling settings for bootstrap-based analyses */}
-          {(analysisType === 'mediation' || analysisType === 'moderation' || analysisType === 'quadratic' || analysisType === 'cta' || analysisType === 'mga') && (
+          {(analysisType === 'mediation' || analysisType === 'moderation' || analysisType === 'quadratic' || analysisType === 'cta' || analysisType === 'mga' || analysisType === 'otg') && (
             <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #e2e8f0' }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                 <div>
@@ -998,7 +1086,7 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({
                     <option value={500}>500 (Fast check)</option>
                     <option value={1000}>1,000 (Standard)</option>
                     <option value={2000}>2,000 (Research)</option>
-                    <option value={5000}>5,000 (Publication)</option>
+                    <option value={5000}>5,000 (Publication &amp; Hair et al. 2018 Preset)</option>
                   </select>
                 </div>
                 <div>

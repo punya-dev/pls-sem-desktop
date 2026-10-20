@@ -6,13 +6,16 @@ import { DataManagerModal } from '../components/DataManagerModal';
 import { BootstrapModal } from '../components/BootstrapModal';
 import { AnalysisModal } from '../components/AnalysisModal';
 import { AdvancedResultPanels } from '../components/AdvancedResultPanels';
+import { RulesOfThumbDrawer } from '../components/RulesOfThumbDrawer';
+import { GlossaryModal } from '../components/GlossaryModal';
 import type { ParsedDataset } from '../utils/dataset-parser';
 import { parseDatasetFile, processData } from '../utils/dataset-parser';
 import { api, type ValidationResponse } from '../utils/api';
 
 import {
   Upload, Trash2, RotateCcw, AlertTriangle, History, Check,
-  FileText, FileSpreadsheet, Code, FileCheck, GitCompare, Copy, Download
+  FileText, FileSpreadsheet, Code, FileCheck, GitCompare, Copy, Download,
+  BookOpen, HelpCircle
 } from 'lucide-react';
 import AppSidebar from '../components/AppSidebar';
 import '../model-canvas.css';
@@ -154,6 +157,8 @@ const ModelEditor = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const calcDropdownRef = useRef<HTMLDivElement>(null);
   const autoSaveTimerRef = useRef<any>(null);
+  const [isRulesDrawerOpen, setIsRulesDrawerOpen] = useState(false);
+  const [isGlossaryModalOpen, setIsGlossaryModalOpen] = useState(false);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -1455,6 +1460,17 @@ const ModelEditor = () => {
               className="subheader__dropdown-item"
               onClick={() => {
                 setIsCalcMenuOpen(false);
+                setAnalysisModalType('otg');
+                setIsAnalysisModalOpen(true);
+              }}
+            >
+              Omnibus Group Differences (OTG)...
+            </button>
+            <button
+              type="button"
+              className="subheader__dropdown-item"
+              onClick={() => {
+                setIsCalcMenuOpen(false);
                 setAnalysisModalType('fimix');
                 setIsAnalysisModalOpen(true);
               }}
@@ -1471,6 +1487,17 @@ const ModelEditor = () => {
               }}
             >
               Prediction-Oriented Segmentation (POS)...
+            </button>
+            <button
+              type="button"
+              className="subheader__dropdown-item"
+              onClick={() => {
+                setIsCalcMenuOpen(false);
+                setAnalysisModalType('ex_post');
+                setIsAnalysisModalOpen(true);
+              }}
+            >
+              Ex Post Segmentation...
             </button>
 
             <div style={{ height: 1, background: 'var(--color-border-subtle)', margin: '4px 0' }} />
@@ -1535,6 +1562,28 @@ const ModelEditor = () => {
           </div>
         )}
       </div>
+
+      {/* Rules of Thumb & Glossary Reference Buttons */}
+      <button
+        type="button"
+        className="subheader__btn"
+        onClick={() => setIsRulesDrawerOpen(true)}
+        title="Hair et al. (2018) Rules of Thumb Guidelines"
+        style={{ gap: 5, padding: '5px 10px', fontSize: 12, fontWeight: 500 }}
+      >
+        <BookOpen size={14} />
+        <span>Rules of Thumb</span>
+      </button>
+      <button
+        type="button"
+        className="subheader__btn"
+        onClick={() => setIsGlossaryModalOpen(true)}
+        title="PLS-SEM Advanced Glossary & Formula Definitions"
+        style={{ gap: 5, padding: '5px 10px', fontSize: 12, fontWeight: 500 }}
+      >
+        <HelpCircle size={14} />
+        <span>Glossary</span>
+      </button>
     </div>
   </div>
   {/* ═══ APP BODY ═══ */}
@@ -2389,6 +2438,20 @@ const ModelEditor = () => {
               </a>
               <a
                 href="#"
+                className={`tree-item ${activeResultTab === 'otg' ? 'active' : ''}`}
+                onClick={(e) => { e.preventDefault(); setActiveResultTab('otg'); }}
+              >
+                <div className="tree-item__left">
+                  <span>Omnibus Differences (OTG)</span>
+                </div>
+                {analysisResultsMap['otg'] && (
+                  <span className="tree-item__size" style={{ backgroundColor: 'var(--color-accent-subtle)', color: 'var(--color-accent)', fontWeight: 600 }}>
+                    OTG
+                  </span>
+                )}
+              </a>
+              <a
+                href="#"
                 className={`tree-item ${activeResultTab === 'fimix' ? 'active' : ''}`}
                 onClick={(e) => { e.preventDefault(); setActiveResultTab('fimix'); }}
               >
@@ -2404,6 +2467,20 @@ const ModelEditor = () => {
                 <div className="tree-item__left">
                   <span>Prediction-Oriented Seg. (POS)</span>
                 </div>
+              </a>
+              <a
+                href="#"
+                className={`tree-item ${activeResultTab === 'ex_post' ? 'active' : ''}`}
+                onClick={(e) => { e.preventDefault(); setActiveResultTab('ex_post'); }}
+              >
+                <div className="tree-item__left">
+                  <span>Ex Post Segmentation</span>
+                </div>
+                {analysisResultsMap['ex_post'] && (
+                  <span className="tree-item__size" style={{ backgroundColor: 'var(--color-accent-subtle)', color: 'var(--color-accent)', fontWeight: 600 }}>
+                    EXP
+                  </span>
+                )}
               </a>
               <a
                 href="#"
@@ -3716,6 +3793,16 @@ const ModelEditor = () => {
       setTimeout(() => setValidationSuccessToast(null), 3500);
     }}
     onClose={() => setIsAnalysisModalOpen(false)}
+  />
+
+  <RulesOfThumbDrawer
+    isOpen={isRulesDrawerOpen}
+    onClose={() => setIsRulesDrawerOpen(false)}
+  />
+
+  <GlossaryModal
+    isOpen={isGlossaryModalOpen}
+    onClose={() => setIsGlossaryModalOpen(false)}
   />
 
   {/* ─── Validation Error Modal ─── */}

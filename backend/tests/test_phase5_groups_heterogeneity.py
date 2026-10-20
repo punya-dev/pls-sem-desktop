@@ -85,8 +85,8 @@ def test_cta_pls_tetrad_analysis(synthetic_multigroup_data):
     # For p = 4 indicators, nonredundant tetrads r = 4*(4-3)/2 = 2
     inds = ["x_1", "x_2", "x_3", "x_4"]
     all_tetrads = generate_all_tetrads_for_block(inds)
-    # (4 choose 4) * 2 = 2 definitions
-    assert len(all_tetrads) == 2
+    # (4 choose 4) * 3 = 3 candidate definitions (r = 2 nonredundant)
+    assert len(all_tetrads) == 3
 
     # Run full CTA-PLS
     cta_res = run_cta_pls(df, spec, n_boot=100, seed=42)
