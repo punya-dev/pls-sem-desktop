@@ -4,13 +4,18 @@ import { useStore } from '../store';
 import { initModelCanvas, exportModelSpec, getModelCanvasState, loadModelCanvasState, setCanvasResults, renderModelCanvas, clearModelCanvas, resetModelStyles } from '../utils/model-canvas';
 import { DataManagerModal } from '../components/DataManagerModal';
 import { BootstrapModal } from '../components/BootstrapModal';
+import { AnalysisModal } from '../components/AnalysisModal';
+import { AdvancedResultPanels } from '../components/AdvancedResultPanels';
+import { RulesOfThumbDrawer } from '../components/RulesOfThumbDrawer';
+import { GlossaryModal } from '../components/GlossaryModal';
 import type { ParsedDataset } from '../utils/dataset-parser';
 import { parseDatasetFile, processData } from '../utils/dataset-parser';
 import { api, type ValidationResponse } from '../utils/api';
 
 import {
   Upload, Trash2, RotateCcw, AlertTriangle, History, Check,
-  FileText, FileSpreadsheet, Code, FileCheck, GitCompare, Copy, Download
+  FileText, FileSpreadsheet, Code, FileCheck, GitCompare, Copy, Download,
+  BookOpen, HelpCircle
 } from 'lucide-react';
 import AppSidebar from '../components/AppSidebar';
 import '../model-canvas.css';
@@ -139,6 +144,9 @@ const ModelEditor = () => {
   const [activeDataset, setActiveDataset] = useState<ParsedDataset | null>(() => activeStudyId ? datasetsByStudy[activeStudyId] ?? null : null);
   const [isImporting, setIsImporting] = useState(false);
   const [isBootstrapModalOpen, setIsBootstrapModalOpen] = useState(false);
+  const [isAnalysisModalOpen, setIsAnalysisModalOpen] = useState(false);
+  const [analysisModalType, setAnalysisModalType] = useState<string>('blindfolding');
+  const [analysisResultsMap, setAnalysisResultsMap] = useState<Record<string, any>>({});
   const [variableFilter, setVariableFilter] = useState('');
   const [isVarSearchOpen, setIsVarSearchOpen] = useState(false);
   const [isCalcMenuOpen, setIsCalcMenuOpen] = useState(false);
@@ -149,6 +157,8 @@ const ModelEditor = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const calcDropdownRef = useRef<HTMLDivElement>(null);
   const autoSaveTimerRef = useRef<any>(null);
+  const [isRulesDrawerOpen, setIsRulesDrawerOpen] = useState(false);
+  const [isGlossaryModalOpen, setIsGlossaryModalOpen] = useState(false);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -1285,7 +1295,10 @@ const ModelEditor = () => {
           <span className="material-symbols-outlined" style={{ fontSize: 16, marginLeft: -1 }}>expand_more</span>
         </button>
         {isCalcMenuOpen && (
-          <div className="subheader__dropdown-menu">
+          <div className="subheader__dropdown-menu" style={{ minWidth: 280, maxHeight: '82vh', overflowY: 'auto', padding: '6px' }}>
+            <div style={{ padding: '6px 10px 2px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--color-text-muted)', letterSpacing: '0.5px' }}>
+              PLS-SEM Algorithms
+            </div>
             <button
               type="button"
               className="subheader__dropdown-item"
@@ -1301,14 +1314,276 @@ const ModelEditor = () => {
               className="subheader__dropdown-item"
               onClick={() => {
                 setIsCalcMenuOpen(false);
+                setAnalysisModalType('consistent_pls');
+                setIsAnalysisModalOpen(true);
+              }}
+            >
+              Consistent PLS-SEM (PLSc)...
+            </button>
+            <button
+              type="button"
+              className="subheader__dropdown-item"
+              onClick={() => {
+                setIsCalcMenuOpen(false);
                 setIsBootstrapModalOpen(true);
               }}
             >
               Bootstrapping...
             </button>
+
+            <div style={{ height: 1, background: 'var(--color-border-subtle)', margin: '4px 0' }} />
+            <div style={{ padding: '6px 10px 2px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--color-text-muted)', letterSpacing: '0.5px' }}>
+              Prediction &amp; Model Fit
+            </div>
+            <button
+              type="button"
+              className="subheader__dropdown-item"
+              onClick={() => {
+                setIsCalcMenuOpen(false);
+                setActiveResultTab('model_fit');
+                switchView('results');
+              }}
+            >
+              Model Fit (SRMR &amp; Exact Fit)
+            </button>
+            <button
+              type="button"
+              className="subheader__dropdown-item"
+              onClick={() => {
+                setIsCalcMenuOpen(false);
+                setAnalysisModalType('blindfolding');
+                setIsAnalysisModalOpen(true);
+              }}
+            >
+              Blindfolding (Q² &amp; q²)...
+            </button>
+            <button
+              type="button"
+              className="subheader__dropdown-item"
+              onClick={() => {
+                setIsCalcMenuOpen(false);
+                setAnalysisModalType('predict');
+                setIsAnalysisModalOpen(true);
+              }}
+            >
+              PLSpredict (Out-of-sample)...
+            </button>
+            <button
+              type="button"
+              className="subheader__dropdown-item"
+              onClick={() => {
+                setIsCalcMenuOpen(false);
+                setAnalysisModalType('cta');
+                setIsAnalysisModalOpen(true);
+              }}
+            >
+              Confirmatory Tetrads (CTA-PLS)...
+            </button>
+
+            <div style={{ height: 1, background: 'var(--color-border-subtle)', margin: '4px 0' }} />
+            <div style={{ padding: '6px 10px 2px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--color-text-muted)', letterSpacing: '0.5px' }}>
+              Advanced Relationships
+            </div>
+            <button
+              type="button"
+              className="subheader__dropdown-item"
+              onClick={() => {
+                setIsCalcMenuOpen(false);
+                setAnalysisModalType('mediation');
+                setIsAnalysisModalOpen(true);
+              }}
+            >
+              Mediation Analysis...
+            </button>
+            <button
+              type="button"
+              className="subheader__dropdown-item"
+              onClick={() => {
+                setIsCalcMenuOpen(false);
+                setAnalysisModalType('moderation');
+                setIsAnalysisModalOpen(true);
+              }}
+            >
+              Moderation &amp; Simple Slopes...
+            </button>
+            <button
+              type="button"
+              className="subheader__dropdown-item"
+              onClick={() => {
+                setIsCalcMenuOpen(false);
+                setAnalysisModalType('quadratic');
+                setIsAnalysisModalOpen(true);
+              }}
+            >
+              Non-linear / Quadratic Effects...
+            </button>
+            <button
+              type="button"
+              className="subheader__dropdown-item"
+              onClick={() => {
+                setIsCalcMenuOpen(false);
+                setAnalysisModalType('hcm');
+                setIsAnalysisModalOpen(true);
+              }}
+            >
+              Higher-Order Constructs (HCM)...
+            </button>
+
+            <div style={{ height: 1, background: 'var(--color-border-subtle)', margin: '4px 0' }} />
+            <div style={{ padding: '6px 10px 2px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--color-text-muted)', letterSpacing: '0.5px' }}>
+              Groups &amp; Segmentation
+            </div>
+            <button
+              type="button"
+              className="subheader__dropdown-item"
+              onClick={() => {
+                setIsCalcMenuOpen(false);
+                setAnalysisModalType('micom');
+                setIsAnalysisModalOpen(true);
+              }}
+            >
+              Measurement Invariance (MICOM)...
+            </button>
+            <button
+              type="button"
+              className="subheader__dropdown-item"
+              onClick={() => {
+                setIsCalcMenuOpen(false);
+                setAnalysisModalType('mga');
+                setIsAnalysisModalOpen(true);
+              }}
+            >
+              Multigroup Analysis (MGA)...
+            </button>
+            <button
+              type="button"
+              className="subheader__dropdown-item"
+              onClick={() => {
+                setIsCalcMenuOpen(false);
+                setAnalysisModalType('otg');
+                setIsAnalysisModalOpen(true);
+              }}
+            >
+              Omnibus Group Differences (OTG)...
+            </button>
+            <button
+              type="button"
+              className="subheader__dropdown-item"
+              onClick={() => {
+                setIsCalcMenuOpen(false);
+                setAnalysisModalType('fimix');
+                setIsAnalysisModalOpen(true);
+              }}
+            >
+              Finite Mixture (FIMIX-PLS)...
+            </button>
+            <button
+              type="button"
+              className="subheader__dropdown-item"
+              onClick={() => {
+                setIsCalcMenuOpen(false);
+                setAnalysisModalType('pos');
+                setIsAnalysisModalOpen(true);
+              }}
+            >
+              Prediction-Oriented Segmentation (POS)...
+            </button>
+            <button
+              type="button"
+              className="subheader__dropdown-item"
+              onClick={() => {
+                setIsCalcMenuOpen(false);
+                setAnalysisModalType('ex_post');
+                setIsAnalysisModalOpen(true);
+              }}
+            >
+              Ex Post Segmentation...
+            </button>
+
+            <div style={{ height: 1, background: 'var(--color-border-subtle)', margin: '4px 0' }} />
+            <div style={{ padding: '6px 10px 2px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--color-text-muted)', letterSpacing: '0.5px' }}>
+              Diagnostics &amp; Reporting
+            </div>
+            <button
+              type="button"
+              className="subheader__dropdown-item"
+              onClick={() => {
+                setIsCalcMenuOpen(false);
+                setAnalysisModalType('ipma');
+                setIsAnalysisModalOpen(true);
+              }}
+            >
+              Importance-Performance Map (IPMA)...
+            </button>
+            <button
+              type="button"
+              className="subheader__dropdown-item"
+              onClick={() => {
+                setIsCalcMenuOpen(false);
+                setAnalysisModalType('power');
+                setIsAnalysisModalOpen(true);
+              }}
+            >
+              Sample Size &amp; Power Calculator...
+            </button>
+            <button
+              type="button"
+              className="subheader__dropdown-item"
+              onClick={() => {
+                setIsCalcMenuOpen(false);
+                setAnalysisModalType('copula');
+                setIsAnalysisModalOpen(true);
+              }}
+            >
+              Gaussian Copula Endogeneity...
+            </button>
+            <button
+              type="button"
+              className="subheader__dropdown-item"
+              onClick={() => {
+                setIsCalcMenuOpen(false);
+                setAnalysisModalType('nca');
+                setIsAnalysisModalOpen(true);
+              }}
+            >
+              Necessary Condition Analysis (NCA)...
+            </button>
+            <button
+              type="button"
+              className="subheader__dropdown-item"
+              onClick={() => {
+                setIsCalcMenuOpen(false);
+                setAnalysisModalType('report');
+                setIsAnalysisModalOpen(true);
+              }}
+            >
+              Executive Report (PDF / APA)...
+            </button>
           </div>
         )}
       </div>
+
+      {/* Rules of Thumb & Glossary Reference Buttons */}
+      <button
+        type="button"
+        className="subheader__btn"
+        onClick={() => setIsRulesDrawerOpen(true)}
+        title="Hair et al. (2018) Rules of Thumb Guidelines"
+        style={{ gap: 5, padding: '5px 10px', fontSize: 12, fontWeight: 500 }}
+      >
+        <BookOpen size={14} />
+        <span>Rules of Thumb</span>
+      </button>
+      <button
+        type="button"
+        className="subheader__btn"
+        onClick={() => setIsGlossaryModalOpen(true)}
+        title="PLS-SEM Advanced Glossary & Formula Definitions"
+        style={{ gap: 5, padding: '5px 10px', fontSize: 12, fontWeight: 500 }}
+      >
+        <HelpCircle size={14} />
+        <span>Glossary</span>
+      </button>
     </div>
   </div>
   {/* ═══ APP BODY ═══ */}
@@ -2006,6 +2281,247 @@ const ModelEditor = () => {
                 onClick={(e) => { e.preventDefault(); setActiveResultTab('collinearity'); }}
               >
                 Collinearity statistics (VIF)
+              </a>
+            </div>
+          </div>
+
+          {/* Model Fit & Prediction */}
+          <div className="tree-section">
+            <div className="tree-section__header" onClick={(e) => { (window as any).toggleTreeSection(e.currentTarget); }}>
+              <svg className="open" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
+              <span>Model Fit &amp; Prediction</span>
+            </div>
+            <div className="tree-section__items">
+              <a
+                href="#"
+                className={`tree-item ${activeResultTab === 'model_fit' ? 'active' : ''}`}
+                onClick={(e) => { e.preventDefault(); setActiveResultTab('model_fit'); }}
+              >
+                <div className="tree-item__left">
+                  <span>Model fit (SRMR)</span>
+                </div>
+                {plsResults?.fit && (
+                  <span className="tree-item__size" style={{ backgroundColor: 'var(--color-accent-subtle)', color: 'var(--color-accent)', fontWeight: 600 }}>
+                    fit
+                  </span>
+                )}
+              </a>
+              <a
+                href="#"
+                className={`tree-item ${activeResultTab === 'blindfolding' ? 'active' : ''}`}
+                onClick={(e) => { e.preventDefault(); setActiveResultTab('blindfolding'); }}
+              >
+                <div className="tree-item__left">
+                  <span>Predictive relevance (Q²)</span>
+                </div>
+                {analysisResultsMap['blindfolding'] && (
+                  <span className="tree-item__size" style={{ backgroundColor: 'var(--color-accent-subtle)', color: 'var(--color-accent)', fontWeight: 600 }}>
+                    Q²
+                  </span>
+                )}
+              </a>
+              <a
+                href="#"
+                className={`tree-item ${activeResultTab === 'predict' ? 'active' : ''}`}
+                onClick={(e) => { e.preventDefault(); setActiveResultTab('predict'); }}
+              >
+                <div className="tree-item__left">
+                  <span>PLSpredict (Out-of-sample)</span>
+                </div>
+                {analysisResultsMap['predict'] && (
+                  <span className="tree-item__size" style={{ backgroundColor: 'var(--color-accent-subtle)', color: 'var(--color-accent)', fontWeight: 600 }}>
+                    cv
+                  </span>
+                )}
+              </a>
+              <a
+                href="#"
+                className={`tree-item ${activeResultTab === 'cta' ? 'active' : ''}`}
+                onClick={(e) => { e.preventDefault(); setActiveResultTab('cta'); }}
+              >
+                <div className="tree-item__left">
+                  <span>Confirmatory tetrads (CTA)</span>
+                </div>
+              </a>
+            </div>
+          </div>
+
+          {/* Advanced Analyses */}
+          <div className="tree-section">
+            <div className="tree-section__header" onClick={(e) => { (window as any).toggleTreeSection(e.currentTarget); }}>
+              <svg className="open" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
+              <span>Advanced Analyses</span>
+            </div>
+            <div className="tree-section__items">
+              <a
+                href="#"
+                className={`tree-item ${activeResultTab === 'mediation' ? 'active' : ''}`}
+                onClick={(e) => { e.preventDefault(); setActiveResultTab('mediation'); }}
+              >
+                <div className="tree-item__left">
+                  <span>Mediation analysis</span>
+                </div>
+                {analysisResultsMap['mediation'] && (
+                  <span className="tree-item__size" style={{ backgroundColor: 'var(--color-accent-subtle)', color: 'var(--color-accent)', fontWeight: 600 }}>
+                    Med
+                  </span>
+                )}
+              </a>
+              <a
+                href="#"
+                className={`tree-item ${activeResultTab === 'moderation' ? 'active' : ''}`}
+                onClick={(e) => { e.preventDefault(); setActiveResultTab('moderation'); }}
+              >
+                <div className="tree-item__left">
+                  <span>Moderation &amp; Simple Slopes</span>
+                </div>
+                {analysisResultsMap['moderation'] && (
+                  <span className="tree-item__size" style={{ backgroundColor: 'var(--color-accent-subtle)', color: 'var(--color-accent)', fontWeight: 600 }}>
+                    Mod
+                  </span>
+                )}
+              </a>
+              <a
+                href="#"
+                className={`tree-item ${activeResultTab === 'quadratic' ? 'active' : ''}`}
+                onClick={(e) => { e.preventDefault(); setActiveResultTab('quadratic'); }}
+              >
+                <div className="tree-item__left">
+                  <span>Non-linear / Quadratic</span>
+                </div>
+              </a>
+              <a
+                href="#"
+                className={`tree-item ${activeResultTab === 'ipma' ? 'active' : ''}`}
+                onClick={(e) => { e.preventDefault(); setActiveResultTab('ipma'); }}
+              >
+                <div className="tree-item__left">
+                  <span>Importance-Performance (IPMA)</span>
+                </div>
+                {analysisResultsMap['ipma'] && (
+                  <span className="tree-item__size" style={{ backgroundColor: 'var(--color-accent-subtle)', color: 'var(--color-accent)', fontWeight: 600 }}>
+                    IPMA
+                  </span>
+                )}
+              </a>
+              <a
+                href="#"
+                className={`tree-item ${activeResultTab === 'hcm' ? 'active' : ''}`}
+                onClick={(e) => { e.preventDefault(); setActiveResultTab('hcm'); }}
+              >
+                <div className="tree-item__left">
+                  <span>Higher-Order Constructs (HCM)</span>
+                </div>
+              </a>
+              <a
+                href="#"
+                className={`tree-item ${activeResultTab === 'micom' ? 'active' : ''}`}
+                onClick={(e) => { e.preventDefault(); setActiveResultTab('micom'); }}
+              >
+                <div className="tree-item__left">
+                  <span>Measurement Invariance (MICOM)</span>
+                </div>
+              </a>
+              <a
+                href="#"
+                className={`tree-item ${activeResultTab === 'mga' ? 'active' : ''}`}
+                onClick={(e) => { e.preventDefault(); setActiveResultTab('mga'); }}
+              >
+                <div className="tree-item__left">
+                  <span>Multigroup Analysis (MGA)</span>
+                </div>
+                {analysisResultsMap['mga'] && (
+                  <span className="tree-item__size" style={{ backgroundColor: 'var(--color-accent-subtle)', color: 'var(--color-accent)', fontWeight: 600 }}>
+                    MGA
+                  </span>
+                )}
+              </a>
+              <a
+                href="#"
+                className={`tree-item ${activeResultTab === 'otg' ? 'active' : ''}`}
+                onClick={(e) => { e.preventDefault(); setActiveResultTab('otg'); }}
+              >
+                <div className="tree-item__left">
+                  <span>Omnibus Differences (OTG)</span>
+                </div>
+                {analysisResultsMap['otg'] && (
+                  <span className="tree-item__size" style={{ backgroundColor: 'var(--color-accent-subtle)', color: 'var(--color-accent)', fontWeight: 600 }}>
+                    OTG
+                  </span>
+                )}
+              </a>
+              <a
+                href="#"
+                className={`tree-item ${activeResultTab === 'fimix' ? 'active' : ''}`}
+                onClick={(e) => { e.preventDefault(); setActiveResultTab('fimix'); }}
+              >
+                <div className="tree-item__left">
+                  <span>FIMIX-PLS Segmentation</span>
+                </div>
+              </a>
+              <a
+                href="#"
+                className={`tree-item ${activeResultTab === 'pos' ? 'active' : ''}`}
+                onClick={(e) => { e.preventDefault(); setActiveResultTab('pos'); }}
+              >
+                <div className="tree-item__left">
+                  <span>Prediction-Oriented Seg. (POS)</span>
+                </div>
+              </a>
+              <a
+                href="#"
+                className={`tree-item ${activeResultTab === 'ex_post' ? 'active' : ''}`}
+                onClick={(e) => { e.preventDefault(); setActiveResultTab('ex_post'); }}
+              >
+                <div className="tree-item__left">
+                  <span>Ex Post Segmentation</span>
+                </div>
+                {analysisResultsMap['ex_post'] && (
+                  <span className="tree-item__size" style={{ backgroundColor: 'var(--color-accent-subtle)', color: 'var(--color-accent)', fontWeight: 600 }}>
+                    EXP
+                  </span>
+                )}
+              </a>
+              <a
+                href="#"
+                className={`tree-item ${activeResultTab === 'power' ? 'active' : ''}`}
+                onClick={(e) => { e.preventDefault(); setActiveResultTab('power'); }}
+              >
+                <div className="tree-item__left">
+                  <span>Power &amp; Sample Size</span>
+                </div>
+              </a>
+              <a
+                href="#"
+                className={`tree-item ${activeResultTab === 'copula' ? 'active' : ''}`}
+                onClick={(e) => { e.preventDefault(); setActiveResultTab('copula'); }}
+              >
+                <div className="tree-item__left">
+                  <span>Gaussian Copula Endogeneity</span>
+                </div>
+              </a>
+              <a
+                href="#"
+                className={`tree-item ${activeResultTab === 'nca' ? 'active' : ''}`}
+                onClick={(e) => { e.preventDefault(); setActiveResultTab('nca'); }}
+              >
+                <div className="tree-item__left">
+                  <span>Necessary Condition (NCA)</span>
+                </div>
+              </a>
+              <a
+                href="#"
+                className={`tree-item ${activeResultTab === 'report_narrative' ? 'active' : ''}`}
+                onClick={(e) => { e.preventDefault(); setActiveResultTab('report_narrative'); }}
+              >
+                <div className="tree-item__left">
+                  <span>Executive Report &amp; APA Writeup</span>
+                </div>
+                {analysisResultsMap['report'] && (
+                  <span className="tree-item__size" style={{ backgroundColor: 'var(--color-accent-subtle)', color: 'var(--color-accent)', fontWeight: 600 }}>
+                    APA
+                  </span>
+                )}
               </a>
             </div>
           </div>
@@ -3186,7 +3702,34 @@ const ModelEditor = () => {
                   </div>
                 </div>
               )
-            ) : null}
+            ) : (
+              <AdvancedResultPanels
+                activeTab={activeResultTab}
+                results={plsResults}
+                analysisResults={analysisResultsMap}
+                onExportExcel={handleExportExcel}
+                onExportPdf={() => {
+                  if (activeStudy?.path) {
+                    api.exportReportPdf({
+                      projectPath: activeStudy.path,
+                      modelId: effectiveModelId || undefined,
+                      datasetId: activeDataset?.id || activeDataset?.filename,
+                      projectName: activeStudy.name,
+                      modelName: activeModel?.name,
+                    })
+                      .then((blob: any) => {
+                        if (blob && !blob.error && blob instanceof Blob) {
+                          const url = window.URL.createObjectURL(blob);
+                          const a = document.createElement('a');
+                          a.href = url;
+                          a.download = `${activeModel?.name || 'Model'}_Executive_Report.pdf`;
+                          a.click();
+                        }
+                      });
+                  }
+                }}
+              />
+            )}
           </div>
         </div>
       </main>
@@ -3220,6 +3763,46 @@ const ModelEditor = () => {
       setTimeout(() => setValidationSuccessToast(null), 3500);
     }}
     onClose={() => setIsBootstrapModalOpen(false)}
+  />
+
+  <AnalysisModal
+    isOpen={isAnalysisModalOpen}
+    analysisType={analysisModalType}
+    projectPath={activeStudy?.path || ''}
+    modelId={effectiveModelId || undefined}
+    datasetId={activeDataset?.id || undefined}
+    spec={exportModelSpec()}
+    datasetHeaders={activeDataset?.variables?.map(v => v.name)}
+    datasetRows={activeDataset?.rows}
+    datasetName={activeDataset?.filename}
+    onComplete={(type, results) => {
+      setAnalysisResultsMap(prev => ({ ...prev, [type]: results }));
+      if (type === 'consistent_pls' && results?.structural) {
+        setPlsResults(results);
+        plsResultsRef.current = results;
+        setCanvasResults(results);
+      }
+      setIsAnalysisModalOpen(false);
+      if (type === 'report') {
+        setActiveResultTab('report_narrative');
+      } else {
+        setActiveResultTab(type);
+      }
+      switchView('results');
+      setValidationSuccessToast('Calculation completed successfully!');
+      setTimeout(() => setValidationSuccessToast(null), 3500);
+    }}
+    onClose={() => setIsAnalysisModalOpen(false)}
+  />
+
+  <RulesOfThumbDrawer
+    isOpen={isRulesDrawerOpen}
+    onClose={() => setIsRulesDrawerOpen(false)}
+  />
+
+  <GlossaryModal
+    isOpen={isGlossaryModalOpen}
+    onClose={() => setIsGlossaryModalOpen(false)}
   />
 
   {/* ─── Validation Error Modal ─── */}

@@ -58,6 +58,8 @@ export interface NodeData {
   height?: number; // Custom sizing
   radius?: number; // Custom sizing
   fillColor?: string; // Custom color
+  formative?: boolean; // Mode B (formative) vs Mode A (reflective)
+  hideIndicators?: boolean; // Toggle visibility of connected indicators
 }
 
 export interface EdgeData {

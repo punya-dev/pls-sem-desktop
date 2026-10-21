@@ -682,6 +682,849 @@ export const api = {
       return { error: err?.message || 'Failed to import SmartPLS project' };
     }
   },
+
+  // --- Phase 3-6 Advanced PLS-SEM Analyses ---
+  async runBlindfolding(data: {
+    projectPath: string;
+    modelId?: string;
+    datasetId?: string;
+    omissionDistance?: number;
+    computeQ2Effects?: boolean;
+    spec?: any;
+    columns?: string[];
+    rows?: any[][];
+  }): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE}/blindfolding/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_path: data.projectPath,
+          model_id: data.modelId || 'default',
+          dataset_id: data.datasetId,
+          omission_distance: data.omissionDistance || 7,
+          compute_q2_effects: data.computeQ2Effects !== false,
+          spec: data.spec,
+          columns: data.columns,
+          rows: data.rows,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to run blindfolding' };
+    }
+  },
+
+  async analyzeMediation(data: {
+    projectPath: string;
+    modelId?: string;
+    source: string;
+    target: string;
+    datasetId?: string;
+    nBoot?: number;
+    seed?: number;
+    alpha?: number;
+    includeSobel?: boolean;
+    spec?: any;
+    columns?: string[];
+    rows?: any[][];
+  }): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE}/analysis/mediation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_path: data.projectPath,
+          model_id: data.modelId || 'default',
+          source: data.source,
+          target: data.target,
+          dataset_id: data.datasetId,
+          n_boot: data.nBoot || 500,
+          seed: data.seed ?? 42,
+          alpha: data.alpha || 0.05,
+          include_sobel: !!data.includeSobel,
+          spec: data.spec,
+          columns: data.columns,
+          rows: data.rows,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to run mediation analysis' };
+    }
+  },
+
+  async analyzeModeration(data: {
+    projectPath: string;
+    modelId?: string;
+    source: string;
+    moderator: string;
+    target: string;
+    datasetId?: string;
+    method?: string;
+    nBoot?: number;
+    seed?: number;
+    alpha?: number;
+    spec?: any;
+    columns?: string[];
+    rows?: any[][];
+  }): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE}/analysis/moderation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_path: data.projectPath,
+          model_id: data.modelId || 'default',
+          source: data.source,
+          moderator: data.moderator,
+          target: data.target,
+          dataset_id: data.datasetId,
+          method: data.method || 'two_stage',
+          n_boot: data.nBoot || 500,
+          seed: data.seed ?? 42,
+          alpha: data.alpha || 0.05,
+          spec: data.spec,
+          columns: data.columns,
+          rows: data.rows,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to run moderation analysis' };
+    }
+  },
+
+  async analyzeQuadratic(data: {
+    projectPath: string;
+    modelId?: string;
+    source: string;
+    target: string;
+    datasetId?: string;
+    nBoot?: number;
+    seed?: number;
+    alpha?: number;
+    spec?: any;
+    columns?: string[];
+    rows?: any[][];
+  }): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE}/analysis/quadratic`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_path: data.projectPath,
+          model_id: data.modelId || 'default',
+          source: data.source,
+          target: data.target,
+          dataset_id: data.datasetId,
+          n_boot: data.nBoot || 500,
+          seed: data.seed ?? 42,
+          alpha: data.alpha || 0.05,
+          spec: data.spec,
+          columns: data.columns,
+          rows: data.rows,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to run quadratic analysis' };
+    }
+  },
+
+  async analyzeIpma(data: {
+    projectPath: string;
+    modelId?: string;
+    target: string;
+    datasetId?: string;
+    scaleBounds?: Record<string, any>;
+    level?: string;
+    spec?: any;
+    columns?: string[];
+    rows?: any[][];
+  }): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE}/analysis/ipma`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_path: data.projectPath,
+          model_id: data.modelId || 'default',
+          target: data.target,
+          dataset_id: data.datasetId,
+          scale_bounds: data.scaleBounds,
+          level: data.level || 'both',
+          spec: data.spec,
+          columns: data.columns,
+          rows: data.rows,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to run IPMA' };
+    }
+  },
+
+  async analyzeHcm(data: {
+    projectPath: string;
+    modelId?: string;
+    hocId: string;
+    locIds: string[];
+    datasetId?: string;
+    hocType?: string;
+    approach?: string;
+    spec?: any;
+    columns?: string[];
+    rows?: any[][];
+  }): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE}/analysis/hcm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_path: data.projectPath,
+          model_id: data.modelId || 'default',
+          hoc_id: data.hocId,
+          loc_ids: data.locIds,
+          dataset_id: data.datasetId,
+          hoc_type: data.hocType || 'RR',
+          approach: data.approach || 'repeated_indicators',
+          spec: data.spec,
+          columns: data.columns,
+          rows: data.rows,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to run HCM analysis' };
+    }
+  },
+
+  async analyzeCta(data: {
+    projectPath: string;
+    modelId?: string;
+    constructId?: string;
+    datasetId?: string;
+    nBoot?: number;
+    seed?: number;
+    alpha?: number;
+    spec?: any;
+    columns?: string[];
+    rows?: any[][];
+  }): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE}/analysis/cta`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_path: data.projectPath,
+          model_id: data.modelId || 'default',
+          construct_id: data.constructId,
+          dataset_id: data.datasetId,
+          n_boot: data.nBoot || 500,
+          seed: data.seed ?? 42,
+          alpha: data.alpha || 0.05,
+          spec: data.spec,
+          columns: data.columns,
+          rows: data.rows,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to run CTA-PLS' };
+    }
+  },
+
+  async analyzeMicom(data: {
+    projectPath: string;
+    modelId?: string;
+    groupCol: string;
+    groupValues?: any[];
+    datasetId?: string;
+    nPermutations?: number;
+    alpha?: number;
+    seed?: number;
+    spec?: any;
+    columns?: string[];
+    rows?: any[][];
+  }): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE}/analysis/micom`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_path: data.projectPath,
+          model_id: data.modelId || 'default',
+          group_col: data.groupCol,
+          group_values: data.groupValues,
+          dataset_id: data.datasetId,
+          n_permutations: data.nPermutations || 500,
+          alpha: data.alpha || 0.05,
+          seed: data.seed ?? 42,
+          spec: data.spec,
+          columns: data.columns,
+          rows: data.rows,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to run MICOM' };
+    }
+  },
+
+  async analyzeMga(data: {
+    projectPath: string;
+    modelId?: string;
+    groupCol: string;
+    groupValues?: any[];
+    datasetId?: string;
+    nBoot?: number;
+    nPermutations?: number;
+    seed?: number;
+    alpha?: number;
+    spec?: any;
+    columns?: string[];
+    rows?: any[][];
+  }): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE}/analysis/mga`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_path: data.projectPath,
+          model_id: data.modelId || 'default',
+          group_col: data.groupCol,
+          group_values: data.groupValues,
+          dataset_id: data.datasetId,
+          n_boot: data.nBoot || 500,
+          n_permutations: data.nPermutations || 500,
+          seed: data.seed ?? 42,
+          alpha: data.alpha || 0.05,
+          spec: data.spec,
+          columns: data.columns,
+          rows: data.rows,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to run MGA' };
+    }
+  },
+
+  async analyzeFimix(data: {
+    projectPath: string;
+    modelId?: string;
+    minSegments?: number;
+    maxSegments?: number;
+    datasetId?: string;
+    seed?: number;
+    spec?: any;
+    columns?: string[];
+    rows?: any[][];
+  }): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE}/analysis/fimix`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_path: data.projectPath,
+          model_id: data.modelId || 'default',
+          min_segments: data.minSegments || 1,
+          max_segments: data.maxSegments || 4,
+          dataset_id: data.datasetId,
+          seed: data.seed ?? 42,
+          spec: data.spec,
+          columns: data.columns,
+          rows: data.rows,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to run FIMIX-PLS' };
+    }
+  },
+
+  async analyzePos(data: {
+    projectPath: string;
+    modelId?: string;
+    nSegments?: number;
+    maxIter?: number;
+    minSegmentSize?: number;
+    datasetId?: string;
+    seed?: number;
+    spec?: any;
+    columns?: string[];
+    rows?: any[][];
+  }): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE}/analysis/pos`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_path: data.projectPath,
+          model_id: data.modelId || 'default',
+          n_segments: data.nSegments || 2,
+          max_iter: data.maxIter || 50,
+          min_segment_size: data.minSegmentSize || 15,
+          dataset_id: data.datasetId,
+          seed: data.seed ?? 42,
+          spec: data.spec,
+          columns: data.columns,
+          rows: data.rows,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to run PLS-POS' };
+    }
+  },
+
+  async analyzeOtg(data: {
+    projectPath: string;
+    modelId?: string;
+    groupCol: string;
+    groupValues?: any[];
+    nBoot?: number;
+    nPermutations?: number;
+    datasetId?: string;
+    seed?: number;
+    alpha?: number;
+    spec?: any;
+    columns?: string[];
+    rows?: any[][];
+  }): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE}/analysis/otg`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_path: data.projectPath,
+          model_id: data.modelId || 'default',
+          group_col: data.groupCol,
+          group_values: data.groupValues,
+          n_boot: data.nBoot || 500,
+          n_permutations: data.nPermutations || 1000,
+          dataset_id: data.datasetId,
+          seed: data.seed ?? 42,
+          alpha: data.alpha ?? 0.05,
+          spec: data.spec,
+          columns: data.columns,
+          rows: data.rows,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to run OTG analysis' };
+    }
+  },
+
+  async analyzeExPost(data: {
+    projectPath: string;
+    modelId?: string;
+    segmentCol: string;
+    explanatoryCols: string[];
+    crosstabCatCol?: string;
+    runPosComparison?: boolean;
+    minSampleSize?: number;
+    datasetId?: string;
+    spec?: any;
+    columns?: string[];
+    rows?: any[][];
+  }): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE}/analysis/ex-post`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_path: data.projectPath,
+          model_id: data.modelId || 'default',
+          segment_col: data.segmentCol,
+          explanatory_cols: data.explanatoryCols,
+          crosstab_cat_col: data.crosstabCatCol,
+          run_pos_comparison: data.runPosComparison ?? true,
+          min_sample_size: data.minSampleSize ?? 54,
+          dataset_id: data.datasetId,
+          spec: data.spec,
+          columns: data.columns,
+          rows: data.rows,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to run Ex Post segmentation' };
+    }
+  },
+
+  async generateDataGroups(data: {
+    path: string;
+    datasetId?: string;
+    column: string;
+    minSize?: number;
+    maxPathsPredictors?: number;
+  }): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE}/data/groups/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          path: data.path,
+          dataset_id: data.datasetId,
+          column: data.column,
+          min_size: data.minSize ?? 10,
+          max_paths_predictors: data.maxPathsPredictors ?? 2,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to generate data groups' };
+    }
+  },
+
+  async appendDatasetColumn(data: {
+    path: string;
+    datasetId: string;
+    columnName: string;
+    values: any[];
+    role?: string;
+    label?: string;
+  }): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE}/data/append-column`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          path: data.path,
+          dataset_id: data.datasetId,
+          column_name: data.columnName,
+          values: data.values,
+          role: data.role || 'group',
+          label: data.label,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to append column' };
+    }
+  },
+
+  async loadCorporateReputationTemplate(path: string): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE}/project/load-template/corporate-reputation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to load Corporate Reputation template' };
+    }
+  },
+
+  async calculatePower(params: {
+    nSamples?: number;
+    nPredictors?: number;
+    rSquared?: number;
+    effectSizeF2?: number;
+    targetPower?: number;
+    alpha?: number;
+    maxFormativeIndicators?: number;
+    maxPathsIntoConstruct?: number;
+  }): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE}/power/calculate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          n_samples: params.nSamples,
+          n_predictors: params.nPredictors,
+          r_squared: params.rSquared,
+          effect_size_f2: params.effectSizeF2,
+          target_power: params.targetPower || 0.80,
+          alpha: params.alpha || 0.05,
+          max_formative_indicators: params.maxFormativeIndicators,
+          max_paths_into_construct: params.maxPathsIntoConstruct,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to calculate power' };
+    }
+  },
+
+  async getPowerTable(targetPower: number = 0.80, alpha: number = 0.05): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE}/power/table?target_power=${targetPower}&alpha=${alpha}`);
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to fetch power table' };
+    }
+  },
+
+  async analyzeCopula(data: {
+    projectPath: string;
+    modelId: string;
+    candidatePredictor: string;
+    targetConstruct: string;
+    datasetId?: string;
+    nBoot?: number;
+    seed?: number;
+    alpha?: number;
+    spec?: any;
+    columns?: string[];
+    rows?: any[][];
+  }): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE}/analysis/copula`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_path: data.projectPath,
+          model_id: data.modelId,
+          candidate_predictor: data.candidatePredictor,
+          target_construct: data.targetConstruct,
+          dataset_id: data.datasetId,
+          n_boot: data.nBoot || 200,
+          seed: data.seed ?? 42,
+          alpha: data.alpha || 0.05,
+          spec: data.spec,
+          columns: data.columns,
+          rows: data.rows,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to run Copula analysis' };
+    }
+  },
+
+  async analyzeNca(data: {
+    projectPath: string;
+    modelId: string;
+    predictor: string;
+    outcome: string;
+    datasetId?: string;
+    nPermutations?: number;
+    seed?: number;
+    alpha?: number;
+    spec?: any;
+    columns?: string[];
+    rows?: any[][];
+  }): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE}/analysis/nca`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_path: data.projectPath,
+          model_id: data.modelId,
+          predictor: data.predictor,
+          outcome: data.outcome,
+          dataset_id: data.datasetId,
+          n_permutations: data.nPermutations || 500,
+          seed: data.seed ?? 42,
+          alpha: data.alpha || 0.05,
+          spec: data.spec,
+          columns: data.columns,
+          rows: data.rows,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to run NCA analysis' };
+    }
+  },
+
+  async analyzePredict(data: {
+    projectPath: string;
+    modelId: string;
+    datasetId?: string;
+    kFolds?: number;
+    repetitions?: number;
+    seed?: number;
+    antecedents?: string;
+    spec?: any;
+    columns?: string[];
+    rows?: any[][];
+  }): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE}/analysis/predict`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_path: data.projectPath,
+          model_id: data.modelId,
+          dataset_id: data.datasetId,
+          k_folds: data.kFolds || 10,
+          repetitions: data.repetitions || 10,
+          seed: data.seed ?? 42,
+          antecedents: data.antecedents || 'direct',
+          spec: data.spec,
+          columns: data.columns,
+          rows: data.rows,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to run PLSpredict' };
+    }
+  },
+
+  async exportReportPdf(data: {
+    projectPath: string;
+    modelId?: string;
+    datasetId?: string;
+    projectName?: string;
+    datasetName?: string;
+    modelName?: string;
+    author?: string;
+  }): Promise<Blob | { error: string }> {
+    try {
+      const res = await fetch(`${API_BASE}/export/report-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_path: data.projectPath,
+          model_id: data.modelId,
+          dataset_id: data.datasetId,
+          project_name: data.projectName,
+          dataset_name: data.datasetName,
+          model_name: data.modelName,
+          author: data.author,
+        }),
+      });
+      if (!res.ok) {
+        const errJson = await res.json();
+        return { error: errJson.error || 'Failed to generate PDF report' };
+      }
+      return await res.blob();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to download PDF report' };
+    }
+  },
+
+  async exportTable(params: {
+    projectPath: string;
+    tableName: string;
+    format?: string;
+    decimals?: number;
+    modelId?: string;
+  }): Promise<Blob | { error: string }> {
+    try {
+      const query = new URLSearchParams({
+        project_path: params.projectPath,
+        table_name: params.tableName,
+        format: params.format || 'csv',
+        decimals: String(params.decimals ?? 3),
+      });
+      if (params.modelId) query.append('model_id', params.modelId);
+      const res = await fetch(`${API_BASE}/export/table?${query.toString()}`);
+      if (!res.ok) {
+        const errJson = await res.json();
+        return { error: errJson.error || 'Failed to export table' };
+      }
+      return await res.blob();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to export table' };
+    }
+  },
+
+  // --- Data Screening Endpoints ---
+  async getScreeningMissing(projectPath: string, datasetId?: string, modelId?: string, caseThreshold: number = 15.0, indicatorThreshold: number = 5.0): Promise<any> {
+    try {
+      let url = `${API_BASE}/screening/missing?path=${encodeURIComponent(projectPath)}&case_threshold=${caseThreshold}&indicator_threshold=${indicatorThreshold}`;
+      if (datasetId) url += `&dataset_id=${encodeURIComponent(datasetId)}`;
+      if (modelId) url += `&model_id=${encodeURIComponent(modelId)}`;
+      const res = await fetch(url);
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to load missing data screening' };
+    }
+  },
+
+  async removeFlaggedCases(projectPath: string, datasetId?: string, newDatasetName?: string): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE}/screening/remove-flagged-cases`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          path: projectPath,
+          dataset_id: datasetId,
+          new_dataset_name: newDatasetName,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to remove flagged cases' };
+    }
+  },
+
+  async getScreeningPatterns(projectPath: string, datasetId?: string, modelId?: string): Promise<any> {
+    try {
+      let url = `${API_BASE}/screening/patterns?path=${encodeURIComponent(projectPath)}`;
+      if (datasetId) url += `&dataset_id=${encodeURIComponent(datasetId)}`;
+      if (modelId) url += `&model_id=${encodeURIComponent(modelId)}`;
+      const res = await fetch(url);
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to load response patterns' };
+    }
+  },
+
+  async getScreeningOutliers(projectPath: string, datasetId?: string, columns?: string): Promise<any> {
+    try {
+      let url = `${API_BASE}/screening/outliers?path=${encodeURIComponent(projectPath)}`;
+      if (datasetId) url += `&dataset_id=${encodeURIComponent(datasetId)}`;
+      if (columns) url += `&columns=${encodeURIComponent(columns)}`;
+      const res = await fetch(url);
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to load outliers' };
+    }
+  },
+
+  async getScreeningDistributions(projectPath: string, datasetId?: string, ruleSet: string = 'textbook'): Promise<any> {
+    try {
+      let url = `${API_BASE}/screening/distributions?path=${encodeURIComponent(projectPath)}&rule_set=${encodeURIComponent(ruleSet)}`;
+      if (datasetId) url += `&dataset_id=${encodeURIComponent(datasetId)}`;
+      const res = await fetch(url);
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to load distributions' };
+    }
+  },
+
+  async getScreeningHistogram(projectPath: string, column: string, datasetId?: string, bins: string = 'auto'): Promise<any> {
+    try {
+      let url = `${API_BASE}/screening/histogram?path=${encodeURIComponent(projectPath)}&column=${encodeURIComponent(column)}&bins=${encodeURIComponent(bins)}`;
+      if (datasetId) url += `&dataset_id=${encodeURIComponent(datasetId)}`;
+      const res = await fetch(url);
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to load histogram' };
+    }
+  },
+
+  async getScreeningDirectionality(projectPath: string, modelId: string, datasetId?: string): Promise<any> {
+    try {
+      let url = `${API_BASE}/screening/directionality?path=${encodeURIComponent(projectPath)}&model_id=${encodeURIComponent(modelId)}`;
+      if (datasetId) url += `&dataset_id=${encodeURIComponent(datasetId)}`;
+      const res = await fetch(url);
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to load directionality' };
+    }
+  },
+
+  async getDataCorrelations(projectPath: string, datasetId?: string): Promise<any> {
+    try {
+      let url = `${API_BASE}/data/correlations?path=${encodeURIComponent(projectPath)}`;
+      if (datasetId) url += `&dataset_id=${encodeURIComponent(datasetId)}`;
+      const res = await fetch(url);
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to load correlations' };
+    }
+  },
 };
 
 

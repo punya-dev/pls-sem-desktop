@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useStore } from '../store';
 import AppSidebar from '../components/AppSidebar';
+import { api } from '../utils/api';
 
 interface SampleProject {
   id: string;
@@ -72,8 +73,16 @@ const SAMPLE_PROJECTS: SampleProject[] = [
 export const SamplesView: React.FC = () => {
   const { workspaces, activeWorkspaceId, setActiveWorkspace, openTab, addWorkspace } = useStore();
 
-  const handleOpenSample = (project: SampleProject) => {
+  const handleOpenSample = async (project: SampleProject) => {
     const existingWs = workspaces.find((w) => w.id === activeWorkspaceId) || workspaces[0];
+    if (project.id === 'corp-rep' && existingWs?.path) {
+      try {
+        await api.loadCorporateReputationTemplate(existingWs.path);
+      } catch (err) {
+        console.warn('Template load warning:', err);
+      }
+    }
+
     if (existingWs) {
       setActiveWorkspace(existingWs.id);
       openTab({ type: 'workspace', title: existingWs.name, workspaceId: existingWs.id });

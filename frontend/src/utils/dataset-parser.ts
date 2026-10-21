@@ -15,6 +15,7 @@ export interface ParsedVariable {
 }
 
 export interface ParsedDataset {
+  id?: string;
   filename: string;
   variables: ParsedVariable[];
   rows: any[][]; // array of arrays (rows)

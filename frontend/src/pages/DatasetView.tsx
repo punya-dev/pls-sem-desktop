@@ -4,6 +4,7 @@ import { processData, type ParsedDataset, type ParsedVariable } from '../utils/d
 import { EditableCell } from '../components/EditableCell';
 import { api } from '../utils/api';
 import AppSidebar from '../components/AppSidebar';
+import { DataScreeningPanel } from '../components/DataScreeningPanel';
 
 export const DatasetView: React.FC = () => {
   const {
@@ -13,6 +14,7 @@ export const DatasetView: React.FC = () => {
     activeWorkspaceId,
     studies,
     activeStudyId,
+    models,
     datasetsByStudy,
     setStudyDataset,
     touchStudy,
@@ -23,10 +25,11 @@ export const DatasetView: React.FC = () => {
   const currentStudyId = activeTab?.studyId || activeStudyId || '';
   const activeWorkspace = workspaces.find(w => w.id === (activeTab?.workspaceId || activeWorkspaceId));
   const activeStudy = studies.find(s => s.id === currentStudyId);
+  const studyModels = useMemo(() => models.filter(m => m.studyId === currentStudyId), [models, currentStudyId]);
 
   const initialDataset = currentStudyId ? datasetsByStudy[currentStudyId] : null;
   const [dataset, setDataset] = useState<ParsedDataset | null>(initialDataset);
-  const [currentView, setCurrentView] = useState<'variables' | 'data'>('variables');
+  const [currentView, setCurrentView] = useState<'variables' | 'data' | 'screening'>('variables');
   const [searchFilter, setSearchFilter] = useState('');
   const [isVariableSearchOpen, setIsVariableSearchOpen] = useState(false);
   const [sortCol, setSortCol] = useState<number | null>(null);
@@ -239,6 +242,9 @@ export const DatasetView: React.FC = () => {
               <button type="button" className={`subheader__switcher-btn ${currentView === 'data' ? 'active' : ''}`} onClick={() => setCurrentView('data')}>
                 Data <span style={{ opacity: 0.55, fontWeight: 400 }}>({dataset.rows.length})</span>
               </button>
+              <button type="button" className={`subheader__switcher-btn ${currentView === 'screening' ? 'active' : ''}`} onClick={() => setCurrentView('screening')}>
+                Data Screening
+              </button>
             </div>
           </div>
         </div>
@@ -323,7 +329,7 @@ export const DatasetView: React.FC = () => {
                 </tbody>
               </table>
             </div>
-          ) : (
+          ) : currentView === 'data' ? (
             <div style={{ flex: 1, overflow: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11.5px' }}>
                 <thead>
@@ -353,6 +359,27 @@ export const DatasetView: React.FC = () => {
                 </tbody>
               </table>
             </div>
+          ) : (
+            <DataScreeningPanel
+              projectPath={activeStudy?.path || ''}
+              datasetId={dataset.id || dataset.filename}
+              modelId={studyModels[0]?.id || undefined}
+              availableModels={studyModels}
+              datasetName={dataset.filename}
+              totalRows={dataset.rows.length}
+              variables={dataset.variables}
+              onDatasetUpdated={() => {
+                if (activeStudy?.path) {
+                  api.loadProjectData(activeStudy.path)
+                    .then(res => {
+                      if (res && res.columns && res.rows) {
+                        const reprocessed = processData(res.dataset_name || dataset.filename, res.columns, res.rows);
+                        persistChanges(reprocessed);
+                      }
+                    });
+                }
+              }}
+            />
           )}
         </div>
 

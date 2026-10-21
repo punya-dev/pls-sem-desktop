@@ -10,7 +10,7 @@ interface NodeProps {
 }
 
 const Node = ({ node, isSelected, onPointerDown, onPointerUp }: NodeProps) => {
-  const { updateNode } = useStore();
+  const { updateNode, removeNodes, openContextMenu } = useStore();
   const [isEditing, setIsEditing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -107,6 +107,57 @@ const Node = ({ node, isSelected, onPointerDown, onPointerUp }: NodeProps) => {
       onPointerDown={onPointerDown}
       onPointerUp={onPointerUp}
       onDoubleClick={handleDoubleClick}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (node.isLatent) {
+          openContextMenu(e.clientX, e.clientY, [
+            {
+              id: 'rename',
+              label: 'Rename Construct',
+              icon: 'edit',
+              action: () => setIsEditing(true),
+            },
+            {
+              id: 'toggle_mode',
+              label: node.formative ? 'Switch to Reflective (Mode A)' : 'Switch to Formative (Mode B)',
+              icon: 'swap_horiz',
+              action: () => updateNode(node.id, { formative: !node.formative }),
+            },
+            {
+              id: 'add_quadratic',
+              label: 'Add Quadratic Effect...',
+              icon: 'show_chart',
+              action: () => {
+                alert(`Predictor "${node.label}" ready for quadratic analysis. Open Calculate → Non-linear & Quadratic Effects to estimate.`);
+              },
+            },
+            {
+              id: 'toggle_indicators',
+              label: node.hideIndicators ? 'Show Indicators' : 'Hide Indicators',
+              icon: 'visibility',
+              action: () => updateNode(node.id, { hideIndicators: !node.hideIndicators }),
+            },
+            {
+              id: 'delete',
+              label: 'Delete Construct',
+              icon: 'delete',
+              danger: true,
+              action: () => removeNodes([node.id]),
+            },
+          ]);
+        } else {
+          openContextMenu(e.clientX, e.clientY, [
+            {
+              id: 'delete',
+              label: 'Delete Indicator',
+              icon: 'delete',
+              danger: true,
+              action: () => removeNodes([node.id]),
+            },
+          ]);
+        }
+      }}
       style={{ cursor: 'pointer' }}
     >
       {/* Selection Border (Purple Dotted) */}
