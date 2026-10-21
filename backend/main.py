@@ -1170,6 +1170,31 @@ def import_smartpls(req: SmartPlsImportRequest):
         return {"error": str(e)}
 
 
+class FolderDetectRequest(BaseModel):
+    folder_path: str
+
+
+class SmartPlsWorkspaceImportRequest(BaseModel):
+    folder_path: str
+
+
+@app.post("/workspace/detect_folder")
+def detect_folder(req: FolderDetectRequest):
+    try:
+        return smartpls_importer.detect_folder_type(req.folder_path)
+    except Exception as e:
+        return {"kind": "error", "error": str(e)}
+
+
+@app.post("/workspace/smartpls/import")
+def import_smartpls_ws(req: SmartPlsWorkspaceImportRequest):
+    try:
+        return smartpls_importer.import_smartpls_workspace(req.folder_path)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+
 @app.post("/workspace/delete")
 def delete_workspace(folder_path: str):
     try:

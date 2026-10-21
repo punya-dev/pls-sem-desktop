@@ -547,3 +547,152 @@ def import_smartpls_folder(
     finally:
         if temp_extract_dir and os.path.exists(temp_extract_dir):
             shutil.rmtree(temp_extract_dir, ignore_errors=True)
+
+
+def detect_folder_type(folder_path: str) -> Dict[str, Any]:
+    """
+    Classifies a folder or file:
+    - 'cspls_workspace': Has workspace.json or *.pls files
+    - 'smartpls_workspace': Has .smartpls4workspace or subdirectories that are SmartPLS projects
+    - 'smartpls_project': Contains .splsm files directly or is a ZIP archive containing .splsm
+    - 'unknown': Other directory
+    """
+    folder_path = os.path.expanduser(folder_path)
+    if not os.path.exists(folder_path):
+        return {"kind": "not_found", "valid": False, "error": "Path does not exist"}
+
+    if zipfile.is_zipfile(folder_path):
+        det = detect_smartpls_folder(folder_path)
+        if det.get("valid"):
+            return {
+                "kind": "smartpls_project",
+                "is_zip": True,
+                "path": folder_path,
+                "project_name": det.get("project_name"),
+                "models_count": det.get("models_count", 0),
+                "datasets_count": det.get("datasets_count", 0),
+            }
+        return {"kind": "unknown", "path": folder_path}
+
+    if not os.path.isdir(folder_path):
+        return {"kind": "file", "path": folder_path}
+
+    # 1. Check if CSPLS Workspace
+    has_ws_json = os.path.exists(os.path.join(folder_path, "workspace.json"))
+    has_pls_files = len(glob.glob(os.path.join(folder_path, "*.pls"))) > 0
+    if has_ws_json or has_pls_files:
+        ws_name = os.path.basename(folder_path.rstrip("/\\"))
+        if has_ws_json:
+            try:
+                ws_meta = workspace_io.load_workspace(folder_path) or {}
+                ws_name = ws_meta.get("name") or ws_name
+            except Exception:
+                pass
+        return {
+            "kind": "cspls_workspace",
+            "path": folder_path,
+            "name": ws_name,
+        }
+
+    # Direct splsm in folder? -> SmartPLS Project
+    direct_splsm = glob.glob(os.path.join(folder_path, "*.splsm"))
+    if direct_splsm:
+        det = detect_smartpls_folder(folder_path)
+        return {
+            "kind": "smartpls_project",
+            "is_zip": False,
+            "path": folder_path,
+            "project_name": det.get("project_name") or os.path.basename(folder_path.rstrip("/\\")),
+            "models_count": det.get("models_count", 0),
+            "datasets_count": det.get("datasets_count", 0),
+        }
+
+    # 2. Check if SmartPLS Workspace
+    has_smartpls_ws_marker = os.path.exists(os.path.join(folder_path, ".smartpls4workspace"))
+    sub_projects = []
+    for item in os.listdir(folder_path):
+        if item.startswith(".") or item == "Archive":
+            continue
+        sub_path = os.path.join(folder_path, item)
+        if os.path.isdir(sub_path):
+            sub_det = detect_smartpls_folder(sub_path)
+            if sub_det.get("valid") and (sub_det.get("models_count", 0) > 0 or sub_det.get("datasets_count", 0) > 0):
+                sub_projects.append({"name": item, "path": sub_path, **sub_det})
+
+    if has_smartpls_ws_marker or len(sub_projects) > 0:
+        return {
+            "kind": "smartpls_workspace",
+            "path": folder_path,
+            "name": os.path.basename(folder_path.rstrip("/\\")),
+            "projects_count": len(sub_projects),
+            "projects": sub_projects,
+        }
+
+    return {
+        "kind": "unknown",
+        "path": folder_path,
+        "name": os.path.basename(folder_path.rstrip("/\\")),
+    }
+
+
+def import_smartpls_workspace(workspace_folder: str) -> Dict[str, Any]:
+    """
+    Imports a full SmartPLS workspace (a directory containing .smartpls4workspace
+    and/or subdirectories that are SmartPLS projects).
+    Creates/updates workspace.json and imports all subprojects into studies in this workspace.
+    """
+    workspace_folder = os.path.expanduser(workspace_folder)
+    if not os.path.isdir(workspace_folder):
+        raise ValueError("Provided path is not a directory")
+
+    ws_name = os.path.basename(workspace_folder.rstrip("/\\")) or "Workspace"
+    ws_file = os.path.join(workspace_folder, "workspace.json")
+    if not os.path.exists(ws_file):
+        now_iso = datetime.now(timezone.utc).isoformat()
+        ws_meta = {
+            "name": ws_name,
+            "created_at": now_iso,
+            "modified_at": now_iso,
+            "projects": [],
+        }
+        with open(ws_file, "w", encoding="utf-8") as f:
+            json.dump(ws_meta, f, indent=2)
+
+    all_studies = []
+    all_models = []
+
+    subdirs = [
+        os.path.join(workspace_folder, d)
+        for d in os.listdir(workspace_folder)
+        if os.path.isdir(os.path.join(workspace_folder, d)) and not d.startswith(".") and d != "Archive"
+    ]
+
+    for subdir in subdirs:
+        det = detect_smartpls_folder(subdir)
+        if det.get("valid") and (det.get("models_count", 0) > 0 or det.get("datasets_count", 0) > 0):
+            res = import_smartpls_folder(
+                subdir,
+                target_workspace_folder=workspace_folder,
+                workspace_name=ws_name,
+            )
+            all_studies.extend(res.get("studies", []))
+            all_models.extend(res.get("models", []))
+
+    workspace_io.add_recent_workspace(workspace_folder)
+    ws_meta = workspace_io.load_workspace(workspace_folder) or {}
+    now_iso = datetime.now(timezone.utc).isoformat()
+    return {
+        "status": "success",
+        "workspace": {
+            "id": workspace_folder,
+            "name": ws_meta.get("name", ws_name),
+            "path": workspace_folder,
+            "createdAt": ws_meta.get("created_at", now_iso),
+            "modifiedAt": ws_meta.get("modified_at", now_iso),
+            "projects": ws_meta.get("projects", []),
+        },
+        "studies": all_studies,
+        "models": all_models,
+        "imported_from": workspace_folder,
+    }
+

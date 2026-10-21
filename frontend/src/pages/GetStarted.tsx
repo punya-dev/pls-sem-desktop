@@ -283,7 +283,7 @@ const GetStarted = () => {
               <div className="page-header__actions" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                 <button className="btn btn-secondary" type="button" onClick={() => promptOpenWorkspaceFolder()}>
                   <span className="material-symbols-outlined">folder_open</span>
-                  <span>Import Workspace</span>
+                  <span>Import / Open</span>
                   <kbd className="kbd">⌘O</kbd>
                 </button>
                 <button className="btn btn-primary" type="button" onClick={() => setIsWorkspaceModalOpen(true)}>

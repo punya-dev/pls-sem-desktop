@@ -14,6 +14,7 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(workspaceId);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isImportMenuOpen, setIsImportMenuOpen] = useState(false);
 
   const { workspaces, activeWorkspaceId, addStudy, setActiveStudy } = useStore();
   const currentWorkspaceId = selectedWorkspaceId || workspaceId || activeWorkspaceId;
@@ -24,6 +25,7 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
       setName('');
       setSelectedWorkspaceId(workspaceId || activeWorkspaceId || workspaces[0]?.id || '');
       setError(null);
+      setIsImportMenuOpen(false);
     }
   }, [isOpen, workspaceId, activeWorkspaceId, workspaces]);
 
@@ -152,7 +154,7 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
     <div className="modal-overlay active" style={{ display: 'flex' }} onClick={onClose}>
       <div className="modal" onClick={e => e.stopPropagation()}>
         <div className="modal__header">
-          <h2 className="modal__title">New Study</h2>
+          <h2 className="modal__title">Import / New Study</h2>
           <button className="icon-btn icon-btn--sm" type="button" onClick={onClose}>
             <span className="material-symbols-outlined">close</span>
           </button>
@@ -198,31 +200,21 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
               <div style={{ color: 'var(--color-danger, #ef4444)', fontSize: '12px' }}>{error}</div>
             )}
 
-            <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: '1px solid var(--color-border-subtle)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  Or Import Project (SmartPLS)
-                </span>
-                <span style={{ fontSize: '10px', color: 'var(--color-text-muted)' }}>
-                  ZIP / Folder
-                </span>
-              </div>
-              <p style={{ fontSize: '11px', color: 'var(--color-text-muted)', margin: '0 0 10px 0', lineHeight: 1.4 }}>
-                Directly import datasets and models from an exported SmartPLS project into this workspace.
-              </p>
-              <div style={{ display: 'flex', gap: '8px' }}>
+            <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: '1px solid var(--color-border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)', fontWeight: 500 }}>
+                Or import project
+              </span>
+              <div style={{ position: 'relative' }}>
                 <button
                   type="button"
                   className="btn btn-secondary"
-                  onClick={() => handleImportSmartPls(false)}
+                  onClick={() => setIsImportMenuOpen(open => !open)}
                   disabled={isSubmitting}
                   style={{
-                    flex: 1,
-                    padding: '7px 10px',
+                    padding: '6px 12px',
                     fontSize: '12px',
                     display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'center',
                     gap: '6px',
                     borderRadius: 'var(--radius-sm)',
                     border: '1px solid var(--color-border-subtle)',
@@ -231,32 +223,80 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
                     cursor: 'pointer',
                   }}
                 >
-                  <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>folder_zip</span>
-                  <span>Import ZIP (.zip)</span>
+                  <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>file_download</span>
+                  <span>Import Project</span>
+                  <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>expand_more</span>
                 </button>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => handleImportSmartPls(true)}
-                  disabled={isSubmitting}
-                  style={{
-                    flex: 1,
-                    padding: '7px 10px',
-                    fontSize: '12px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '6px',
-                    borderRadius: 'var(--radius-sm)',
-                    border: '1px solid var(--color-border-subtle)',
-                    background: 'var(--color-bg-base)',
-                    color: 'var(--color-text-primary)',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>folder</span>
-                  <span>Import Folder</span>
-                </button>
+                {isImportMenuOpen && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      right: 0,
+                      top: 'calc(100% + 4px)',
+                      background: 'var(--color-bg-surface)',
+                      border: '1px solid var(--color-border-subtle)',
+                      borderRadius: 'var(--radius-md)',
+                      boxShadow: 'var(--shadow-dropdown)',
+                      zIndex: 100,
+                      minWidth: '170px',
+                      padding: '4px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '2px',
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsImportMenuOpen(false);
+                        handleImportSmartPls(false);
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        padding: '8px 10px',
+                        fontSize: '12px',
+                        borderRadius: 'var(--radius-sm)',
+                        border: 'none',
+                        background: 'transparent',
+                        color: 'var(--color-text-primary)',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.background = 'var(--color-bg-hover)')}
+                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>folder_zip</span>
+                      <span>From ZIP Archive (.zip)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsImportMenuOpen(false);
+                        handleImportSmartPls(true);
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        padding: '8px 10px',
+                        fontSize: '12px',
+                        borderRadius: 'var(--radius-sm)',
+                        border: 'none',
+                        background: 'transparent',
+                        color: 'var(--color-text-primary)',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.background = 'var(--color-bg-hover)')}
+                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>folder</span>
+                      <span>From Folder</span>
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>

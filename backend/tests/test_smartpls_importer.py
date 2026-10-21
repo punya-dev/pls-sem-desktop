@@ -14,6 +14,8 @@ from smartpls_importer import (
     convert_smartpls_model,
     detect_smartpls_folder,
     import_smartpls_folder,
+    detect_folder_type,
+    import_smartpls_workspace,
 )
 from engine.pls.algorithm import PLSAlgorithm
 
@@ -113,6 +115,55 @@ class TestSmartPLSImporter(unittest.TestCase):
                 os.remove(temp_zip)
             shutil.rmtree(temp_ws, ignore_errors=True)
 
+    def test_detect_folder_type(self):
+        # 1. Project folder
+        res_proj = detect_folder_type(self.sample_dir)
+        self.assertEqual(res_proj["kind"], "smartpls_project")
+        self.assertEqual(res_proj["models_count"], 8)
+
+        # 2. CSPLS Workspace
+        temp_cspls_ws = tempfile.mkdtemp(prefix="cspls_ws_test_")
+        try:
+            with open(os.path.join(temp_cspls_ws, "workspace.json"), "w") as f:
+                json.dump({"name": "Test CSPLS WS", "projects": []}, f)
+            res_cspls = detect_folder_type(temp_cspls_ws)
+            self.assertEqual(res_cspls["kind"], "cspls_workspace")
+            self.assertEqual(res_cspls["name"], "Test CSPLS WS")
+        finally:
+            shutil.rmtree(temp_cspls_ws, ignore_errors=True)
+
+        # 3. SmartPLS Workspace with subfolder
+        temp_spls_ws = tempfile.mkdtemp(prefix="spls_ws_test_")
+        try:
+            sub_proj_dir = os.path.join(temp_spls_ws, "Sub Project")
+            os.makedirs(sub_proj_dir, exist_ok=True)
+            # Copy one model file into sub_proj_dir
+            for f in os.listdir(self.sample_dir):
+                if f.endswith(".splsm") or f.endswith(".txt"):
+                    shutil.copy(os.path.join(self.sample_dir, f), os.path.join(sub_proj_dir, f))
+                    break
+            res_spls_ws = detect_folder_type(temp_spls_ws)
+            self.assertEqual(res_spls_ws["kind"], "smartpls_workspace")
+            self.assertEqual(res_spls_ws["projects_count"], 1)
+        finally:
+            shutil.rmtree(temp_spls_ws, ignore_errors=True)
+
+    def test_import_smartpls_workspace(self):
+        temp_spls_ws = tempfile.mkdtemp(prefix="spls_ws_import_test_")
+        try:
+            # Create a project subfolder
+            sub_proj = os.path.join(temp_spls_ws, "Example - Corporate reputation (primer)")
+            shutil.copytree(self.sample_dir, sub_proj)
+
+            res = import_smartpls_workspace(temp_spls_ws)
+            self.assertEqual(res["status"], "success")
+            self.assertTrue(os.path.exists(os.path.join(temp_spls_ws, "workspace.json")))
+            self.assertTrue(len(res["studies"]) >= 1)
+            self.assertTrue(len(res["models"]) >= 1)
+        finally:
+            shutil.rmtree(temp_spls_ws, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()
+

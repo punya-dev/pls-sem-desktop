@@ -455,9 +455,9 @@ const Dashboard = () => {
                 )}
               </div>
               <div className="ws-header__actions">
-                <button className="btn-ws-primary" type="button" onClick={handleCreateStudy}>
+                <button className="btn-ws-primary" type="button" onClick={handleCreateStudy} title="Import or create new study">
                   <span className="material-symbols-outlined">add</span>
-                  <span>New Study</span>
+                  <span>Import/New Study</span>
                   <kbd className="kbd">⌘S</kbd>
                 </button>
               </div>

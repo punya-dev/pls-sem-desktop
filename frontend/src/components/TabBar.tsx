@@ -1105,7 +1105,7 @@ export const TabBar: React.FC = () => {
                   }}
                 >
                   <span className="material-symbols-outlined">folder_open</span>
-                  <span className="tab-menu-dropdown__item-title">Import Workspace...</span>
+                  <span className="tab-menu-dropdown__item-title">Import / Open...</span>
                 </button>
 
                 <button
