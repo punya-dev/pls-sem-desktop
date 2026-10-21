@@ -390,10 +390,88 @@ def duplicate_project(folder_path: str, source_path: str, new_name: str, model_i
     except Exception as e:
         print(f"Warning: could not add to workspace: {e}")
 
+    try:
+        add_recent_project(target_path)
+    except Exception as e:
+        print(f"Warning: could not add to recent projects: {e}")
+
     return {
         "status": "duplicated",
         "project_path": target_path,
         "name": new_name,
+    }
+
+
+def move_project(source_workspace_path: str, target_workspace_path: str, source_path: str, project_name: str = None):
+    import shutil
+    import workspace_io
+
+    source_workspace_path = os.path.abspath(os.path.expanduser(source_workspace_path))
+    target_workspace_path = os.path.abspath(os.path.expanduser(target_workspace_path))
+    source_path = os.path.abspath(os.path.expanduser(source_path))
+
+    if not os.path.exists(source_path):
+        raise FileNotFoundError(f"Source study file not found: {source_path}")
+    if not os.path.exists(target_workspace_path):
+        raise FileNotFoundError(f"Target workspace folder not found: {target_workspace_path}")
+    if source_workspace_path == target_workspace_path:
+        raise ValueError("Source and target workspaces are the same")
+
+    source_filename = os.path.basename(source_path)
+
+    if not project_name:
+        try:
+            conn = sqlite3.connect(source_path)
+            cur = conn.cursor()
+            cur.execute("SELECT value FROM metadata WHERE key = 'name'")
+            row = cur.fetchone()
+            if row and row[0]:
+                project_name = row[0]
+            conn.close()
+        except Exception:
+            pass
+
+    if not project_name:
+        project_name = os.path.splitext(source_filename)[0]
+
+    clean_name = "".join(c for c in project_name if c.isalnum() or c in (" ", "-", "_")).strip()
+    if not clean_name:
+        clean_name = "Untitled Study"
+
+    base_filename = f"{clean_name}.pls"
+    target_path = os.path.join(target_workspace_path, base_filename)
+    counter = 1
+    while os.path.exists(target_path):
+        target_path = os.path.join(target_workspace_path, f"{clean_name} ({counter}).pls")
+        counter += 1
+
+    shutil.move(source_path, target_path)
+
+    # Remove from source workspace.json
+    try:
+        workspace_io.remove_project_from_workspace(source_workspace_path, source_filename)
+    except Exception as e:
+        print(f"Warning: could not remove from source workspace: {e}")
+
+    # Add to target workspace.json
+    target_filename = os.path.basename(target_path)
+    try:
+        workspace_io.add_project_to_workspace(target_workspace_path, target_filename, project_name)
+    except Exception as e:
+        print(f"Warning: could not add to target workspace: {e}")
+
+    # Update recent projects in settings
+    try:
+        settings_io.remove_recent("recent_projects", source_path)
+        add_recent_project(target_path)
+    except Exception as e:
+        print(f"Warning: could not update recent projects: {e}")
+
+    return {
+        "status": "moved",
+        "project_path": target_path,
+        "name": project_name,
+        "filename": target_filename,
     }
 
 

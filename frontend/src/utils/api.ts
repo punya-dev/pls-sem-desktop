@@ -357,7 +357,25 @@ export const api = {
       });
       return await res.json();
     } catch (err: any) {
-      return { error: err?.message || 'Failed to duplicate project' };
+      return { error: err?.message || 'Failed to duplicate study' };
+    }
+  },
+
+  async moveProject(sourceWorkspacePath: string, targetWorkspacePath: string, sourcePath: string, projectName?: string): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE}/project/move`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source_workspace_path: sourceWorkspacePath,
+          target_workspace_path: targetWorkspacePath,
+          source_path: sourcePath,
+          project_name: projectName,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to move study' };
     }
   },
 

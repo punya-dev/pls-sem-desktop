@@ -1269,6 +1269,12 @@ class DuplicateProjectRequest(BaseModel):
     new_name: str
     model_id_map: Optional[Dict[str, str]] = None
 
+class MoveProjectRequest(BaseModel):
+    source_workspace_path: str
+    target_workspace_path: str
+    source_path: str
+    project_name: Optional[str] = None
+
 class RemapModelIdsRequest(BaseModel):
     project_path: str
     model_id_map: Dict[str, str]
@@ -1410,9 +1416,25 @@ def duplicate_project_model(req: DuplicateModelRequest):
 
 
 @app.post("/project/duplicate")
+@app.post("/study/duplicate")
 def duplicate_project_file(req: DuplicateProjectRequest):
     try:
         res = project_io.duplicate_project(req.folder_path, req.source_path, req.new_name, req.model_id_map)
+        return res
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/project/move")
+@app.post("/study/move")
+def move_project_file(req: MoveProjectRequest):
+    try:
+        res = project_io.move_project(
+            req.source_workspace_path,
+            req.target_workspace_path,
+            req.source_path,
+            req.project_name
+        )
         return res
     except Exception as e:
         return {"error": str(e)}

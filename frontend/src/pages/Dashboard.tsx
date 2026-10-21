@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useStore } from '../store';
+import { useStore, type Study } from '../store';
 import WorkspaceModal from '../components/WorkspaceModal';
 import StudyModal from '../components/StudyModal';
+import MoveCopyStudyModal from '../components/MoveCopyStudyModal';
 import InputDialog from '../components/InputDialog';
 import { DataManagerModal } from '../components/DataManagerModal';
 import { parseDatasetFile } from '../utils/dataset-parser';
@@ -48,6 +49,15 @@ const Dashboard = () => {
   const [expandedStudies, setExpandedStudies] = useState<Set<string>>(new Set());
   
   const [isStudyModalOpen, setIsStudyModalOpen] = useState(false);
+  const [moveCopyModalConfig, setMoveCopyModalConfig] = useState<{
+    isOpen: boolean;
+    mode: 'move' | 'copy';
+    study: Study | null;
+  }>({
+    isOpen: false,
+    mode: 'move',
+    study: null,
+  });
   const [inputDialogConfig, setInputDialogConfig] = useState<{isOpen: boolean; title: string; placeholder: string; submitLabel: string; initialValue?: string; onSubmit: (val: string) => void}>({
     isOpen: false, title: '', placeholder: '', submitLabel: '', onSubmit: () => {}
   });
@@ -615,6 +625,18 @@ const Dashboard = () => {
                                 },
                                 { id: 'duplicate', label: 'Duplicate Study', icon: 'content_copy', action: () => duplicateStudy(study.id) },
                                 {
+                                  id: 'move-study',
+                                  label: 'Move to Workspace…',
+                                  icon: 'drive_file_move',
+                                  action: () => setMoveCopyModalConfig({ isOpen: true, mode: 'move', study }),
+                                },
+                                {
+                                  id: 'copy-study',
+                                  label: 'Copy to Workspace…',
+                                  icon: 'file_copy',
+                                  action: () => setMoveCopyModalConfig({ isOpen: true, mode: 'copy', study }),
+                                },
+                                {
                                   id: 'delete', 
                                   label: 'Delete Study', 
                                   icon: 'delete', 
@@ -924,6 +946,12 @@ const Dashboard = () => {
         isOpen={isStudyModalOpen} 
         onClose={() => setIsStudyModalOpen(false)} 
         workspaceId={activeWorkspaceId || ''} 
+      />
+      <MoveCopyStudyModal
+        isOpen={moveCopyModalConfig.isOpen}
+        onClose={() => setMoveCopyModalConfig((prev) => ({ ...prev, isOpen: false }))}
+        mode={moveCopyModalConfig.mode}
+        study={moveCopyModalConfig.study}
       />
       <InputDialog 
         isOpen={inputDialogConfig.isOpen} 
