@@ -613,6 +613,75 @@ export const api = {
       return { error: err?.message || 'Failed to create model from snapshot' };
     }
   },
+
+  async detectSmartPls(folderPath: string): Promise<{
+    valid?: boolean;
+    project_name?: string;
+    folder_path?: string;
+    models_count?: number;
+    models?: Array<{ file: string; name: string }>;
+    datasets_count?: number;
+    datasets?: string[];
+    error?: string;
+  }> {
+    try {
+      const res = await fetch(`${API_BASE}/project/smartpls/detect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder_path: folderPath }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to detect SmartPLS project' };
+    }
+  },
+
+  async importSmartPls(folderPath: string, targetWorkspaceFolder?: string, workspaceName?: string): Promise<{
+    status?: string;
+    workspace?: {
+      id: string;
+      name: string;
+      path: string;
+      createdAt?: string;
+      modifiedAt?: string;
+    };
+    studies?: Array<{
+      id: string;
+      workspaceId: string;
+      name: string;
+      type: string;
+      description: string;
+      lastModified: string;
+      path: string;
+      dataset_rows: number;
+      dataset_columns: string[];
+      createdAt?: string;
+    }>;
+    models?: Array<{
+      id: string;
+      studyId: string;
+      name: string;
+      type: string;
+      lastModified: string;
+    }>;
+    imported_from?: string;
+    error?: string;
+  }> {
+    try {
+      const res = await fetch(`${API_BASE}/project/smartpls/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          folder_path: folderPath,
+          target_workspace_folder: targetWorkspaceFolder || undefined,
+          workspace_name: workspaceName || undefined,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to import SmartPLS project' };
+    }
+  },
 };
 
 

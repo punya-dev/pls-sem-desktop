@@ -17,6 +17,7 @@ import settings_io
 from model_spec import ModelSpec, ValidateModelRequest, SaveModelRequest, RunPlsRequest, BootstrapStartRequest
 from model_validator import validate_model_spec, ValidationResult
 from engine.pls.algorithm import PLSAlgorithm, run_pls
+import smartpls_importer
 
 
 
@@ -332,6 +333,36 @@ def delete_project_from_ws(folder_path: str, project_filename: str):
         ws = workspace_io.remove_project_from_workspace(folder_path, project_filename)
         settings_io.remove_recent("recent_projects", full_project_path)
         return {"status": "deleted", "workspace": ws}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+class SmartPlsDetectRequest(BaseModel):
+    folder_path: str
+
+
+class SmartPlsImportRequest(BaseModel):
+    folder_path: str
+    target_workspace_folder: Optional[str] = None
+    workspace_name: Optional[str] = None
+
+
+@app.post("/project/smartpls/detect")
+def detect_smartpls(req: SmartPlsDetectRequest):
+    try:
+        return smartpls_importer.detect_smartpls_folder(req.folder_path)
+    except Exception as e:
+        return {"valid": False, "error": str(e)}
+
+
+@app.post("/project/smartpls/import")
+def import_smartpls(req: SmartPlsImportRequest):
+    try:
+        return smartpls_importer.import_smartpls_folder(
+            req.folder_path,
+            target_workspace_folder=req.target_workspace_folder,
+            workspace_name=req.workspace_name,
+        )
     except Exception as e:
         return {"error": str(e)}
 

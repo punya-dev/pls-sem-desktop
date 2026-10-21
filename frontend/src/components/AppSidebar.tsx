@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useStore } from '../store';
 import { api } from '../utils/api';
 import WorkspaceModal from './WorkspaceModal';
+import { promptImportSmartPlsFolder } from '../utils/smartpls-import';
 
 interface AppSidebarProps {
   activeNav?: 'workspace' | 'archive' | 'docs' | 'samples' | 'feedback' | 'changelog';
@@ -92,6 +93,15 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ activeNav }) => {
                 </button>
                 <button
                   className="sidebar-create-folder-btn"
+                  title="Import SmartPLS Project"
+                  type="button"
+                  onClick={() => promptImportSmartPlsFolder()}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>swap_horiz</span>
+                </button>
+                <button
+                  className="sidebar-create-folder-btn"
                   title="Create Workspace"
                   type="button"
                   onClick={() => setIsWorkspaceModalOpen(true)}
@@ -157,6 +167,12 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ activeNav }) => {
                         icon: 'content_copy',
                         action: () =>
                           useStore.getState().duplicateWorkspace(ws.id),
+                      },
+                      {
+                        id: 'import_smartpls',
+                        label: 'Import SmartPLS into Workspace',
+                        icon: 'swap_horiz',
+                        action: () => promptImportSmartPlsFolder(ws.path, ws.name),
                       },
                       {
                         id: 'archive',

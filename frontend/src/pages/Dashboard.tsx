@@ -8,6 +8,7 @@ import { DataManagerModal } from '../components/DataManagerModal';
 import { parseDatasetFile } from '../utils/dataset-parser';
 import type { ParsedDataset } from '../utils/dataset-parser';
 import { api } from '../utils/api';
+import { promptImportSmartPlsFolder } from '../utils/smartpls-import';
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -454,7 +455,29 @@ const Dashboard = () => {
                   </h1>
                 )}
               </div>
-              <div className="ws-header__actions">
+              <div className="ws-header__actions" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <button
+                  className="btn-ws-secondary"
+                  type="button"
+                  onClick={() => promptImportSmartPlsFolder(activeWorkspace?.path, activeWorkspace?.name)}
+                  title="Import an exported SmartPLS project folder into this workspace"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '7px 12px',
+                    fontSize: '12px',
+                    fontWeight: 500,
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--color-border-subtle)',
+                    background: 'var(--color-bg-base)',
+                    color: 'var(--color-text-primary)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>swap_horiz</span>
+                  <span>Import SmartPLS</span>
+                </button>
                 <button className="btn-ws-primary" type="button" onClick={handleCreateStudy}>
                   <span className="material-symbols-outlined">add</span>
                   <span>New Study</span>
