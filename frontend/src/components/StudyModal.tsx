@@ -75,32 +75,28 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
     try {
       let selectedPath: string | null = null;
 
-      // 1. Try native Cocoa picker that supports choosing BOTH folders and .zip files simultaneously
       try {
         const pickRes = await api.pickFileOrFolder();
+        if (pickRes?.cancelled) {
+          // User clicked Cancel in dialog; exit cleanly without popping any second dialog
+          return;
+        }
         if (pickRes?.path) {
           selectedPath = pickRes.path;
-        }
-      } catch (pickErr) {
-        console.warn('Native pick_file_or_folder unavailable, falling back:', pickErr);
-      }
-
-      // 2. Fallback to Tauri open dialog if not selected
-      if (!selectedPath) {
-        try {
+        } else if (pickRes?.fallback) {
+          // Only fallback if not supported natively on this OS
           const { open } = await import('@tauri-apps/plugin-dialog');
           const selected = await open({
             multiple: false,
-            directory: false,
-            title: 'Import SmartPLS Study (ZIP or Folder)',
-            filters: [{ name: 'SmartPLS ZIP or All Files', extensions: ['zip', '*'] }]
+            directory: true,
+            title: 'Import SmartPLS Study Folder',
           });
           if (selected && typeof selected === 'string') {
             selectedPath = selected;
           }
-        } catch (dialogErr) {
-          console.warn('Tauri open dialog fallback error:', dialogErr);
         }
+      } catch (pickErr) {
+        console.warn('Native pick_file_or_folder error:', pickErr);
       }
 
       if (!selectedPath) return;

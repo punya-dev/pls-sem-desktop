@@ -1211,20 +1211,28 @@ def pick_file_or_folder():
             openPanel's setCanChooseFiles:true
             openPanel's setCanChooseDirectories:true
             openPanel's setAllowsMultipleSelection:false
+            openPanel's setResolvesAliases:true
             openPanel's setTitle:"Import SmartPLS Study (ZIP or Folder)"
             openPanel's setMessage:"Choose an exported SmartPLS ZIP file or study folder"
-            if openPanel's runModal() = 1 then
-                return (openPanel's |URL|()'s |path|()) as text
+            set theApp to current application's NSApplication's sharedApplication()
+            theApp's activateIgnoringOtherApps:true
+            set res to openPanel's runModal()
+            if res = 1 then
+                set chosenURL to (openPanel's |URLs|()'s objectAtIndex:0)
+                return (chosenURL's |path|()) as text
             else
-                return ""
+                return "__CANCELLED__"
             end if
             """
             res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
             path = res.stdout.strip()
-            return {"path": path if path else None}
+            if path == "__CANCELLED__" or not path:
+                return {"path": None, "cancelled": True}
+            return {"path": path, "cancelled": False}
         return {"path": None, "fallback": True}
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": str(e), "fallback": True}
+
 
 
 

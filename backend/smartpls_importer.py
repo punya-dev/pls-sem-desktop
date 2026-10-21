@@ -259,7 +259,14 @@ def detect_smartpls_folder(folder_path: str) -> Dict[str, Any]:
             return {"valid": False, "error": f"Failed to read ZIP archive: {e}"}
 
     if not os.path.isdir(folder_path):
-        return {"valid": False, "error": "Path is neither a directory nor a valid ZIP archive"}
+        parent_dir = os.path.dirname(folder_path)
+        if os.path.isdir(parent_dir) and (
+            glob.glob(os.path.join(parent_dir, "*.splsm"))
+            or os.path.exists(os.path.join(parent_dir, ".meta"))
+        ):
+            folder_path = parent_dir
+        else:
+            return {"valid": False, "error": "Path is neither a directory nor a valid ZIP archive"}
 
     meta_file = os.path.join(folder_path, ".meta")
     splsm_files = sorted(glob.glob(os.path.join(folder_path, "*.splsm")))
@@ -308,6 +315,14 @@ def import_smartpls_folder(
     - Optionally loads .splsrp reports into results tables
     """
     folder_path = os.path.expanduser(folder_path)
+    if os.path.isfile(folder_path) and not zipfile.is_zipfile(folder_path):
+        parent_dir = os.path.dirname(folder_path)
+        if os.path.isdir(parent_dir) and (
+            glob.glob(os.path.join(parent_dir, "*.splsm"))
+            or os.path.exists(os.path.join(parent_dir, ".meta"))
+        ):
+            folder_path = parent_dir
+
     detection = detect_smartpls_folder(folder_path)
     if not detection.get("valid"):
         raise ValueError(detection.get("error", "Invalid SmartPLS project"))
