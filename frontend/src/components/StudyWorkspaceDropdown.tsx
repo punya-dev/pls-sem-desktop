@@ -145,53 +145,7 @@ export const StudyWorkspaceDropdown: React.FC<StudyWorkspaceDropdownProps> = ({
     onClose();
   };
 
-  const handleBrowseFolder = async () => {
-    try {
-      const { open } = await import('@tauri-apps/plugin-dialog');
-      const selected = await open({
-        directory: true,
-        multiple: false,
-        title: mode === 'move' ? 'Select Workspace Folder to Move Study into' : 'Select Workspace Folder to Copy Study into',
-      });
-      if (!selected || typeof selected !== 'string') return;
-
-      const wsRes = await api.openWorkspace(selected);
-      if (wsRes.error || !wsRes.workspace) {
-        console.warn('Selected folder is not a valid workspace:', wsRes.error);
-        return;
-      }
-
-      const existingWs = workspaces.find((w) => (w.path || '').toLowerCase() === selected.toLowerCase());
-      let targetId: string;
-      if (existingWs) {
-        targetId = existingWs.id;
-      } else {
-        targetId = `ws_${Date.now()}`;
-        addWorkspace({
-          id: targetId,
-          name: wsRes.workspace.name || selected.split(/[/\\]/).pop() || 'Workspace',
-          path: selected,
-          modifiedAt: new Date().toISOString(),
-        });
-      }
-
-      if (mode === 'move' && targetId === study.workspaceId) {
-        console.warn('Cannot move to the current workspace');
-        return;
-      }
-
-      if (mode === 'move') {
-        await moveStudyToWorkspace(study.id, targetId, selected);
-      } else {
-        const isSameWs = targetId === study.workspaceId;
-        const targetName = isSameWs ? `${study.name} copy` : study.name;
-        await copyStudyToWorkspace(study.id, targetId, selected, targetName);
-      }
-      onClose();
-    } catch (err) {
-      console.warn('Browse workspace folder error:', err);
-    }
-  };
+  const titleText = mode === 'move' ? `Move "${study.name}" Study to...` : `Copy "${study.name}" Study to...`;
 
   return (
     <div
@@ -215,15 +169,26 @@ export const StudyWorkspaceDropdown: React.FC<StudyWorkspaceDropdownProps> = ({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          paddingBottom: '4px',
+          paddingBottom: '6px',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <span className="material-symbols-outlined" style={{ fontSize: '15px', color: 'var(--color-primary)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flex: 1, paddingRight: '4px' }}>
+          <span className="material-symbols-outlined" style={{ fontSize: '15px', color: 'var(--color-primary)', flexShrink: 0 }}>
             {mode === 'move' ? 'drive_file_move' : 'file_copy'}
           </span>
-          <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-primary)', textTransform: 'none' }}>
-            {mode === 'move' ? 'Move Study to…' : 'Duplicate Study to…'}
+          <span
+            style={{
+              fontSize: '11px',
+              fontWeight: 600,
+              color: 'var(--color-text-primary)',
+              textTransform: 'none',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+            title={titleText}
+          >
+            {titleText}
           </span>
         </div>
         <button
@@ -234,10 +199,6 @@ export const StudyWorkspaceDropdown: React.FC<StudyWorkspaceDropdownProps> = ({
         >
           <span className="material-symbols-outlined">close</span>
         </button>
-      </div>
-
-      <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', padding: '0 6px 6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        Study: <span style={{ color: 'var(--color-text-secondary)', fontWeight: 500 }}>{study.name}</span>
       </div>
 
       {/* Search Input */}
@@ -267,7 +228,7 @@ export const StudyWorkspaceDropdown: React.FC<StudyWorkspaceDropdownProps> = ({
       </div>
 
       {/* Workspaces List */}
-      <div className="tab-menu-dropdown__list custom-scroll" style={{ maxHeight: '200px' }}>
+      <div className="tab-menu-dropdown__list custom-scroll" style={{ maxHeight: '230px' }}>
         {filteredWorkspaces.length === 0 ? (
           <div className="tab-menu-dropdown__empty">
             {mode === 'move' && allWorkspaces.length <= 1
@@ -291,20 +252,6 @@ export const StudyWorkspaceDropdown: React.FC<StudyWorkspaceDropdownProps> = ({
             </button>
           ))
         )}
-      </div>
-
-      <div className="tab-menu-dropdown__divider" />
-
-      {/* Footer / Browse folder */}
-      <div className="tab-menu-dropdown__footer">
-        <button
-          type="button"
-          className="tab-menu-dropdown__item"
-          onClick={handleBrowseFolder}
-        >
-          <span className="material-symbols-outlined">folder_open</span>
-          <span className="tab-menu-dropdown__item-title">Browse folder...</span>
-        </button>
       </div>
     </div>
   );
