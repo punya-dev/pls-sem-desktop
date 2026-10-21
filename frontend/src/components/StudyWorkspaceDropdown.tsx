@@ -145,7 +145,7 @@ export const StudyWorkspaceDropdown: React.FC<StudyWorkspaceDropdownProps> = ({
     onClose();
   };
 
-  const titleText = mode === 'move' ? `Move ${study.name} Study to...` : `Copy ${study.name} Study to...`;
+  const titleText = mode === 'move' ? `Move ${study.name} to...` : `Copy ${study.name} to...`;
 
   return (
     <div
@@ -190,7 +190,7 @@ export const StudyWorkspaceDropdown: React.FC<StudyWorkspaceDropdownProps> = ({
           >
             {mode === 'move' ? 'Move ' : 'Copy '}
             <span style={{ color: 'var(--color-accent, #6B4EE6)', fontWeight: 600 }}>{study.name}</span>
-            {' Study to...'}
+            {' to...'}
           </span>
         </div>
         <button
