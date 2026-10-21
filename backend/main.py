@@ -1194,6 +1194,40 @@ def import_smartpls_ws(req: SmartPlsWorkspaceImportRequest):
         return {"error": str(e)}
 
 
+@app.post("/system/pick_file_or_folder")
+def pick_file_or_folder():
+    """
+    Opens a native picker that allows choosing BOTH files (.zip) and directories
+    in a single dialog window on macOS.
+    """
+    try:
+        import platform
+        import subprocess
+
+        if platform.system() == "Darwin":
+            script = """
+            use framework "AppKit"
+            set openPanel to current application's NSOpenPanel's openPanel()
+            openPanel's setCanChooseFiles:true
+            openPanel's setCanChooseDirectories:true
+            openPanel's setAllowsMultipleSelection:false
+            openPanel's setTitle:"Import SmartPLS Study (ZIP or Folder)"
+            openPanel's setMessage:"Choose an exported SmartPLS ZIP file or study folder"
+            if openPanel's runModal() = 1 then
+                return (openPanel's |URL|()'s |path|()) as text
+            else
+                return ""
+            end if
+            """
+            res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+            path = res.stdout.strip()
+            return {"path": path if path else None}
+        return {"path": None, "fallback": True}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+
 
 @app.post("/workspace/delete")
 def delete_workspace(folder_path: str):

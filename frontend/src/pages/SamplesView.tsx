@@ -3,7 +3,7 @@ import { useStore } from '../store';
 import AppSidebar from '../components/AppSidebar';
 import { api } from '../utils/api';
 
-interface SampleProject {
+interface SampleStudy {
   id: string;
   title: string;
   tag: string;
@@ -13,7 +13,7 @@ interface SampleProject {
   description: string;
 }
 
-const SAMPLE_PROJECTS: SampleProject[] = [
+const SAMPLE_STUDIES: SampleStudy[] = [
   {
     id: 'corp-rep',
     title: 'Corporate Reputation Model',
@@ -30,52 +30,70 @@ const SAMPLE_PROJECTS: SampleProject[] = [
     constructs: 7,
     indicators: 24,
     sampleSize: 250,
-    description: 'European Customer Satisfaction Index with consistent PLSc estimation for pure latent factor structures.',
+    description: 'Classic European customer satisfaction index with structural paths between Expectations, Quality, Value, and Retention.',
   },
   {
-    id: 'tam3',
+    id: 'tam',
     title: 'Technology Acceptance Model (TAM 3)',
-    tag: 'Moderation & Mediation',
-    constructs: 8,
-    indicators: 28,
-    sampleSize: 412,
-    description: 'Investigates Perceived Usefulness, Perceived Ease of Use, and Computer Self-Efficacy with two-stage interaction terms.',
-  },
-  {
-    id: 'meta-mod',
-    title: 'Latent Moderation & Multi-Group Analysis',
-    tag: 'Two-Stage Moderation',
+    tag: 'Moderation / Interaction',
     constructs: 5,
     indicators: 18,
-    sampleSize: 520,
-    description: 'Template demonstrating continuous moderator interaction via orthogonalized indicators and non-parametric MICOM testing.',
+    sampleSize: 280,
+    description: 'Venkatesh & Bala TAM 3 architecture with Perceived Usefulness, Perceived Ease of Use, Subjective Norm, and Job Relevance.',
   },
   {
-    id: 'ecom-trust',
-    title: 'E-Commerce Trust & Purchase Intention',
-    tag: 'Consumer Behavior',
-    constructs: 5,
-    indicators: 19,
-    sampleSize: 380,
-    description: 'Cross-sectional study examining Website Usability, Security Perception, Institutional Trust, and Repurchase Intention.',
-  },
-  {
-    id: 'htmt2-benchmark',
-    title: 'HTMT2 Cross-Loading Benchmark Study',
-    tag: 'Discriminant Validity',
+    id: 'brand-equity',
+    title: 'Consumer Brand Equity Model',
+    tag: 'Hierarchical Component',
     constructs: 4,
     indicators: 16,
-    sampleSize: 300,
-    description: 'Demonstration dataset designed to evaluate discriminant validity boundaries between closely correlated constructs.',
+    sampleSize: 420,
+    description: 'Higher-order formative construct model analyzing Brand Awareness, Associations, Perceived Quality, and Brand Loyalty.',
+  },
+  {
+    id: 'job-perf',
+    title: 'Job Performance & Leadership Study',
+    tag: 'Mediation Model',
+    constructs: 5,
+    indicators: 15,
+    sampleSize: 195,
+    description: 'Organizational behavior study exploring how Transformational Leadership impacts Task Performance via Psychological Empowerment.',
+  },
+  {
+    id: 'online-trust',
+    title: 'E-Commerce Trust & Purchase Intention',
+    tag: 'Multi-Group Ready',
+    constructs: 6,
+    indicators: 20,
+    sampleSize: 512,
+    description: 'Consumer trust model across Mobile vs. Desktop shoppers, evaluating Structural Assurance, Perceived Security, and Repeat Purchase.',
+  },
+  {
+    id: 'healthcare',
+    title: 'Healthcare Patient Loyalty Framework',
+    tag: 'Non-Linear & Complex',
+    constructs: 5,
+    indicators: 19,
+    sampleSize: 310,
+    description: 'Service quality assessment in outpatient clinics evaluating Doctor-Patient Communication, Empathy, and Hospital Reputation.',
+  },
+  {
+    id: 'green-purchase',
+    title: 'Sustainable Consumption & Green Marketing',
+    tag: 'Environmental SEM',
+    constructs: 5,
+    indicators: 17,
+    sampleSize: 365,
+    description: 'Pro-environmental behavioral research linking Environmental Concern, Green Value, and Willingness to Pay Premium Prices.',
   },
 ];
 
-export const SamplesView: React.FC = () => {
+const SamplesView: React.FC = () => {
   const { workspaces, activeWorkspaceId, setActiveWorkspace, openTab, addWorkspace } = useStore();
 
-  const handleOpenSample = async (project: SampleProject) => {
+  const handleOpenSample = async (study: SampleStudy) => {
     const existingWs = workspaces.find((w) => w.id === activeWorkspaceId) || workspaces[0];
-    if (project.id === 'corp-rep' && existingWs?.path) {
+    if (study.id === 'corp-rep' && existingWs?.path) {
       try {
         await api.loadCorporateReputationTemplate(existingWs.path);
       } catch (err) {
@@ -90,11 +108,11 @@ export const SamplesView: React.FC = () => {
       const sampleWsId = `sample_ws_${Date.now()}`;
       addWorkspace({
         id: sampleWsId,
-        name: project.title,
+        name: study.title,
         path: '',
       });
       setActiveWorkspace(sampleWsId);
-      openTab({ type: 'workspace', title: project.title, workspaceId: sampleWsId });
+      openTab({ type: 'workspace', title: study.title, workspaceId: sampleWsId });
     }
   };
 
@@ -106,17 +124,17 @@ export const SamplesView: React.FC = () => {
         <div className="main-content__inner">
           <div className="page-header animate-fade-in">
             <div className="page-header__text">
-              <h1 className="page-header__title">Sample Projects</h1>
+              <h1 className="page-header__title">Sample Studies</h1>
               <p className="page-header__subtitle">Explore guided models and standard benchmark datasets to get started.</p>
             </div>
           </div>
 
           <div className="project-list animate-fade-in">
-            {SAMPLE_PROJECTS.map((project) => (
+            {SAMPLE_STUDIES.map((study) => (
               <div
-                key={project.id}
+                key={study.id}
                 className="project-card"
-                onClick={() => handleOpenSample(project)}
+                onClick={() => handleOpenSample(study)}
                 style={{ cursor: 'pointer' }}
               >
                 <div className="project-card__content">
@@ -125,16 +143,16 @@ export const SamplesView: React.FC = () => {
                   </div>
                   <div className="project-card__info">
                     <div className="project-card__title-row">
-                      <h3 className="project-card__title">{project.title}</h3>
-                      <span className="project-card__badge project-card__badge--accent">{project.tag}</span>
+                      <h3 className="project-card__title">{study.title}</h3>
+                      <span className="project-card__badge project-card__badge--accent">{study.tag}</span>
                     </div>
-                    <p className="project-card__desc">{project.description}</p>
+                    <p className="project-card__desc">{study.description}</p>
                     <div className="project-card__meta">
-                      <span>{project.constructs} constructs</span>
+                      <span>{study.constructs} constructs</span>
                       <span className="project-card__meta-dot">·</span>
-                      <span>{project.indicators} indicators</span>
+                      <span>{study.indicators} indicators</span>
                       <span className="project-card__meta-dot">·</span>
-                      <span>N = {project.sampleSize}</span>
+                      <span>N = {study.sampleSize}</span>
                     </div>
                   </div>
                 </div>
@@ -143,7 +161,7 @@ export const SamplesView: React.FC = () => {
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    handleOpenSample(project);
+                    handleOpenSample(study);
                   }}
                 >
                   <span>Open</span>

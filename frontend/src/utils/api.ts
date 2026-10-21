@@ -733,6 +733,16 @@ export const api = {
     }
   },
 
+  async pickFileOrFolder(): Promise<{ path?: string | null; fallback?: boolean; error?: string }> {
+    try {
+      const res = await fetch(`${API_BASE}/system/pick_file_or_folder`, { method: 'POST' });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to pick file or folder' };
+    }
+  },
+
+
 
   // --- Phase 3-6 Advanced PLS-SEM Analyses ---
   async runBlindfolding(data: {

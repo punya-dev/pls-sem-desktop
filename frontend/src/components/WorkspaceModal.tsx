@@ -3,6 +3,7 @@ import { useStore } from '../store';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../utils/api';
 import { processData } from '../utils/dataset-parser';
+import { promptOpenWorkspaceFolder } from '../utils/workspace-import';
 
 interface WorkspaceModalProps {
   isOpen: boolean;
@@ -110,7 +111,7 @@ const WorkspaceModal = ({
 
     const workspaceId = existing ? existing.id : newId;
 
-    // If an initial project is attached, import it into the new workspace
+    // If an initial study/project is attached, import it into the new workspace
     if (initialImportProject) {
       try {
         const importRes = await api.importSmartPls(initialImportProject, calculatedPath, cleanName);
@@ -153,7 +154,7 @@ const WorkspaceModal = ({
           }
         }
       } catch (importErr: any) {
-        console.warn('Failed to import initial SmartPLS project:', importErr);
+        console.warn('Failed to import initial SmartPLS study:', importErr);
       }
     }
 
@@ -216,7 +217,7 @@ const WorkspaceModal = ({
                   </span>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-                      Will import project:
+                      Will import study:
                     </div>
                     <div
                       style={{
@@ -243,7 +244,7 @@ const WorkspaceModal = ({
                       fontSize: '11px',
                       padding: '2px 4px',
                     }}
-                    title="Remove project"
+                    title="Remove study"
                   >
                     ✕
                   </button>
@@ -296,6 +297,36 @@ const WorkspaceModal = ({
                 </div>
               )}
             </div>
+
+            <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: '1px solid var(--color-border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)', fontWeight: 500 }}>
+                Or import workspace
+              </span>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={async () => {
+                  onClose();
+                  await promptOpenWorkspaceFolder();
+                }}
+                disabled={isCreating}
+                style={{
+                  padding: '6px 12px',
+                  fontSize: '12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--color-border-subtle)',
+                  background: 'var(--color-bg-base)',
+                  color: 'var(--color-text-primary)',
+                  cursor: 'pointer',
+                }}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>folder_open</span>
+                <span>Import Workspace</span>
+              </button>
+            </div>
           </div>
 
           <div className="modal__footer">
@@ -308,7 +339,7 @@ const WorkspaceModal = ({
               type="submit" 
               disabled={!name.trim() || isCreating}
             >
-              {isCreating ? 'Creating…' : (initialImportProject ? 'Create & Import Project' : 'Create Workspace')}
+              {isCreating ? 'Creating…' : (initialImportProject ? 'Create & Import Study' : 'Create Workspace')}
             </button>
           </div>
         </form>

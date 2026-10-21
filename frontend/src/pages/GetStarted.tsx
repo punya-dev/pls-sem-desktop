@@ -39,7 +39,7 @@ const GetStarted = () => {
     });
   };
 
-  const handleOpenSampleProject = () => {
+  const handleOpenSampleStudy = () => {
     const ws = workspaces.find(w => w.id === activeWorkspaceId) || workspaces[0];
     if (ws) {
       setActiveWorkspace(ws.id);
@@ -256,10 +256,10 @@ const GetStarted = () => {
               </span>
             </button>
 
-            <button className="sidebar-item" type="button" data-action="samples" onClick={() => openTab({ type: 'samples', title: 'Sample Projects' })}>
+            <button className="sidebar-item" type="button" data-action="samples" onClick={() => openTab({ type: 'samples', title: 'Sample Studies' })}>
               <span className="sidebar-item__left">
                 <span className="material-symbols-outlined">science</span>
-                <span>Sample Projects</span>
+                <span>Sample Studies</span>
               </span>
             </button>
 
@@ -376,14 +376,14 @@ const GetStarted = () => {
               <div className="animate-fade-in animate-fade-in-delay-3">
                 <div className="section-header">
                   <div className="section-header__title">
-                    Sample Projects to Get Started
+                    Sample Studies to Get Started
                   </div>
-                  <a href="#" className="section-header__link" onClick={(e) => { e.preventDefault(); openTab({ type: 'samples', title: 'Sample Projects' }); }}>More</a>
+                  <a href="#" className="section-header__link" onClick={(e) => { e.preventDefault(); openTab({ type: 'samples', title: 'Sample Studies' }); }}>More</a>
                 </div>
 
                 <div className="project-list">
 
-                  <div onClick={handleOpenSampleProject} className="project-card animate-fade-in animate-fade-in-delay-4" style={{ cursor: 'pointer' }}>
+                  <div onClick={handleOpenSampleStudy} className="project-card animate-fade-in animate-fade-in-delay-4" style={{ cursor: 'pointer' }}>
                     <div className="project-card__content">
                       <div className="project-card__info">
                         <h3 className="project-card__title">Corporate Reputation Model</h3>
@@ -392,7 +392,7 @@ const GetStarted = () => {
                     </div>
                   </div>
 
-                  <div onClick={handleOpenSampleProject} className="project-card animate-fade-in animate-fade-in-delay-5" style={{ cursor: 'pointer' }}>
+                  <div onClick={handleOpenSampleStudy} className="project-card animate-fade-in animate-fade-in-delay-5" style={{ cursor: 'pointer' }}>
                     <div className="project-card__content">
                       <div className="project-card__info">
                         <h3 className="project-card__title">Customer Satisfaction Index (ACSI/ECSI)</h3>
@@ -401,7 +401,7 @@ const GetStarted = () => {
                     </div>
                   </div>
 
-                  <div onClick={handleOpenSampleProject} className="project-card animate-fade-in animate-fade-in-delay-6" style={{ cursor: 'pointer' }}>
+                  <div onClick={handleOpenSampleStudy} className="project-card animate-fade-in animate-fade-in-delay-6" style={{ cursor: 'pointer' }}>
                     <div className="project-card__content">
                       <div className="project-card__info">
                         <h3 className="project-card__title">Technology Acceptance Model (TAM 3)</h3>
@@ -410,7 +410,7 @@ const GetStarted = () => {
                     </div>
                   </div>
 
-                  <div onClick={handleOpenSampleProject} className="project-card animate-fade-in animate-fade-in-delay-7" style={{ cursor: 'pointer' }}>
+                  <div onClick={handleOpenSampleStudy} className="project-card animate-fade-in animate-fade-in-delay-7" style={{ cursor: 'pointer' }}>
                     <div className="project-card__content">
                       <div className="project-card__info">
                         <h3 className="project-card__title">Meta-Analysis &amp; Moderation</h3>

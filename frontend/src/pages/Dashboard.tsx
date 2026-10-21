@@ -400,10 +400,10 @@ const Dashboard = () => {
                 <span>Documentation</span>
               </span>
             </button>
-            <button className="sidebar-item" type="button" data-action="samples" onClick={() => openTab({ type: 'samples', title: 'Sample Projects' })}>
+            <button className="sidebar-item" type="button" data-action="samples" onClick={() => openTab({ type: 'samples', title: 'Sample Studies' })}>
               <span className="sidebar-item__left">
                 <span className="material-symbols-outlined">science</span>
-                <span>Sample Projects</span>
+                <span>Sample Studies</span>
               </span>
             </button>
             <button className="sidebar-item" type="button" data-action="feedback" onClick={() => openTab({ type: 'feedback', title: 'Feedback & Reports' })}>

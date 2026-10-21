@@ -138,7 +138,7 @@ export async function promptOpenWorkspaceFolder(): Promise<void> {
       if (createWsWithProjectListener) {
         createWsWithProjectListener(selectedPath, detection.project_name);
       } else {
-        alert(`Selected folder "${detection.project_name || selectedPath}" is a SmartPLS project. Please create or open a workspace first.`);
+        alert(`Selected folder "${detection.project_name || selectedPath}" is a SmartPLS study. Please create or open a workspace first.`);
       }
       return;
     }

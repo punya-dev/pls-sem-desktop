@@ -291,7 +291,7 @@ export const useStore = create<AppState>()(
             tabInput.type === 'get-started' ? 'Home' :
             tabInput.type === 'archive' ? 'Archive' :
             tabInput.type === 'docs' ? 'Documentation' :
-            tabInput.type === 'samples' ? 'Sample Projects' :
+            tabInput.type === 'samples' ? 'Sample Studies' :
             tabInput.type === 'feedback' ? 'Feedback & Reports' :
             'Changelog'
           );

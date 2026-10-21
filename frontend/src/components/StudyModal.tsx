@@ -6,7 +6,7 @@ import { processData } from '../utils/dataset-parser';
 interface StudyModalProps {
   isOpen: boolean;
   onClose: () => void;
-  workspaceId: string;
+  workspaceId?: string;
 }
 
 const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
@@ -14,7 +14,6 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(workspaceId);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isImportMenuOpen, setIsImportMenuOpen] = useState(false);
 
   const { workspaces, activeWorkspaceId, addStudy, setActiveStudy } = useStore();
   const currentWorkspaceId = selectedWorkspaceId || workspaceId || activeWorkspaceId;
@@ -25,7 +24,6 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
       setName('');
       setSelectedWorkspaceId(workspaceId || activeWorkspaceId || workspaces[0]?.id || '');
       setError(null);
-      setIsImportMenuOpen(false);
     }
   }, [isOpen, workspaceId, activeWorkspaceId, workspaces]);
 
@@ -45,7 +43,7 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
     setIsSubmitting(true);
     try {
       const res = await api.addProject(currentWorkspace.path, cleanName);
-      if (res.error) {
+      if (res?.error) {
         setError(res.error);
         setIsSubmitting(false);
         return;
@@ -65,43 +63,57 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
       setActiveStudy(newId);
       onClose();
     } catch (err: any) {
-      setError(err?.message || 'Failed to create project');
+      setError(err?.message || 'Failed to create study');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleImportSmartPls = async (isFolder: boolean) => {
+  const handleImportStudy = async () => {
     if (!currentWorkspace) return;
     setError(null);
     try {
-      const { open } = await import('@tauri-apps/plugin-dialog');
-      const selected = await open(
-        isFolder
-          ? {
-              directory: true,
-              multiple: false,
-              title: 'Select SmartPLS Project Folder',
-            }
-          : {
-              directory: false,
-              multiple: false,
-              title: 'Select SmartPLS Project ZIP',
-              filters: [{ name: 'SmartPLS Project ZIP', extensions: ['zip'] }],
-            }
-      );
+      let selectedPath: string | null = null;
 
-      if (!selected || typeof selected !== 'string') return;
+      // 1. Try native Cocoa picker that supports choosing BOTH folders and .zip files simultaneously
+      try {
+        const pickRes = await api.pickFileOrFolder();
+        if (pickRes?.path) {
+          selectedPath = pickRes.path;
+        }
+      } catch (pickErr) {
+        console.warn('Native pick_file_or_folder unavailable, falling back:', pickErr);
+      }
+
+      // 2. Fallback to Tauri open dialog if not selected
+      if (!selectedPath) {
+        try {
+          const { open } = await import('@tauri-apps/plugin-dialog');
+          const selected = await open({
+            multiple: false,
+            directory: false,
+            title: 'Import SmartPLS Study (ZIP or Folder)',
+            filters: [{ name: 'SmartPLS ZIP or All Files', extensions: ['zip', '*'] }]
+          });
+          if (selected && typeof selected === 'string') {
+            selectedPath = selected;
+          }
+        } catch (dialogErr) {
+          console.warn('Tauri open dialog fallback error:', dialogErr);
+        }
+      }
+
+      if (!selectedPath) return;
 
       setIsSubmitting(true);
-      const detection = await api.detectSmartPls(selected);
+      const detection = await api.detectSmartPls(selectedPath);
       if (!detection?.valid) {
-        setError(detection?.error || 'Selected file/folder is not a valid SmartPLS project.');
+        setError(detection?.error || 'Selected file/folder is not a valid SmartPLS study.');
         setIsSubmitting(false);
         return;
       }
 
-      const res = await api.importSmartPls(selected, currentWorkspace.path, currentWorkspace.name);
+      const res = await api.importSmartPls(selectedPath, currentWorkspace.path, currentWorkspace.name);
       if (res?.error) {
         setError(res.error);
         setIsSubmitting(false);
@@ -144,7 +156,7 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
       }
       onClose();
     } catch (err: any) {
-      setError(err?.message || 'Failed to import SmartPLS project');
+      setError(err?.message || 'Failed to import SmartPLS study');
     } finally {
       setIsSubmitting(false);
     }
@@ -202,102 +214,29 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
 
             <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: '1px solid var(--color-border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)', fontWeight: 500 }}>
-                Or import project
+                Or import study
               </span>
-              <div style={{ position: 'relative' }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => setIsImportMenuOpen(open => !open)}
-                  disabled={isSubmitting}
-                  style={{
-                    padding: '6px 12px',
-                    fontSize: '12px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    borderRadius: 'var(--radius-sm)',
-                    border: '1px solid var(--color-border-subtle)',
-                    background: 'var(--color-bg-base)',
-                    color: 'var(--color-text-primary)',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>file_download</span>
-                  <span>Import Project</span>
-                  <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>expand_more</span>
-                </button>
-                {isImportMenuOpen && (
-                  <div
-                    style={{
-                      position: 'absolute',
-                      right: 0,
-                      top: 'calc(100% + 4px)',
-                      background: 'var(--color-bg-surface)',
-                      border: '1px solid var(--color-border-subtle)',
-                      borderRadius: 'var(--radius-md)',
-                      boxShadow: 'var(--shadow-dropdown)',
-                      zIndex: 100,
-                      minWidth: '170px',
-                      padding: '4px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '2px',
-                    }}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsImportMenuOpen(false);
-                        handleImportSmartPls(false);
-                      }}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        padding: '8px 10px',
-                        fontSize: '12px',
-                        borderRadius: 'var(--radius-sm)',
-                        border: 'none',
-                        background: 'transparent',
-                        color: 'var(--color-text-primary)',
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                      }}
-                      onMouseEnter={e => (e.currentTarget.style.background = 'var(--color-bg-hover)')}
-                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                    >
-                      <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>folder_zip</span>
-                      <span>From ZIP Archive (.zip)</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsImportMenuOpen(false);
-                        handleImportSmartPls(true);
-                      }}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        padding: '8px 10px',
-                        fontSize: '12px',
-                        borderRadius: 'var(--radius-sm)',
-                        border: 'none',
-                        background: 'transparent',
-                        color: 'var(--color-text-primary)',
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                      }}
-                      onMouseEnter={e => (e.currentTarget.style.background = 'var(--color-bg-hover)')}
-                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                    >
-                      <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>folder</span>
-                      <span>From Folder</span>
-                    </button>
-                  </div>
-                )}
-              </div>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={handleImportStudy}
+                disabled={isSubmitting}
+                style={{
+                  padding: '6px 12px',
+                  fontSize: '12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--color-border-subtle)',
+                  background: 'var(--color-bg-base)',
+                  color: 'var(--color-text-primary)',
+                  cursor: 'pointer',
+                }}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>file_download</span>
+                <span>Import Study</span>
+              </button>
             </div>
           </div>
           <div className="modal__footer">
