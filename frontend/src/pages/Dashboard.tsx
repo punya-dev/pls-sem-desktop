@@ -634,7 +634,7 @@ const Dashboard = () => {
                                 },
                                 {
                                   id: 'copy-study',
-                                  label: 'Duplicate to Workspace…',
+                                  label: 'Copy to Workspace…',
                                   icon: 'file_copy',
                                   action: () => setWorkspaceDropdownConfig({ isOpen: true, mode: 'copy', study, position: { x: e.clientX, y: e.clientY } }),
                                 },
