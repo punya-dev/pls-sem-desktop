@@ -86,6 +86,33 @@ class TestSmartPLSImporter(unittest.TestCase):
         finally:
             shutil.rmtree(temp_ws, ignore_errors=True)
 
+    def test_zip_detection_and_import(self):
+        import zipfile
+        temp_zip = os.path.join(tempfile.gettempdir(), f"smartpls_test_{os.getpid()}.zip")
+        temp_ws = tempfile.mkdtemp(prefix="pls_zip_test_")
+        try:
+            with zipfile.ZipFile(temp_zip, "w") as zf:
+                for root, dirs, files in os.walk(self.sample_dir):
+                    for f in files:
+                        full = os.path.join(root, f)
+                        rel = os.path.relpath(full, self.sample_dir)
+                        zf.write(full, rel)
+
+            det = detect_smartpls_folder(temp_zip)
+            self.assertTrue(det["valid"])
+            self.assertTrue(det["is_zip"])
+            self.assertEqual(det["models_count"], 8)
+            self.assertEqual(det["datasets_count"], 3)
+
+            res = import_smartpls_folder(temp_zip, target_workspace_folder=temp_ws, workspace_name="Zip Test WS")
+            self.assertEqual(res["status"], "success")
+            self.assertEqual(len(res["studies"]), 3)
+            self.assertEqual(len(res["models"]), 8)
+        finally:
+            if os.path.exists(temp_zip):
+                os.remove(temp_zip)
+            shutil.rmtree(temp_ws, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()

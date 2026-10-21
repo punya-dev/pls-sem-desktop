@@ -18,9 +18,12 @@ import SnapshotView from './pages/SnapshotView';
 
 import { api } from './utils/api';
 import { applyAccentColor } from './utils/theme';
+import { ImportWorkspaceModal } from './components/ImportWorkspaceModal';
+import { registerImportWorkspaceModal } from './utils/workspace-import';
 
 function App() {
   const { tabs, activeTabId, settings, theme } = useStore();
+  const [isImportWsOpen, setIsImportWsOpen] = React.useState(false);
 
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
 
@@ -158,6 +161,10 @@ function App() {
           e.preventDefault();
         }
       }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'o') {
+        e.preventDefault();
+        setIsImportWsOpen(true);
+      }
     };
     window.addEventListener('keydown', handleGlobalKeyDown);
 
@@ -177,7 +184,11 @@ function App() {
     };
     window.addEventListener('selectstart', handleGlobalSelectStart);
 
+    // Listen for Import Workspace modal trigger
+    const unregister = registerImportWorkspaceModal(setIsImportWsOpen);
+
     return () => {
+      unregister();
       window.removeEventListener('keydown', handleGlobalKeyDown);
       window.removeEventListener('selectstart', handleGlobalSelectStart);
     };
@@ -190,6 +201,7 @@ function App() {
         <ContextMenu />
         <SettingsModal />
         <ConfirmDeleteModal />
+        <ImportWorkspaceModal isOpen={isImportWsOpen} onClose={() => setIsImportWsOpen(false)} />
         <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {renderContent()}
         </div>

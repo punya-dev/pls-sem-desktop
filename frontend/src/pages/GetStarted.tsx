@@ -5,7 +5,6 @@ import WorkspaceModal from '../components/WorkspaceModal';
 import InputDialog from '../components/InputDialog';
 import { api } from '../utils/api';
 import { promptOpenWorkspaceFolder } from '../utils/workspace-import';
-import { promptImportSmartPlsFolder } from '../utils/smartpls-import';
 
 const GetStarted = () => {
   const navigate = useNavigate();
@@ -282,13 +281,9 @@ const GetStarted = () => {
                 <p className="page-header__subtitle">Welcome to CSPLS. Set up your workspace or explore guided sample models to begin.</p>
               </div>
               <div className="page-header__actions" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                <button className="btn btn-secondary" type="button" onClick={() => promptImportSmartPlsFolder()} title="Import an exported SmartPLS project folder">
-                  <span className="material-symbols-outlined">swap_horiz</span>
-                  <span>Import SmartPLS</span>
-                </button>
                 <button className="btn btn-secondary" type="button" onClick={() => promptOpenWorkspaceFolder()}>
                   <span className="material-symbols-outlined">folder_open</span>
-                  <span>Open Workspace</span>
+                  <span>Import Workspace</span>
                   <kbd className="kbd">⌘O</kbd>
                 </button>
                 <button className="btn btn-primary" type="button" onClick={() => setIsWorkspaceModalOpen(true)}>
