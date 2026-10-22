@@ -971,8 +971,27 @@ def export_project_zip(project_path: str, out_zip_path: str, include_results: bo
     - datasets/<name>.csv
     """
     import zipfile
+    project_path = os.path.expanduser(project_path)
+    out_zip_path = os.path.expanduser(out_zip_path)
     if not os.path.exists(project_path):
         raise FileNotFoundError(f"Project not found: {project_path}")
+
+    parent_dir = os.path.dirname(out_zip_path)
+    if parent_dir:
+        os.makedirs(parent_dir, exist_ok=True)
+
+    # If project_path is a directory, compress the folder
+    if os.path.isdir(project_path):
+        with zipfile.ZipFile(out_zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for root, dirs, files in os.walk(project_path):
+                dirs[:] = [d for d in dirs if not d.startswith(".") and d != "__pycache__"]
+                for f in files:
+                    if f.startswith(".") or f.endswith(".pyc"):
+                        continue
+                    file_path = os.path.join(root, f)
+                    arcname = os.path.relpath(file_path, project_path)
+                    zf.write(file_path, arcname)
+        return out_zip_path
 
     migrate_project(project_path)
     conn = sqlite3.connect(project_path)
@@ -983,7 +1002,7 @@ def export_project_zip(project_path: str, out_zip_path: str, include_results: bo
         "app_version": "1.0.0",
         "schema_version": SCHEMA_VERSION,
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "project_name": meta.get("project_name", os.path.basename(project_path)),
+        "project_name": meta.get("name") or meta.get("project_name", os.path.basename(project_path)),
         "datasets_count": len(datasets),
     }
 

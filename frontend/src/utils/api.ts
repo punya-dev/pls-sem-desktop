@@ -752,9 +752,31 @@ export const api = {
     }
   },
 
+  async exportProjectZip(projectPath: string, outZipPath: string): Promise<{ status?: string; zip_path?: string; error?: string }> {
+    try {
+      const res = await fetch(`${API_BASE}/project/export-zip`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: projectPath, out_path: outZipPath, include_results: true }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to export project archive' };
+    }
+  },
 
-
-
+  async exportWorkspaceZip(workspacePath: string, outZipPath: string): Promise<{ status?: string; zip_path?: string; error?: string }> {
+    try {
+      const res = await fetch(`${API_BASE}/workspace/export-zip`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspace_path: workspacePath, out_path: outZipPath }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to export workspace archive' };
+    }
+  },
 
   // --- Phase 3-6 Advanced PLS-SEM Analyses ---
   async runBlindfolding(data: {

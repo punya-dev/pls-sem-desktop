@@ -154,6 +154,11 @@ class ExportZipRequest(BaseModel):
     include_results: bool = True
 
 
+class ExportWorkspaceRequest(BaseModel):
+    workspace_path: str
+    out_path: str
+
+
 class ImportZipRequest(BaseModel):
     zip_path: str
     workspace_dir: str
@@ -1461,6 +1466,15 @@ def duplicate_workspace_folder(req: DuplicateWorkspaceRequest):
     try:
         res = workspace_io.duplicate_workspace(req.source_folder_path, req.new_name)
         return res
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/workspace/export-zip")
+def workspace_export_zip(req: ExportWorkspaceRequest):
+    try:
+        zip_path = workspace_io.export_workspace_zip(req.workspace_path, req.out_path)
+        return {"status": "exported", "zip_path": zip_path}
     except Exception as e:
         return {"error": str(e)}
 

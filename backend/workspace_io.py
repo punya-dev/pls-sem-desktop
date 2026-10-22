@@ -141,4 +141,28 @@ def duplicate_workspace(source_folder_path: str, new_name: str):
         "name": new_name
     }
 
+
+def export_workspace_zip(workspace_path: str, out_zip_path: str) -> str:
+    import zipfile
+    workspace_path = os.path.expanduser(workspace_path)
+    out_zip_path = os.path.expanduser(out_zip_path)
+    if not os.path.exists(workspace_path):
+        raise FileNotFoundError(f"Workspace folder not found: {workspace_path}")
+
+    parent_dir = os.path.dirname(out_zip_path)
+    if parent_dir:
+        os.makedirs(parent_dir, exist_ok=True)
+
+    with zipfile.ZipFile(out_zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for root, dirs, files in os.walk(workspace_path):
+            dirs[:] = [d for d in dirs if not d.startswith(".") and d != "__pycache__"]
+            for f in files:
+                if f.startswith(".") or f.endswith(".pyc") or f.endswith(".tmp"):
+                    continue
+                file_path = os.path.join(root, f)
+                arcname = os.path.relpath(file_path, workspace_path)
+                zf.write(file_path, arcname)
+
+    return out_zip_path
+
     

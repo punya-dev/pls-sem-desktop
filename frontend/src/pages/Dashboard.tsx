@@ -225,7 +225,132 @@ const Dashboard = () => {
     setImportingStudyId(null);
   };
 
+  const handleExportProject = async (study: Study) => {
+    if (!study.path) {
+      alert('This project does not have a saved file on disk.');
+      return;
+    }
+    try {
+      let selected: string | null = null;
+      const safeName = (study.name || 'Project').replace(/[/\\?%*:|"<>]/g, '_');
+      try {
+        const { save } = await import('@tauri-apps/plugin-dialog');
+        selected = await save({
+          title: 'Export Project Archive',
+          defaultPath: `${safeName}.zip`,
+          filters: [{ name: 'ZIP Archive', extensions: ['zip'] }],
+        });
+      } catch {
+        selected = window.prompt('Enter destination file path for .zip archive:', `${safeName}.zip`);
+      }
 
+      if (!selected) return;
+
+      const outZipPath = selected.endsWith('.zip') ? selected : `${selected}.zip`;
+      const res = await api.exportProjectZip(study.path, outZipPath);
+      if (res?.error) {
+        alert(`Export failed: ${res.error}`);
+      }
+    } catch (err: any) {
+      console.error('Failed to export project:', err);
+      alert(`Failed to export project: ${err?.message || err}`);
+    }
+  };
+
+  const handleExportWorkspace = async (ws: { id: string; name: string; path?: string }) => {
+    if (!ws.path) {
+      alert('This workspace does not have a saved directory path on disk.');
+      return;
+    }
+    try {
+      let selected: string | null = null;
+      const safeName = (ws.name || 'Workspace').replace(/[/\\?%*:|"<>]/g, '_');
+      try {
+        const { save } = await import('@tauri-apps/plugin-dialog');
+        selected = await save({
+          title: 'Export Workspace Archive',
+          defaultPath: `${safeName}.zip`,
+          filters: [{ name: 'ZIP Archive', extensions: ['zip'] }],
+        });
+      } catch {
+        selected = window.prompt('Enter destination file path for .zip archive:', `${safeName}.zip`);
+      }
+
+      if (!selected) return;
+
+      const outZipPath = selected.endsWith('.zip') ? selected : `${selected}.zip`;
+      const res = await api.exportWorkspaceZip(ws.path, outZipPath);
+      if (res?.error) {
+        alert(`Export failed: ${res.error}`);
+      }
+    } catch (err: any) {
+      console.error('Failed to export workspace:', err);
+      alert(`Failed to export workspace: ${err?.message || err}`);
+    }
+  };
+
+  const openWorkspaceContextMenu = (e: React.MouseEvent, ws: { id: string; name: string; path?: string }) => {
+    e.preventDefault();
+    e.stopPropagation();
+    useStore.getState().openContextMenu(e.clientX, e.clientY, [
+      {
+        id: 'rename',
+        label: 'Rename Workspace',
+        icon: 'edit',
+        action: () => {
+          if (activeWorkspace && activeWorkspace.id === ws.id) {
+            setEditWorkspaceTitle(ws.name);
+            setIsEditingTitle(true);
+          } else {
+            setEditingSidebarWsId(ws.id);
+            setEditSidebarWsName(ws.name);
+          }
+        },
+      },
+      {
+        id: 'duplicate',
+        label: 'Duplicate Workspace',
+        icon: 'content_copy',
+        action: () => useStore.getState().duplicateWorkspace(ws.id),
+      },
+      {
+        id: 'export-workspace',
+        label: 'Export Workspace…',
+        icon: 'archive',
+        action: () => handleExportWorkspace(ws),
+      },
+      {
+        id: 'archive',
+        label: 'Archive Workspace',
+        icon: 'inventory_2',
+        action: () => archiveWorkspace(ws.id),
+      },
+      {
+        id: 'delete',
+        label: 'Delete Workspace',
+        icon: 'delete',
+        danger: true,
+        action: () => {
+          requestDelete({
+            title: 'Delete Workspace',
+            itemName: ws.name,
+            message:
+              'Are you sure? This workspace and all its contents will be permanently deleted and cannot be recovered.',
+            onConfirm: async () => {
+              if (ws.path) {
+                try {
+                  await api.deleteWorkspace(ws.path);
+                } catch (e) {
+                  console.warn('Failed to delete workspace on disk:', e);
+                }
+              }
+              deleteWorkspace(ws.id);
+            },
+          });
+        },
+      },
+    ]);
+  };
 
   const handleCreateStudy = () => {
     setIsStudyModalOpen(true);
@@ -322,49 +447,7 @@ const Dashboard = () => {
                         openTab({ type: 'workspace', title: ws.name, workspaceId: ws.id });
                       }
                     }}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      useStore.getState().openContextMenu(e.clientX, e.clientY, [
-                        {
-                          id: 'rename', 
-                          label: 'Rename Workspace', 
-                          icon: 'edit', 
-                          action: () => {
-                            setEditingSidebarWsId(ws.id);
-                            setEditSidebarWsName(ws.name);
-                          }
-                        },
-                        {
-                          id: 'duplicate', label: 'Duplicate Workspace', icon: 'content_copy', action: () => useStore.getState().duplicateWorkspace(ws.id)
-                        },
-                        {
-                          id: 'archive', label: 'Archive Workspace', icon: 'inventory_2', action: () => archiveWorkspace(ws.id)
-                        },
-                        {
-                          id: 'delete', 
-                          label: 'Delete Workspace', 
-                          icon: 'delete', 
-                          danger: true, 
-                          action: () => {
-                            requestDelete({
-                              title: 'Delete Workspace',
-                              itemName: ws.name,
-                              message: 'Are you sure? This workspace and all its contents will be permanently deleted and cannot be recovered.',
-                              onConfirm: async () => {
-                                if (ws.path) {
-                                  try {
-                                    await api.deleteWorkspace(ws.path);
-                                  } catch (e) {
-                                    console.warn('Failed to delete workspace on disk:', e);
-                                  }
-                                }
-                                deleteWorkspace(ws.id);
-                              },
-                            });
-                          } 
-                        }
-                      ]);
-                    }}
+                    onContextMenu={(e) => openWorkspaceContextMenu(e, ws)}
                     style={{ cursor: 'pointer' }}
                   >
                     <span className="sidebar-item__left" style={{ width: '100%', overflow: 'hidden' }}>
@@ -457,7 +540,12 @@ const Dashboard = () => {
                         setIsEditingTitle(true);
                       }
                     }}
-                    title="Double-click to rename workspace"
+                    onContextMenu={(e) => {
+                      if (activeWorkspace) {
+                        openWorkspaceContextMenu(e, activeWorkspace);
+                      }
+                    }}
+                    title="Double-click to rename workspace, right-click for options"
                   >
                     {activeWorkspace?.name || 'Workspace'}
                   </h1>
@@ -634,6 +722,12 @@ const Dashboard = () => {
                                   label: 'Copy to Workspace…',
                                   icon: 'file_copy',
                                   action: () => setWorkspaceDropdownConfig({ isOpen: true, mode: 'copy', study, position: { x: e.clientX, y: e.clientY } }),
+                                },
+                                {
+                                  id: 'export-project',
+                                  label: 'Export Project…',
+                                  icon: 'archive',
+                                  action: () => handleExportProject(study),
                                 },
                                 {
                                   id: 'delete', 
