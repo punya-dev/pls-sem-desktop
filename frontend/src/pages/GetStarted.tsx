@@ -328,7 +328,7 @@ const GetStarted = () => {
                 <h1 className="page-header__title">Get Started</h1>
                 <p className="page-header__subtitle">Welcome to StatSEM. Set up your workspace or explore guided sample models to begin.</p>
               </div>
-              <div className="page-header__actions" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+              <div className="page-header__actions">
                 <div style={{ position: 'relative' }} ref={importDropdownRef}>
                   <button
                     className="btn btn-secondary"

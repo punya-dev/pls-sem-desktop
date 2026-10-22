@@ -351,7 +351,7 @@ a:hover {
 
 /* In compact / windowed mode, vertically center the logo and text to align directly with macOS traffic lights */
 .titlebar__left .brand {
-  transform: translateY(-2.5px);
+  transform: translateY(-3.5px);
 }
 
 /* In expanded (fullscreen) screen, left-align completely flush without traffic light space */
@@ -1995,15 +1995,26 @@ body.is-tab-sliding * {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  container-type: inline-size;
 }
 
 .main-content__inner {
-  padding: 24px 32px;
+  padding: 28px 32px 32px 32px;
   width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
   min-height: 100%;
   gap: 24px;
+  box-sizing: border-box;
+}
+
+@media (max-width: 900px) {
+  .main-content__inner {
+    padding: 20px 20px 24px 20px;
+    gap: 18px;
+  }
 }
 
 
@@ -2011,18 +2022,20 @@ body.is-tab-sliding * {
 
 .page-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  padding-bottom: 12px;
+  padding-bottom: 16px;
   border-bottom: 1px solid var(--color-border-subtle);
   gap: 16px;
-  min-height: 45px;
+  flex-wrap: wrap;
 }
 
 .page-header__text {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 240px;
+  flex: 1;
 }
 
 .page-header__title {
@@ -2045,6 +2058,7 @@ body.is-tab-sliding * {
   align-items: center;
   gap: 10px;
   flex-shrink: 0;
+  flex-wrap: wrap;
 }
 
 
@@ -2155,14 +2169,27 @@ body.is-tab-sliding * {
 
 .content-grid {
   display: grid;
-  grid-template-columns: 5fr 7fr;
-  gap: 32px;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: 24px;
   align-items: flex-start;
+  min-width: 0;
 }
 
-@media (max-width: 960px) {
+.content-grid > * {
+  min-width: 0;
+}
+
+@media (max-width: 1080px) {
   .content-grid {
     grid-template-columns: 1fr;
+    gap: 20px;
+  }
+}
+
+@container (max-width: 780px) {
+  .content-grid {
+    grid-template-columns: 1fr;
+    gap: 20px;
   }
 }
 
@@ -2224,6 +2251,7 @@ body.is-tab-sliding * {
   flex-direction: column;
   gap: 12px;
   box-shadow: var(--shadow-xs);
+  min-width: 0;
 }
 
 .release-card__header {
@@ -2461,6 +2489,7 @@ body.is-tab-sliding * {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
   transition: border-color var(--transition-normal), background-color var(--transition-fast);
 }
 
@@ -2546,7 +2575,9 @@ body.is-tab-sliding * {
   margin-top: 2px;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .project-card__meta {
