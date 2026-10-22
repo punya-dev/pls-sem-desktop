@@ -1622,19 +1622,17 @@ body.is-tab-sliding * {
   flex-direction: column;
   justify-content: space-between;
   flex-shrink: 0;
-  padding: 12px;
+  padding: 12px 12px 6px 12px;
   user-select: none;
   overflow: hidden;
-  transition: width var(--transition-sidebar), padding var(--transition-sidebar), opacity var(--transition-sidebar);
+  transition: width var(--transition-sidebar), padding var(--transition-sidebar);
+  will-change: width;
 }
 
 .sidebar.collapsed {
   width: 44px;
-  padding: 12px 6px;
+  padding: 12px 6px 6px 6px;
 }
-
-
-
 
 /* Smoothly hide specific elements when collapsed */
 .sidebar-header__label,
@@ -1644,16 +1642,17 @@ body.is-tab-sliding * {
 .sidebar-item__left span:not(.material-symbols-outlined),
 .license-badge__content,
 .sidebar-create-btn span:not(.material-symbols-outlined) {
-  transition: opacity calc(var(--transition-sidebar) * 0.8) ease;
   white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
   opacity: 1;
+  transition: opacity 0.16s ease;
 }
 
 .sidebar-header__label,
 .sidebar-item__left span:not(.material-symbols-outlined) {
   max-width: 176px;
-  transition: max-width var(--transition-sidebar), opacity calc(var(--transition-sidebar) * 0.55) ease;
+  transition: max-width var(--transition-sidebar), opacity 0.16s ease;
 }
 
 .sidebar.collapsed .sidebar-header__label,
@@ -1687,7 +1686,7 @@ body.is-tab-sliding * {
 
 .sidebar.collapsed .sidebar-header__actions {
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   width: 32px;
   align-items: center;
 }
@@ -1696,15 +1695,6 @@ body.is-tab-sliding * {
 .sidebar.collapsed #sidebar-collapse-btn { order: -3; }
 .sidebar.collapsed #sidebar-search { order: -2; }
 .sidebar.collapsed .sidebar-create-folder-btn { order: -1; }
-
-.sidebar.collapsed #sidebar-ws-list {
-  max-height: 0;
-  opacity: 0;
-  visibility: hidden;
-  margin: 0;
-  padding: 0;
-  overflow: hidden;
-}
 
 .sidebar-ws-container {
   display: flex;
@@ -1715,15 +1705,26 @@ body.is-tab-sliding * {
 }
 
 #sidebar-ws-list {
-  transition: opacity var(--transition-sidebar), margin var(--transition-sidebar), padding var(--transition-sidebar), visibility 0s linear;
+  transition: opacity 0.18s ease, max-height var(--transition-sidebar);
   opacity: 1;
   visibility: visible;
   flex: 1;
   min-height: 0;
+  max-height: 2000px;
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: thin;
   padding-right: 2px;
+}
+
+.sidebar.collapsed #sidebar-ws-list {
+  max-height: 0;
+  opacity: 0;
+  visibility: hidden;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  pointer-events: none;
 }
 
 .sidebar.collapsed .sidebar-ws-item,
@@ -1736,8 +1737,6 @@ body.is-tab-sliding * {
 .sidebar.collapsed .sidebar-item .material-symbols-outlined {
   margin: 0;
 }
-
-
 
 .sidebar.collapsed .license-badge {
   padding: 4px 6px;
@@ -1761,8 +1760,8 @@ body.is-tab-sliding * {
 .sidebar__bottom {
   margin-top: auto;
   border-top: 1px solid var(--color-border-subtle);
-  padding-top: 10px;
-  padding-bottom: 12px;
+  padding-top: 8px;
+  padding-bottom: 0px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1843,7 +1842,8 @@ body.is-tab-sliding * {
 
 .sidebar-create-btn {
   width: 100%;
-  min-width: calc(var(--sidebar-width) - 24px);
+  min-width: 0;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1872,7 +1872,8 @@ body.is-tab-sliding * {
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  min-width: calc(var(--sidebar-width) - 24px);
+  min-width: 0;
+  box-sizing: border-box;
   padding: 4px 8px;
   border-radius: var(--radius-md);
   font-size: var(--text-sm);
@@ -1891,6 +1892,7 @@ body.is-tab-sliding * {
   align-items: center;
   gap: 8px;
   min-width: 0;
+  flex: 1;
 }
 
 .sidebar-item__left .material-symbols-outlined {
@@ -1926,7 +1928,9 @@ body.is-tab-sliding * {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-width: calc(var(--sidebar-width) - 24px);
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .license-badge__icon {
@@ -1994,12 +1998,12 @@ body.is-tab-sliding * {
 }
 
 .main-content__inner {
-  padding: 32px;
+  padding: 24px 32px;
   width: 100%;
   display: flex;
   flex-direction: column;
   min-height: 100%;
-  gap: 32px;
+  gap: 24px;
 }
 
 
@@ -2007,25 +2011,27 @@ body.is-tab-sliding * {
 
 .page-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  padding-bottom: 24px;
+  padding-bottom: 12px;
   border-bottom: 1px solid var(--color-border-subtle);
   gap: 16px;
+  min-height: 45px;
 }
 
 .page-header__text {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .page-header__title {
-  font-size: 22px;
-  font-weight: 600;
+  font-size: 24px;
+  font-weight: 700;
   letter-spacing: -0.02em;
-  color: var(--color-text-primary);
-  line-height: 1.15;
+  color: var(--color-accent, #6B4EE6);
+  line-height: 32px;
+  margin: 0;
 }
 
 .page-header__subtitle {
