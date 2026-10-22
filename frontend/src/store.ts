@@ -684,8 +684,9 @@ export const useStore = create<AppState>()(
       })),
       setActiveWorkspace: (id) => set({ activeWorkspaceId: id }),
       addStudy: (study) => set((state) => {
+        // If it's the exact same study by ID or non-empty path, update it in place
         const existingIdx = state.studies.findIndex(
-          s => s.id === study.id || (s.workspaceId === study.workspaceId && (s.path === study.path || s.name.toLowerCase() === study.name.toLowerCase()))
+          s => s.id === study.id || (Boolean(study.path) && Boolean(s.path) && s.path === study.path)
         );
         if (existingIdx >= 0) {
           const updated = [...state.studies];
@@ -695,9 +696,27 @@ export const useStore = create<AppState>()(
             activeStudyId: study.id
           };
         }
+
+        // It's a new study; ensure unique name within the target workspace
+        let uniqueName = study.name.trim();
+        const wsStudies = state.studies.filter(s => s.workspaceId === study.workspaceId);
+        const existingNames = new Set(wsStudies.map(s => s.name.trim().toLowerCase()));
+
+        if (existingNames.has(uniqueName.toLowerCase())) {
+          const match = uniqueName.match(/^(.*?)(?:\s*\(([0-9]+)\))?$/);
+          const base = match ? match[1].trim() : uniqueName;
+          let counter = 1;
+          while (existingNames.has(`${base}(${counter})`.toLowerCase())) {
+            counter++;
+          }
+          uniqueName = `${base}(${counter})`;
+        }
+
+        const studyWithUniqueName = uniqueName !== study.name ? { ...study, name: uniqueName } : study;
+
         return {
-          studies: [...state.studies, study],
-          activeStudyId: study.id
+          studies: [...state.studies, studyWithUniqueName],
+          activeStudyId: studyWithUniqueName.id
         };
       }),
       syncWorkspaceStudies: (workspaceId, diskProjects) => set((state) => {

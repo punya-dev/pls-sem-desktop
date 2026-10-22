@@ -24,6 +24,7 @@ export interface RecentWorkspace {
 export interface ProjectResponse {
   status?: string;
   project_path?: string;
+  project_name?: string;
   workspace?: WorkspaceMetadata;
   error?: string;
 }

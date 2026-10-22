@@ -9,13 +9,33 @@ interface StudyModalProps {
   workspaceId?: string;
 }
 
+const getNextUniqueStudyName = (candidateName: string, workspaceId?: string, existingStudies: Array<{ name: string; workspaceId?: string }> = []): string => {
+  const clean = candidateName.trim();
+  if (!clean) return '';
+  const wsStudies = existingStudies.filter(s => !workspaceId || s.workspaceId === workspaceId);
+  const existingNames = new Set(wsStudies.map(s => s.name.trim().toLowerCase()));
+
+  if (!existingNames.has(clean.toLowerCase())) {
+    return clean;
+  }
+
+  const match = clean.match(/^(.*?)(?:\s*\(([0-9]+)\))?$/);
+  const base = match ? match[1].trim() : clean;
+
+  let counter = 1;
+  while (existingNames.has(`${base}(${counter})`.toLowerCase())) {
+    counter++;
+  }
+  return `${base}(${counter})`;
+};
+
 const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
   const [name, setName] = useState('');
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(workspaceId);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { workspaces, activeWorkspaceId, addStudy, setActiveStudy } = useStore();
+  const { workspaces, activeWorkspaceId, addStudy, setActiveStudy, studies } = useStore();
   const currentWorkspaceId = selectedWorkspaceId || workspaceId || activeWorkspaceId;
   const currentWorkspace = workspaces.find(w => w.id === currentWorkspaceId);
 
@@ -30,7 +50,10 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
   if (!isOpen) return null;
 
   const cleanName = name.trim();
-  const fileName = cleanName ? `${cleanName.replace(/[/\\?%*:|"<>]/g, '_')}.pls` : '';
+  const effectiveName = getNextUniqueStudyName(cleanName, currentWorkspace?.id, studies);
+  const isNameCollision = Boolean(cleanName && effectiveName && effectiveName.toLowerCase() !== cleanName.toLowerCase());
+
+  const fileName = effectiveName ? `${effectiveName.replace(/[/\\?%*:|"<>]/g, '_')}.pls` : '';
   const wsPath = currentWorkspace?.path || '';
   const separator = wsPath.includes('\\') ? '\\' : '/';
   const studyFilePath = fileName && wsPath ? `${wsPath.replace(/[/\\]+$/, '')}${separator}${fileName}` : '';
@@ -42,19 +65,20 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
     setError(null);
     setIsSubmitting(true);
     try {
-      const res = await api.addProject(currentWorkspace.path, cleanName);
+      const res = await api.addProject(currentWorkspace.path, effectiveName);
       if (res?.error) {
         setError(res.error);
         setIsSubmitting(false);
         return;
       }
 
+      const finalName = res.project_name || effectiveName;
       const projectPath = res.project_path || studyFilePath;
       const newId = projectPath || 'study_' + Date.now();
       addStudy({
         id: newId,
         workspaceId: currentWorkspace.id,
-        name: cleanName,
+        name: finalName,
         type: 'PLS-SEM',
         description: '',
         lastModified: 'Just now',
@@ -216,6 +240,13 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
             {studyFilePath && (
               <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', wordBreak: 'break-all' }}>
                 <span style={{ fontFamily: 'var(--font-mono)' }}>{studyFilePath}</span>
+              </div>
+            )}
+
+            {isNameCollision && (
+              <div style={{ fontSize: '11px', color: 'var(--color-accent, #3b82f6)', display: 'flex', alignItems: 'center', gap: '5px', marginTop: '2px' }}>
+                <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>info</span>
+                <span>Name exists in this workspace; will be created as <strong>{effectiveName}</strong>.</span>
               </div>
             )}
 

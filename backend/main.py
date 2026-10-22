@@ -1105,14 +1105,50 @@ def recent_workspaces():
 @app.post("/workspace/add-project")
 def add_project(folder_path: str, project_name: str):
     try:
-        project_filename = f"{project_name}.pls"
-        full_project_path = os.path.join(folder_path, project_filename)
+        import re
+        folder_path = os.path.expanduser(folder_path)
+        clean_name = project_name.strip()
+        m = re.match(r"^(.*?)(?:\s*\(([0-9]+)\))?$", clean_name)
+        base_name = m.group(1).strip() if m else clean_name
+        if not base_name:
+            base_name = "Untitled Study"
 
-        project_io.create_project(full_project_path, project_name)
+        ws = workspace_io.load_workspace(folder_path)
+        existing_names = set()
+        existing_files = set()
+        if ws and "projects" in ws and isinstance(ws["projects"], list):
+            for p in ws["projects"]:
+                if isinstance(p, dict):
+                    if p.get("name"):
+                        existing_names.add(p["name"].strip().lower())
+                    if p.get("path"):
+                        existing_files.add(p["path"].strip().lower())
+
+        target_name = clean_name
+        target_filename = f"{target_name}.pls"
+        full_project_path = os.path.join(folder_path, target_filename)
+
+        counter = 1
+        while (
+            os.path.exists(full_project_path)
+            or target_name.lower() in existing_names
+            or target_filename.lower() in existing_files
+        ):
+            target_name = f"{base_name}({counter})"
+            target_filename = f"{target_name}.pls"
+            full_project_path = os.path.join(folder_path, target_filename)
+            counter += 1
+
+        project_io.create_project(full_project_path, target_name)
         project_io.add_recent_project(full_project_path)
-        ws = workspace_io.add_project_to_workspace(folder_path, project_filename, project_name)
+        ws = workspace_io.add_project_to_workspace(folder_path, target_filename, target_name)
 
-        return {"status": "created", "project_path": full_project_path, "workspace": ws}
+        return {
+            "status": "created",
+            "project_path": full_project_path,
+            "project_name": target_name,
+            "workspace": ws,
+        }
     except Exception as e:
         return {"error": str(e)}
 
