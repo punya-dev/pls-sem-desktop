@@ -339,19 +339,39 @@ a:hover {
   flex-shrink: 0;
 }
 
-/* Native macOS traffic lights are rendered by Tauri in this reserved space */
+/* Native macOS traffic lights are rendered by Tauri in this reserved space.
+   Smooth transition for sliding when expanding / collapsing in fullscreen. */
 .titlebar__traffic-light-space {
   width: 72px;
   min-width: 72px;
   height: 100%;
   flex-shrink: 0;
+  margin-right: 0;
+  transition: width 0.26s cubic-bezier(0.16, 1, 0.3, 1),
+              min-width 0.26s cubic-bezier(0.16, 1, 0.3, 1),
+              margin-right 0.26s cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 0.2s ease;
+  overflow: hidden;
 }
 
-/* In fullscreen on macOS, native window buttons are hidden; remove space so logo is flush */
+/* In fullscreen on macOS, collapse spacer by default so logo sits flush at the left */
 body[data-window-fullscreen="true"] .titlebar__traffic-light-space {
-  display: none !important;
-  width: 0 !important;
-  min-width: 0 !important;
+  width: 0;
+  min-width: 0;
+  margin-right: -12px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* In fullscreen on macOS, when the cursor enters the top-left corner, smoothly expand
+   the spacer to slide the logo & brand name right, making room for macOS traffic lights */
+body[data-window-fullscreen="true"] .titlebar__traffic-light-space.expanded,
+body[data-window-fullscreen="true"] .titlebar__left:hover .titlebar__traffic-light-space {
+  width: 72px;
+  min-width: 72px;
+  margin-right: 0;
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .titlebar__right .icon-btn {
