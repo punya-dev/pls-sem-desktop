@@ -12,6 +12,19 @@ const GetStarted = () => {
   const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = useState(false);
   const [editingWsId, setEditingWsId] = useState<string | null>(null);
   const [editWsName, setEditWsName] = useState('');
+  const [isImportMenuOpen, setIsImportMenuOpen] = useState(false);
+  const importDropdownRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!isImportMenuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (importDropdownRef.current && !importDropdownRef.current.contains(e.target as Node)) {
+        setIsImportMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isImportMenuOpen]);
 
   const commitWsRename = (id: string) => {
     if (editWsName.trim()) {
@@ -316,11 +329,106 @@ const GetStarted = () => {
                 <p className="page-header__subtitle">Welcome to CSPLS. Set up your workspace or explore guided sample models to begin.</p>
               </div>
               <div className="page-header__actions" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                <button className="btn btn-secondary" type="button" onClick={() => promptOpenWorkspaceFolder()}>
-                  <span className="material-symbols-outlined">folder_open</span>
-                  <span>Import / Open</span>
-                  <kbd className="kbd">⌘O</kbd>
-                </button>
+                <div style={{ position: 'relative' }} ref={importDropdownRef}>
+                  <button
+                    className="btn btn-secondary"
+                    type="button"
+                    onClick={() => setIsImportMenuOpen((prev) => !prev)}
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    <span className="material-symbols-outlined">folder_open</span>
+                    <span>Import / Open</span>
+                    <span className="material-symbols-outlined" style={{ fontSize: '18px', marginLeft: '-2px' }}>
+                      {isImportMenuOpen ? 'arrow_drop_up' : 'arrow_drop_down'}
+                    </span>
+                    <kbd className="kbd">⌘O</kbd>
+                  </button>
+
+                  {isImportMenuOpen && (
+                    <div
+                      className="no-drag animate-fade-in"
+                      style={{
+                        position: 'absolute',
+                        top: 'calc(100% + 6px)',
+                        left: 0,
+                        minWidth: '230px',
+                        background: 'var(--color-bg-surface)',
+                        border: '1px solid var(--color-border-subtle)',
+                        borderRadius: 'var(--radius-md)',
+                        boxShadow: 'var(--shadow-lg)',
+                        padding: '6px',
+                        zIndex: 1000,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '4px',
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsImportMenuOpen(false);
+                          promptOpenWorkspaceFolder('folder');
+                        }}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '10px',
+                          padding: '8px 10px',
+                          borderRadius: 'var(--radius-sm)',
+                          border: 'none',
+                          background: 'transparent',
+                          color: 'var(--color-text-primary)',
+                          fontSize: '13px',
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                          width: '100%',
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--color-bg-base)')}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                      >
+                        <span className="material-symbols-outlined" style={{ fontSize: '18px', color: 'var(--color-accent)' }}>
+                          folder_open
+                        </span>
+                        <div>
+                          <div style={{ fontWeight: 500, fontSize: '12px' }}>Open Workspace Folder</div>
+                          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>CSPLS or SmartPLS folder</div>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsImportMenuOpen(false);
+                          promptOpenWorkspaceFolder('zip');
+                        }}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '10px',
+                          padding: '8px 10px',
+                          borderRadius: 'var(--radius-sm)',
+                          border: 'none',
+                          background: 'transparent',
+                          color: 'var(--color-text-primary)',
+                          fontSize: '13px',
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                          width: '100%',
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--color-bg-base)')}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                      >
+                        <span className="material-symbols-outlined" style={{ fontSize: '18px', color: 'var(--color-accent)' }}>
+                          archive
+                        </span>
+                        <div>
+                          <div style={{ fontWeight: 500, fontSize: '12px' }}>Import Archive (.zip)</div>
+                          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>Workspace or Study archive</div>
+                        </div>
+                      </button>
+                    </div>
+                  )}
+                </div>
                 <button className="btn btn-primary" type="button" onClick={() => setIsWorkspaceModalOpen(true)}>
                   <span className="material-symbols-outlined">add</span>
                   <span>Create Workspace</span>

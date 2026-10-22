@@ -105,7 +105,7 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
           const selected = await open({
             multiple: false,
             directory: true,
-            title: 'Import SmartPLS Study Folder',
+            title: 'Import Study Folder',
           });
           if (selected && typeof selected === 'string') {
             selectedPath = selected;
@@ -141,14 +141,24 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
       if (!selectedPath) return;
 
       setIsSubmitting(true);
-      const detection = await api.detectSmartPls(selectedPath);
-      if (!detection?.valid) {
-        setError(detection?.error || 'Selected file/folder is not a valid SmartPLS study.');
+      const detection = await api.detectFolder(selectedPath);
+      if (detection.kind === 'error' || (!detection.valid && detection.kind !== 'cspls_project' && detection.kind !== 'smartpls_project')) {
+        setError(detection.error || 'No compatible files found');
         setIsSubmitting(false);
         return;
       }
 
-      const res = await api.importSmartPls(selectedPath, currentWorkspace.path, currentWorkspace.name);
+      let res: any = null;
+      if (detection.kind === 'cspls_project') {
+        if (selectedPath.toLowerCase().endsWith('.zip')) {
+          res = await api.importProjectZip(selectedPath, currentWorkspace.path, 'rename');
+        } else {
+          res = await api.importProjectFile(selectedPath, currentWorkspace.path, 'rename');
+        }
+      } else {
+        res = await api.importSmartPls(selectedPath, currentWorkspace.path, currentWorkspace.name);
+      }
+
       if (res?.error) {
         setError(res.error);
         setIsSubmitting(false);
@@ -161,6 +171,7 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
           state.addStudy({
             ...s,
             workspaceId: currentWorkspace.id,
+            type: s.type || 'PLS-SEM',
           });
           try {
             const dataRes = await api.loadProjectData(s.path);
@@ -184,14 +195,14 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
             id: m.id,
             studyId: m.studyId,
             name: m.name,
-            type: m.type || 'pls',
+            type: m.type || 'PLS-SEM',
             lastModified: 'Just now',
           });
         }
       }
       onClose();
     } catch (err: any) {
-      setError(err?.message || 'Failed to import SmartPLS study');
+      setError(err?.message || 'Failed to import study');
     } finally {
       setIsSubmitting(false);
     }
@@ -264,7 +275,7 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
                   className="btn btn-secondary"
                   onClick={() => handleImportStudy('file')}
                   disabled={isSubmitting}
-                  title="Import a SmartPLS export (.zip) or project file (.pls)"
+                  title="Import a study archive (.zip) or project file (.pls)"
                   style={{
                     padding: '6px 10px',
                     fontSize: '12px',
@@ -287,7 +298,7 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
                   className="btn btn-secondary"
                   onClick={() => handleImportStudy('folder')}
                   disabled={isSubmitting}
-                  title="Import an unzipped SmartPLS study directory"
+                  title="Import an unzipped study directory"
                   style={{
                     padding: '6px 10px',
                     fontSize: '12px',

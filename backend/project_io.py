@@ -1070,3 +1070,33 @@ def import_project_zip(zip_path: str, workspace_dir: str, on_conflict: str = "re
     migrate_project(target_path)
     settings_io.add_recent("recent_projects", target_path)
     return target_path
+
+
+def import_project_file(pls_path: str, workspace_dir: str, on_conflict: str = "rename") -> str:
+    """
+    Safely copies an existing .pls project file into workspace_dir,
+    handling naming conflicts by renaming, and migrates the project schema.
+    """
+    import shutil
+    pls_path = os.path.expanduser(pls_path)
+    if not os.path.exists(pls_path):
+        raise FileNotFoundError(f"Project file not found: {pls_path}")
+    if not pls_path.endswith(".pls"):
+        raise ValueError("File is not a .pls project file")
+
+    os.makedirs(workspace_dir, exist_ok=True)
+    base_name = os.path.basename(pls_path)
+    target_path = os.path.join(workspace_dir, base_name)
+    if os.path.exists(target_path):
+        if on_conflict == "cancel":
+            raise FileExistsError(f"Project '{base_name}' already exists in workspace")
+        elif on_conflict == "rename":
+            root, ext = os.path.splitext(base_name)
+            i = 1
+            while os.path.exists(target_path):
+                target_path = os.path.join(workspace_dir, f"{root}_{i}{ext}")
+                i += 1
+    shutil.copy2(pls_path, target_path)
+    migrate_project(target_path)
+    settings_io.add_recent("recent_projects", target_path)
+    return target_path

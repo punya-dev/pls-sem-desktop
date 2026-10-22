@@ -67,5 +67,67 @@ def test_export_project_and_workspace_zip():
         assert os.path.exists(api_ws_zip_out)
         assert zipfile.is_zipfile(api_ws_zip_out)
 
+        # 4. Test detection and import of workspace zip
+        from smartpls_importer import detect_folder_type, detect_smartpls_folder
+        det_ws = detect_folder_type(ws_zip_out)
+        assert det_ws["kind"] == "cspls_workspace_zip"
+        assert det_ws["valid"] is True
+
+        import_target_dir = os.path.join(temp_dir, "ImportedWorkspaces")
+        ws_import_res = workspace_io.import_workspace_zip(ws_zip_out, target_parent_folder=import_target_dir)
+        assert ws_import_res["status"] == "imported"
+        assert os.path.exists(ws_import_res["path"])
+        assert len(ws_import_res["studies"]) == 1
+        assert ws_import_res["studies"][0]["name"] == "Test Study"
+
+        # 5. Test detection and import of project zip
+        det_proj = detect_folder_type(proj_zip_out)
+        assert det_proj["kind"] == "cspls_project"
+        assert det_proj["valid"] is True
+        assert det_proj["project_name"] == "TestStudy"
+
+        det_smartpls_proj = detect_smartpls_folder(proj_zip_out)
+        assert det_smartpls_proj["valid"] is True
+        assert det_smartpls_proj["kind"] == "cspls_project"
+
+        import_proj_ws = os.path.join(temp_dir, "TargetWsForProject")
+        workspace_io.create_workspace(import_proj_ws, "Target Workspace")
+        proj_import_res = client.post("/project/import-zip", json={
+            "zip_path": proj_zip_out,
+            "workspace_dir": import_proj_ws,
+            "on_conflict": "rename"
+        })
+        assert proj_import_res.status_code == 200
+        proj_data = proj_import_res.json()
+        assert proj_data["status"] == "imported"
+        assert len(proj_data["studies"]) == 1
+        assert os.path.exists(proj_data["project_path"])
+
+        # 6. Test import of raw .pls file
+        pls_file_import_res = client.post("/project/import-file", json={
+            "file_path": study_path,
+            "workspace_dir": import_proj_ws,
+            "on_conflict": "rename"
+        })
+        assert pls_file_import_res.status_code == 200
+        pls_data = pls_file_import_res.json()
+        assert pls_data["status"] == "imported"
+        assert len(pls_data["studies"]) == 1
+
+        # 7. Test invalid zip returns 'No compatible files found' without mentioning SmartPLS
+        dummy_zip = os.path.join(temp_dir, "random_files.zip")
+        with zipfile.ZipFile(dummy_zip, "w") as zf:
+            zf.writestr("notes.txt", "Hello world")
+        
+        dummy_det = detect_smartpls_folder(dummy_zip)
+        assert dummy_det["valid"] is False
+        assert dummy_det["error"] == "No compatible files found"
+        assert "SmartPLS" not in dummy_det["error"]
+
+        dummy_folder_det = detect_folder_type(dummy_zip)
+        assert dummy_folder_det["valid"] is False
+        assert dummy_folder_det["error"] == "No compatible files found"
+        assert "SmartPLS" not in dummy_folder_det["error"]
+
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)

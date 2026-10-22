@@ -703,7 +703,8 @@ export const api = {
   },
 
   async detectFolder(folderPath: string): Promise<{
-    kind?: 'cspls_workspace' | 'smartpls_workspace' | 'smartpls_project' | 'unknown' | 'file' | 'not_found' | 'error';
+    kind?: 'cspls_workspace' | 'cspls_workspace_zip' | 'cspls_project' | 'smartpls_workspace' | 'smartpls_project' | 'unknown' | 'file' | 'not_found' | 'error';
+    valid?: boolean;
     name?: string;
     path?: string;
     is_zip?: boolean;
@@ -775,6 +776,80 @@ export const api = {
       return await res.json();
     } catch (err: any) {
       return { error: err?.message || 'Failed to export workspace archive' };
+    }
+  },
+
+  async importWorkspaceZip(zipPath: string, targetParentFolder?: string): Promise<{
+    status?: string;
+    path?: string;
+    workspace?: {
+      id: string;
+      name: string;
+      path: string;
+      projects?: any[];
+    };
+    studies?: any[];
+    models?: any[];
+    error?: string;
+  }> {
+    try {
+      const res = await fetch(`${API_BASE}/workspace/import-zip`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          zip_path: zipPath,
+          target_parent_folder: targetParentFolder || undefined,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to import workspace archive' };
+    }
+  },
+
+  async importProjectZip(zipPath: string, workspaceDir: string, onConflict: string = 'rename'): Promise<{
+    status?: string;
+    project_path?: string;
+    studies?: any[];
+    models?: any[];
+    error?: string;
+  }> {
+    try {
+      const res = await fetch(`${API_BASE}/project/import-zip`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          zip_path: zipPath,
+          workspace_dir: workspaceDir,
+          on_conflict: onConflict,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to import project archive' };
+    }
+  },
+
+  async importProjectFile(filePath: string, workspaceDir: string, onConflict: string = 'rename'): Promise<{
+    status?: string;
+    project_path?: string;
+    studies?: any[];
+    models?: any[];
+    error?: string;
+  }> {
+    try {
+      const res = await fetch(`${API_BASE}/project/import-file`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file_path: filePath,
+          workspace_dir: workspaceDir,
+          on_conflict: onConflict,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to import project file' };
     }
   },
 

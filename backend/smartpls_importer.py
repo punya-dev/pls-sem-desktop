@@ -214,17 +214,71 @@ def convert_smartpls_model(splsm_dict: Dict[str, Any]) -> Tuple[Dict[str, Any], 
 
 def detect_smartpls_folder(folder_path: str) -> Dict[str, Any]:
     """
-    Inspects a directory or ZIP file and returns whether it is a valid SmartPLS export,
-    along with summary details (models found, datasets found).
+    Inspects a directory, ZIP archive, or .pls file and returns whether it is a valid
+    study/workspace export (SmartPLS or CSPLS), along with summary details.
     """
     folder_path = os.path.expanduser(folder_path)
     if not os.path.exists(folder_path):
         return {"valid": False, "error": "Path does not exist"}
 
+    if folder_path.endswith(".pls") and os.path.isfile(folder_path):
+        proj_name = os.path.splitext(os.path.basename(folder_path))[0]
+        return {
+            "valid": True,
+            "kind": "cspls_project",
+            "is_zip": False,
+            "project_name": proj_name,
+            "folder_path": folder_path,
+            "models_count": 0,
+            "datasets_count": 1,
+            "models": [],
+            "datasets": [f"{proj_name}.csv"],
+        }
+
     if zipfile.is_zipfile(folder_path):
         try:
             with zipfile.ZipFile(folder_path, "r") as zf:
                 names = zf.namelist()
+                has_ws_json = any(n == "workspace.json" or n.endswith("/workspace.json") for n in names)
+                pls_files = [
+                    n for n in names
+                    if n.endswith(".pls") and not n.startswith("__MACOSX") and not os.path.basename(n).startswith(".")
+                ]
+                if has_ws_json:
+                    ws_name = os.path.splitext(os.path.basename(folder_path))[0]
+                    try:
+                        ws_json_entry = next(n for n in names if n == "workspace.json" or n.endswith("/workspace.json"))
+                        raw_meta = json.loads(zf.read(ws_json_entry).decode("utf-8"))
+                        ws_name = raw_meta.get("name") or ws_name
+                    except Exception:
+                        pass
+                    return {
+                        "valid": True,
+                        "kind": "cspls_workspace_zip",
+                        "is_zip": True,
+                        "workspace_name": ws_name,
+                        "project_name": ws_name,
+                        "folder_path": folder_path,
+                        "projects_count": len(pls_files),
+                        "models_count": 0,
+                        "datasets_count": 0,
+                    }
+
+                if pls_files:
+                    proj_name = os.path.splitext(os.path.basename(pls_files[0]))[0]
+                    return {
+                        "valid": True,
+                        "kind": "cspls_project",
+                        "is_zip": True,
+                        "project_name": proj_name,
+                        "folder_path": folder_path,
+                        "pls_files": pls_files,
+                        "models_count": 0,
+                        "datasets_count": 1,
+                        "models": [],
+                        "datasets": [f"{proj_name}.csv"],
+                    }
+
                 splsm_files = [n for n in names if n.endswith(".splsm") and not os.path.basename(n).startswith(".")]
                 data_files = [
                     n for n in names
@@ -234,8 +288,8 @@ def detect_smartpls_folder(folder_path: str) -> Dict[str, Any]:
                     and not os.path.basename(n).startswith(".")
                 ]
                 has_meta = any(n.endswith(".meta") for n in names)
-                if not splsm_files and not data_files and not has_meta:
-                    return {"valid": False, "error": "No SmartPLS files (.splsm, datasets) found in ZIP archive"}
+                if not splsm_files and not has_meta:
+                    return {"valid": False, "error": "No compatible files found"}
 
                 proj_name = os.path.splitext(os.path.basename(folder_path))[0]
                 model_summaries = [
@@ -246,6 +300,7 @@ def detect_smartpls_folder(folder_path: str) -> Dict[str, Any]:
 
                 return {
                     "valid": True,
+                    "kind": "smartpls_project",
                     "is_zip": True,
                     "project_name": proj_name,
                     "folder_path": folder_path,
@@ -262,14 +317,17 @@ def detect_smartpls_folder(folder_path: str) -> Dict[str, Any]:
         parent_dir = os.path.dirname(folder_path)
         if os.path.isdir(parent_dir) and (
             glob.glob(os.path.join(parent_dir, "*.splsm"))
+            or glob.glob(os.path.join(parent_dir, "*.pls"))
             or os.path.exists(os.path.join(parent_dir, ".meta"))
+            or os.path.exists(os.path.join(parent_dir, "workspace.json"))
         ):
             folder_path = parent_dir
         else:
-            return {"valid": False, "error": "Path is neither a directory nor a valid ZIP archive"}
+            return {"valid": False, "error": "No compatible files found"}
 
     meta_file = os.path.join(folder_path, ".meta")
     splsm_files = sorted(glob.glob(os.path.join(folder_path, "*.splsm")))
+    pls_files = sorted(glob.glob(os.path.join(folder_path, "*.pls")))
     data_files = sorted(
         [
             f for f in glob.glob(os.path.join(folder_path, "*.txt")) + glob.glob(os.path.join(folder_path, "*.csv"))
@@ -277,8 +335,22 @@ def detect_smartpls_folder(folder_path: str) -> Dict[str, Any]:
         ]
     )
 
+    if pls_files and not splsm_files and not os.path.exists(meta_file):
+        proj_name = os.path.splitext(os.path.basename(pls_files[0]))[0]
+        return {
+            "valid": True,
+            "kind": "cspls_project",
+            "is_zip": False,
+            "project_name": proj_name,
+            "folder_path": folder_path,
+            "models_count": 0,
+            "datasets_count": len(pls_files),
+            "models": [],
+            "datasets": [os.path.basename(p) for p in pls_files],
+        }
+
     if not splsm_files and not data_files and not os.path.exists(meta_file):
-        return {"valid": False, "error": "No SmartPLS files (.splsm, datasets) found in directory"}
+        return {"valid": False, "error": "No compatible files found"}
 
     project_name = os.path.basename(folder_path.rstrip("/\\"))
     model_summaries = []
@@ -290,6 +362,7 @@ def detect_smartpls_folder(folder_path: str) -> Dict[str, Any]:
 
     return {
         "valid": True,
+        "kind": "smartpls_project",
         "is_zip": False,
         "project_name": project_name,
         "folder_path": folder_path,
@@ -301,31 +374,81 @@ def detect_smartpls_folder(folder_path: str) -> Dict[str, Any]:
     }
 
 
+
 def import_smartpls_folder(
     folder_path: str,
     target_workspace_folder: Optional[str] = None,
     workspace_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Fully imports a SmartPLS project (folder or ZIP file):
+    Imports a study/workspace (SmartPLS or CSPLS):
     - Sets up or opens the Workspace
     - Loads datasets into SQLite .pls Study databases
-    - Decrypts and converts all .splsm models
-    - Saves models into model_spec tables
-    - Optionally loads .splsrp reports into results tables
+    - Converts and saves models into model_spec tables
+    - Seamlessly supports SmartPLS directories/archives and CSPLS .pls/zip exports
     """
     folder_path = os.path.expanduser(folder_path)
     if os.path.isfile(folder_path) and not zipfile.is_zipfile(folder_path):
-        parent_dir = os.path.dirname(folder_path)
-        if os.path.isdir(parent_dir) and (
-            glob.glob(os.path.join(parent_dir, "*.splsm"))
-            or os.path.exists(os.path.join(parent_dir, ".meta"))
-        ):
-            folder_path = parent_dir
+        if not folder_path.endswith(".pls"):
+            parent_dir = os.path.dirname(folder_path)
+            if os.path.isdir(parent_dir) and (
+                glob.glob(os.path.join(parent_dir, "*.splsm"))
+                or glob.glob(os.path.join(parent_dir, "*.pls"))
+                or os.path.exists(os.path.join(parent_dir, ".meta"))
+            ):
+                folder_path = parent_dir
 
     detection = detect_smartpls_folder(folder_path)
     if not detection.get("valid"):
-        raise ValueError(detection.get("error", "Invalid SmartPLS project"))
+        raise ValueError(detection.get("error", "No compatible files found"))
+
+    # 1. Handle CSPLS Workspace Archive
+    if detection.get("kind") == "cspls_workspace_zip":
+        return workspace_io.import_workspace_zip(folder_path, target_parent_folder=target_workspace_folder)
+
+    # 2. Handle CSPLS Project Archive or direct .pls file
+    if detection.get("kind") == "cspls_project":
+        ws_dir = target_workspace_folder or os.path.expanduser("~/CSPLS/Workspaces/Default")
+        ws_dir = os.path.expanduser(ws_dir)
+        os.makedirs(ws_dir, exist_ok=True)
+        if zipfile.is_zipfile(folder_path):
+            imported_path = project_io.import_project_zip(folder_path, ws_dir, on_conflict="rename")
+        else:
+            imported_path = project_io.import_project_file(folder_path, ws_dir, on_conflict="rename")
+
+        proj_name = os.path.splitext(os.path.basename(imported_path))[0]
+        try:
+            workspace_io.add_project_to_workspace(ws_dir, os.path.basename(imported_path), proj_name)
+        except Exception:
+            pass
+
+        models = []
+        try:
+            tree = project_io.get_project_tree(imported_path)
+            for m in tree.get("models", []):
+                models.append({
+                    "id": m["id"],
+                    "studyId": imported_path,
+                    "name": m["name"],
+                    "type": "PLS-SEM",
+                    "lastModified": "Just now",
+                })
+        except Exception:
+            pass
+
+        return {
+            "status": "success",
+            "project_path": imported_path,
+            "studies": [{
+                "id": imported_path,
+                "name": proj_name,
+                "type": "PLS-SEM",
+                "path": imported_path,
+                "createdAt": "Just now",
+                "lastModified": "Just now",
+            }],
+            "models": models,
+        }
 
     proj_name = detection.get("project_name") or "SmartPLS Project"
 
@@ -344,6 +467,7 @@ def import_smartpls_folder(
         active_source_dir = candidate_dir
     else:
         active_source_dir = folder_path
+
 
     try:
         # Destination directory for workspace
@@ -579,18 +703,42 @@ def detect_folder_type(folder_path: str) -> Dict[str, Any]:
     if zipfile.is_zipfile(folder_path):
         det = detect_smartpls_folder(folder_path)
         if det.get("valid"):
+            kind = det.get("kind", "smartpls_project")
             return {
-                "kind": "smartpls_project",
+                "kind": kind,
+                "valid": True,
                 "is_zip": True,
                 "path": folder_path,
+                "name": det.get("workspace_name") or det.get("project_name"),
                 "project_name": det.get("project_name"),
+                "projects_count": det.get("projects_count", 0),
                 "models_count": det.get("models_count", 0),
                 "datasets_count": det.get("datasets_count", 0),
             }
-        return {"kind": "unknown", "path": folder_path}
+        return {
+            "kind": "unknown",
+            "valid": False,
+            "path": folder_path,
+            "error": det.get("error", "No compatible files found"),
+        }
+
+    if folder_path.endswith(".pls") and os.path.isfile(folder_path):
+        proj_name = os.path.splitext(os.path.basename(folder_path))[0]
+        return {
+            "kind": "cspls_project",
+            "valid": True,
+            "is_zip": False,
+            "path": folder_path,
+            "project_name": proj_name,
+        }
 
     if not os.path.isdir(folder_path):
-        return {"kind": "file", "path": folder_path}
+        return {
+            "kind": "unknown",
+            "valid": False,
+            "path": folder_path,
+            "error": "No compatible files found",
+        }
 
     # 1. Check if CSPLS Workspace
     has_ws_json = os.path.exists(os.path.join(folder_path, "workspace.json"))
@@ -645,8 +793,10 @@ def detect_folder_type(folder_path: str) -> Dict[str, Any]:
 
     return {
         "kind": "unknown",
+        "valid": False,
         "path": folder_path,
         "name": os.path.basename(folder_path.rstrip("/\\")),
+        "error": "No compatible files found",
     }
 
 

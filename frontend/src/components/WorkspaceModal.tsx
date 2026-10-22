@@ -114,7 +114,18 @@ const WorkspaceModal = ({
     // If an initial study/project is attached, import it into the new workspace
     if (initialImportProject) {
       try {
-        const importRes = await api.importSmartPls(initialImportProject, calculatedPath, cleanName);
+        let importRes: any = null;
+        const det = await api.detectFolder(initialImportProject);
+        if (det.kind === 'cspls_project') {
+          if (initialImportProject.toLowerCase().endsWith('.zip')) {
+            importRes = await api.importProjectZip(initialImportProject, calculatedPath, 'rename');
+          } else {
+            importRes = await api.importProjectFile(initialImportProject, calculatedPath, 'rename');
+          }
+        } else {
+          importRes = await api.importSmartPls(initialImportProject, calculatedPath, cleanName);
+        }
+
         if (importRes?.studies && importRes.studies.length > 0) {
           for (const s of importRes.studies) {
             addStudy({
@@ -148,13 +159,13 @@ const WorkspaceModal = ({
               id: m.id,
               studyId: m.studyId,
               name: m.name,
-              type: m.type || 'pls',
+              type: m.type || 'PLS-SEM',
               lastModified: 'Just now',
             });
           }
         }
       } catch (importErr: any) {
-        console.warn('Failed to import initial SmartPLS study:', importErr);
+        console.warn('Failed to import initial study:', importErr);
       }
     }
 
@@ -298,34 +309,62 @@ const WorkspaceModal = ({
               )}
             </div>
 
-            <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: '1px solid var(--color-border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)', fontWeight: 500 }}>
+            <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: '1px solid var(--color-border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+              <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)', fontWeight: 500, whiteSpace: 'nowrap' }}>
                 Or import workspace
               </span>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={async () => {
-                  onClose();
-                  await promptOpenWorkspaceFolder();
-                }}
-                disabled={isCreating}
-                style={{
-                  padding: '6px 12px',
-                  fontSize: '12px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  borderRadius: 'var(--radius-sm)',
-                  border: '1px solid var(--color-border-subtle)',
-                  background: 'var(--color-bg-base)',
-                  color: 'var(--color-text-primary)',
-                  cursor: 'pointer',
-                }}
-              >
-                <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>folder_open</span>
-                <span>Import Workspace</span>
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={async () => {
+                    onClose();
+                    await promptOpenWorkspaceFolder('zip');
+                  }}
+                  disabled={isCreating}
+                  title="Import an exported workspace or study archive (.zip)"
+                  style={{
+                    padding: '6px 10px',
+                    fontSize: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--color-border-subtle)',
+                    background: 'var(--color-bg-base)',
+                    color: 'var(--color-text-primary)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>archive</span>
+                  <span>From Archive (.zip)</span>
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={async () => {
+                    onClose();
+                    await promptOpenWorkspaceFolder('folder');
+                  }}
+                  disabled={isCreating}
+                  title="Open an existing workspace folder"
+                  style={{
+                    padding: '6px 10px',
+                    fontSize: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--color-border-subtle)',
+                    background: 'var(--color-bg-base)',
+                    color: 'var(--color-text-primary)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>folder_open</span>
+                  <span>From Folder</span>
+                </button>
+              </div>
             </div>
           </div>
 
