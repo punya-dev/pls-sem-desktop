@@ -14,18 +14,6 @@ export const TitleBar: React.FC = () => {
     let isCancelled = false;
 
     const checkFullscreen = async () => {
-      // 1. Instant check: A windowed (non-fullscreen) window on macOS cannot take the full screen width and height.
-      // If either dimension is smaller than the display minus 20px, it is guaranteed to be windowed.
-      const isWindowed = window.innerHeight < (window.screen.height - 20) || window.innerWidth < (window.screen.width - 20);
-      if (isWindowed) {
-        if (!isCancelled) {
-          setIsFullscreen(false);
-          document.body.dataset.windowFullscreen = 'false';
-        }
-        return;
-      }
-
-      // 2. Full dimensions: verify using native Tauri API
       try {
         const fs = await appWindow.isFullscreen();
         if (!isCancelled) {
@@ -39,21 +27,29 @@ export const TitleBar: React.FC = () => {
 
     const triggerCheck = () => {
       void checkFullscreen();
-      setTimeout(checkFullscreen, 100);
-      setTimeout(checkFullscreen, 250);
-      setTimeout(checkFullscreen, 500);
-      setTimeout(checkFullscreen, 800);
+      setTimeout(checkFullscreen, 50);
+      setTimeout(checkFullscreen, 150);
+      setTimeout(checkFullscreen, 300);
+      setTimeout(checkFullscreen, 600);
     };
 
     triggerCheck();
 
-    const interval = setInterval(checkFullscreen, 350);
+    const interval = setInterval(checkFullscreen, 200);
 
-    let unlisten: (() => void) | undefined;
+    let unlistenResize: (() => void) | undefined;
+    let unlistenFocus: (() => void) | undefined;
+
     void appWindow.onResized(() => {
       triggerCheck();
     }).then(listener => {
-      unlisten = listener;
+      unlistenResize = listener;
+    });
+
+    void appWindow.onFocusChanged(() => {
+      triggerCheck();
+    }).then(listener => {
+      unlistenFocus = listener;
     });
 
     window.addEventListener('resize', triggerCheck);
@@ -61,7 +57,8 @@ export const TitleBar: React.FC = () => {
     return () => {
       isCancelled = true;
       clearInterval(interval);
-      unlisten?.();
+      unlistenResize?.();
+      unlistenFocus?.();
       window.removeEventListener('resize', triggerCheck);
     };
   }, []);
@@ -155,8 +152,17 @@ export const TitleBar: React.FC = () => {
     <header className="titlebar window-drag" id="titlebar">
       {/* ─── Left Section: Traffic Lights & Brand ─── */}
       <div 
-        className="titlebar__left no-drag"
+        className={`titlebar__left no-drag ${isCornerHovered ? 'corner-hovered' : ''}`}
         onMouseEnter={() => {
+          if (isFullscreen) {
+            if (cornerLeaveTimer.current) {
+              clearTimeout(cornerLeaveTimer.current);
+              cornerLeaveTimer.current = null;
+            }
+            setIsCornerHovered(true);
+          }
+        }}
+        onMouseMove={() => {
           if (isFullscreen) {
             if (cornerLeaveTimer.current) {
               clearTimeout(cornerLeaveTimer.current);
