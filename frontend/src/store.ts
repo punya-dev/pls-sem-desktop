@@ -231,7 +231,7 @@ const INITIAL_VARIABLES: Variable[] = [
 
 const INITIAL_SETTINGS: AppSettings = {
   version: '0.1.0',
-  websiteUrl: 'https://cspls.org',
+  websiteUrl: 'https://statsem.org',
   theme: 'light',
   darkVariant: 'default',
   fontFamily: 'Inter',

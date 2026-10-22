@@ -215,7 +215,7 @@ def convert_smartpls_model(splsm_dict: Dict[str, Any]) -> Tuple[Dict[str, Any], 
 def detect_smartpls_folder(folder_path: str) -> Dict[str, Any]:
     """
     Inspects a directory, ZIP archive, or .pls file and returns whether it is a valid
-    study/workspace export (SmartPLS or CSPLS), along with summary details.
+    study/workspace export (SmartPLS or StatSEM), along with summary details.
     """
     folder_path = os.path.expanduser(folder_path)
     if not os.path.exists(folder_path):
@@ -381,11 +381,11 @@ def import_smartpls_folder(
     workspace_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Imports a study/workspace (SmartPLS or CSPLS):
+    Imports a study/workspace (SmartPLS or StatSEM):
     - Sets up or opens the Workspace
     - Loads datasets into SQLite .pls Study databases
     - Converts and saves models into model_spec tables
-    - Seamlessly supports SmartPLS directories/archives and CSPLS .pls/zip exports
+    - Seamlessly supports SmartPLS directories/archives and StatSEM .pls/zip exports
     """
     folder_path = os.path.expanduser(folder_path)
     if os.path.isfile(folder_path) and not zipfile.is_zipfile(folder_path):
@@ -402,13 +402,13 @@ def import_smartpls_folder(
     if not detection.get("valid"):
         raise ValueError(detection.get("error", "No compatible files found"))
 
-    # 1. Handle CSPLS Workspace Archive
+    # 1. Handle StatSEM Workspace Archive
     if detection.get("kind") == "cspls_workspace_zip":
         return workspace_io.import_workspace_zip(folder_path, target_parent_folder=target_workspace_folder)
 
-    # 2. Handle CSPLS Project Archive or direct .pls file
+    # 2. Handle StatSEM Project Archive or direct .pls file
     if detection.get("kind") == "cspls_project":
-        ws_dir = target_workspace_folder or os.path.expanduser("~/CSPLS/Workspaces/Default")
+        ws_dir = target_workspace_folder or os.path.expanduser("~/StatSEM/Workspaces/Default")
         ws_dir = os.path.expanduser(ws_dir)
         os.makedirs(ws_dir, exist_ok=True)
         if zipfile.is_zipfile(folder_path):
@@ -740,7 +740,7 @@ def detect_folder_type(folder_path: str) -> Dict[str, Any]:
             "error": "No compatible files found",
         }
 
-    # 1. Check if CSPLS Workspace
+    # 1. Check if StatSEM Workspace
     has_ws_json = os.path.exists(os.path.join(folder_path, "workspace.json"))
     has_pls_files = len(glob.glob(os.path.join(folder_path, "*.pls"))) > 0
     if has_ws_json or has_pls_files:

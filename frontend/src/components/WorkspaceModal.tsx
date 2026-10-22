@@ -62,7 +62,7 @@ const WorkspaceModal = ({
       }
     } catch (err) {
       console.warn('Tauri dialog not available, falling back to prompt:', err);
-      const fallback = window.prompt('Enter workspace directory path:', location || '~/CSPLS/Workspaces');
+      const fallback = window.prompt('Enter workspace directory path:', location || '~/StatSEM/Workspaces');
       if (fallback) {
         setLocation(fallback);
         if (!name.trim()) {
@@ -74,7 +74,7 @@ const WorkspaceModal = ({
   };
 
   const cleanName = name.trim();
-  const baseLoc = location.trim() || '~/CSPLS/Workspaces';
+  const baseLoc = location.trim() || '~/StatSEM/Workspaces';
   const cleanLoc = baseLoc.replace(/[/\\]+$/, '');
   const lastFolder = cleanLoc.split(/[/\\]/).filter(Boolean).pop();
   const calculatedPath = cleanName ? ((lastFolder === cleanName) ? cleanLoc : `${cleanLoc}/${cleanName}`) : cleanLoc;
@@ -288,7 +288,7 @@ const WorkspaceModal = ({
                   className="modal__input modal__input--path"
                   id="modal-workspace-location"
                   type="text"
-                  placeholder="~/CSPLS/Workspaces"
+                  placeholder="~/StatSEM/Workspaces"
                   value={location}
                   onChange={(e) => setLocation(e.target.value)}
                   spellCheck="false"

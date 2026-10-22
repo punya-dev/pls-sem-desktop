@@ -178,7 +178,7 @@ def import_workspace_zip(zip_path: str, target_parent_folder: Optional[str] = No
     if not zipfile.is_zipfile(zip_path):
         raise ValueError(f"File is not a valid zip archive: {zip_path}")
 
-    base_dir = target_parent_folder or os.path.expanduser("~/CSPLS/Workspaces")
+    base_dir = target_parent_folder or os.path.expanduser("~/StatSEM/Workspaces")
     base_dir = os.path.expanduser(base_dir)
     os.makedirs(base_dir, exist_ok=True)
 

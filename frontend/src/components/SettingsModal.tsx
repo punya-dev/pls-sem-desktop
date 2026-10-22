@@ -83,10 +83,10 @@ export const SettingsModal: React.FC = () => {
               <div className="settings-section">
                 <div className="settings-section__header">Application</div>
                 <div className="settings-row settings-row--app">
-                  <div className="settings-app-icon">CS</div>
+                  <div className="settings-app-icon">ST</div>
                   <div className="settings-app-info">
                     <div className="settings-app-name">
-                      CSPLS Desktop
+                      StatSEM Desktop
                       <span className="settings-app-version">v{settings.version}</span>
                     </div>
                     <div className="settings-app-desc">Partial Least Squares Structural Equation Modeling</div>
@@ -113,7 +113,7 @@ export const SettingsModal: React.FC = () => {
                 <div className="settings-row">
                   <div className="settings-row__label">Official Website</div>
                   <a href={settings.websiteUrl} target="_blank" rel="noreferrer" className="settings-link">
-                    cspls.org
+                    statsem.org
                     <span className="material-symbols-outlined" style={{ fontSize: '12px' }}>open_in_new</span>
                   </a>
                 </div>

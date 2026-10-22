@@ -16,8 +16,8 @@ export function registerCreateWorkspaceWithProject(listener: CreateWorkspaceWith
 
 /**
  * Directly opens the native directory or archive selector to import or open a workspace.
- * - CSPLS Workspace Zip: Extracted, imported and opened immediately.
- * - CSPLS Workspace Folder: Opened immediately.
+ * - StatSEM Workspace Zip: Extracted, imported and opened immediately.
+ * - StatSEM Workspace Folder: Opened immediately.
  * - SmartPLS Workspace: Imported and opened immediately.
  * - Project File / Archive: Prompts the Create New Workspace modal with that project attached.
  */
@@ -62,7 +62,7 @@ export async function promptOpenWorkspaceFolder(targetType: 'folder' | 'zip' = '
   try {
     const detection = await api.detectFolder(selectedPath);
 
-    // 1. Exported CSPLS Workspace Zip Archive
+    // 1. Exported StatSEM Workspace Zip Archive
     if (detection.kind === 'cspls_workspace_zip') {
       const res = await api.importWorkspaceZip(selectedPath);
       if (res?.error) {
@@ -125,7 +125,7 @@ export async function promptOpenWorkspaceFolder(targetType: 'folder' | 'zip' = '
       return;
     }
 
-    // 2. Existing CSPLS Workspace Folder
+    // 2. Existing StatSEM Workspace Folder
     if (detection.kind === 'cspls_workspace') {
       const res = await api.openWorkspace(selectedPath);
       if (res?.error) {

@@ -326,7 +326,7 @@ const GetStarted = () => {
             <div className="page-header animate-fade-in">
               <div className="page-header__text">
                 <h1 className="page-header__title">Get Started</h1>
-                <p className="page-header__subtitle">Welcome to CSPLS. Set up your workspace or explore guided sample models to begin.</p>
+                <p className="page-header__subtitle">Welcome to StatSEM. Set up your workspace or explore guided sample models to begin.</p>
               </div>
               <div className="page-header__actions" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                 <div style={{ position: 'relative' }} ref={importDropdownRef}>
@@ -391,7 +391,7 @@ const GetStarted = () => {
                         </span>
                         <div>
                           <div style={{ fontWeight: 500, fontSize: '12px' }}>Open Workspace Folder</div>
-                          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>CSPLS or SmartPLS folder</div>
+                          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>StatSEM or SmartPLS folder</div>
                         </div>
                       </button>
 
