@@ -486,7 +486,7 @@ def import_smartpls_folder(
                     "id": model_key,
                     "studyId": study_id,
                     "name": m_info["name"],
-                    "type": "pls",
+                    "type": "PLS-SEM",
                     "lastModified": "Just now",
                 })
 
@@ -524,7 +524,7 @@ def import_smartpls_folder(
                     "id": model_key,
                     "studyId": study_id,
                     "name": m_info["name"],
-                    "type": "pls",
+                    "type": "PLS-SEM",
                     "lastModified": "Just now",
                 })
 

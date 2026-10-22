@@ -9,6 +9,15 @@ import { parseDatasetFile } from '../utils/dataset-parser';
 import type { ParsedDataset } from '../utils/dataset-parser';
 import { api } from '../utils/api';
 
+export const formatModelType = (type?: string): string => {
+  if (!type) return 'PLS-SEM';
+  const clean = type.trim().toLowerCase().replace(/[-_\s]+/g, '');
+  if (clean === 'pls' || clean === 'plssem') return 'PLS-SEM';
+  if (clean === 'cbsem' || clean === 'cb') return 'CB-SEM';
+  if (clean === 'regression') return 'Regression';
+  return type.toUpperCase();
+};
+
 const Dashboard = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -777,10 +786,15 @@ const Dashboard = () => {
                             {isEmpty ? 'Empty' : `${totalItems} item${totalItems === 1 ? '' : 's'}`}
                           </span>
                           {isEmpty && (
-                            <div className="study-row__actions">
-                              <button className="btn-inline" type="button" onClick={(e) => { e.stopPropagation(); setImportingStudyId(study.id); fileInputRef.current?.click(); }}><span className="material-symbols-outlined">upload_file</span><span>Import Dataset</span></button>
-                              <span style={{color: 'rgba(0,0,0,0.15)'}}>•</span>
-                              <button className="btn-inline" type="button" onClick={(e) => openModelModal(study.id, e)}><span className="material-symbols-outlined">add</span><span>Create Model</span></button>
+                            <div className="study-row__actions" onClick={(e) => e.stopPropagation()}>
+                              <button className="study-action-btn" type="button" onClick={(e) => { e.stopPropagation(); setImportingStudyId(study.id); fileInputRef.current?.click(); }}>
+                                <span className="material-symbols-outlined">upload_file</span>
+                                <span>Import Dataset</span>
+                              </button>
+                              <button className="study-action-btn" type="button" onClick={(e) => openModelModal(study.id, e)}>
+                                <span className="material-symbols-outlined">add</span>
+                                <span>Create Model</span>
+                              </button>
                             </div>
                           )}
                         </div>
@@ -796,8 +810,20 @@ const Dashboard = () => {
                       
                       <div className={`study-children ${!isExpanded ? 'hidden' : ''}`} id={`study-children-${study.id}`}>
                         {isEmpty ? (
-                          <div style={{padding: '12px 16px', marginLeft: '26px', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', fontStyle: 'italic'}}>
-                            No files yet. Drop files here to get started.
+                          <div style={{padding: '10px 16px', marginLeft: '26px', display: 'flex', flexDirection: 'column', gap: '8px'}}>
+                            <div style={{color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', fontStyle: 'italic'}}>
+                              No files yet.
+                            </div>
+                            <div style={{display: 'flex', gap: '8px', alignItems: 'center'}}>
+                              <button className="study-action-btn" type="button" style={{border: '1px solid var(--color-border-subtle)', background: 'var(--color-bg-base)'}} onClick={(e) => { e.stopPropagation(); setImportingStudyId(study.id); fileInputRef.current?.click(); }}>
+                                <span className="material-symbols-outlined">upload_file</span>
+                                <span>Import Dataset</span>
+                              </button>
+                              <button className="study-action-btn" type="button" style={{border: '1px solid var(--color-border-subtle)', background: 'var(--color-bg-base)'}} onClick={(e) => openModelModal(study.id, e)}>
+                                <span className="material-symbols-outlined">add</span>
+                                <span>Create Model</span>
+                              </button>
+                            </div>
                           </div>
                         ) : (
                           <>
@@ -942,7 +968,7 @@ const Dashboard = () => {
                                   ) : (
                                     <span>{model.name}</span>
                                   )}
-                                  <span className={`file-badge ${model.type === 'PLS-SEM' ? 'file-badge--accent' : (model.type === 'Dataset' ? 'file-badge--default' : '')}`}>{model.type}</span>
+                                  <span className="file-badge file-badge--model-tag">{formatModelType(model.type)}</span>
                                 </div>
                                 <div className="file-row__meta">
                                   <span className="file-row__time">{model.lastModified}</span>
@@ -1016,9 +1042,17 @@ const Dashboard = () => {
                                 </div>
                               </div>
                             ))}
-                            <div style={{display: 'flex', gap: '16px', margin: '8px 0 8px 26px'}}>
-                              <div className="create-model-link" onClick={(e) => openModelModal(study.id, e)} style={{margin: 0, padding: 0}}><span className="material-symbols-outlined">add</span><span>Create Model</span></div>
-                              {!studyDataset && <div className="create-model-link" style={{margin: 0, padding: 0}} onClick={(e) => { e.stopPropagation(); setImportingStudyId(study.id); fileInputRef.current?.click(); }}><span className="material-symbols-outlined">upload_file</span><span>Import Dataset</span></div>}
+                            <div style={{display: 'flex', gap: '8px', margin: '8px 0 8px 26px', alignItems: 'center'}}>
+                              {!studyDataset && (
+                                <button className="study-action-btn" type="button" onClick={(e) => { e.stopPropagation(); setImportingStudyId(study.id); fileInputRef.current?.click(); }}>
+                                  <span className="material-symbols-outlined">upload_file</span>
+                                  <span>Import Dataset</span>
+                                </button>
+                              )}
+                              <button className="study-action-btn" type="button" onClick={(e) => openModelModal(study.id, e)}>
+                                <span className="material-symbols-outlined">add</span>
+                                <span>Create Model</span>
+                              </button>
                             </div>
                           </>
                         )}

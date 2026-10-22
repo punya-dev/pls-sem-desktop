@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useStore } from '../store';
 import AppSidebar from '../components/AppSidebar';
+import { formatModelType } from './Dashboard';
 
 export const ArchiveView: React.FC = () => {
   const { 
@@ -145,7 +146,7 @@ export const ArchiveView: React.FC = () => {
                                 <div className="file-row__left">
                                   <span className="material-symbols-outlined">account_tree</span>
                                   <span>{model.name}</span>
-                                  <span className="file-badge file-badge--default">{model.type}</span>
+                                  <span className="file-badge file-badge--model-tag">{formatModelType(model.type)}</span>
                                 </div>
                                 <div className="file-row__meta">
                                   <span className="file-row__time">{model.lastModified}</span>
