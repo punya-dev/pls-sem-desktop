@@ -751,14 +751,7 @@ export const api = {
     }
   },
 
-  async pickFileOrFolder(): Promise<{ path?: string | null; cancelled?: boolean; fallback?: boolean; error?: string }> {
-    try {
-      const res = await fetch(`${API_BASE}/system/pick_file_or_folder`, { method: 'POST' });
-      return await res.json();
-    } catch (err: any) {
-      return { error: err?.message || 'Failed to pick file or folder' };
-    }
-  },
+
 
 
 

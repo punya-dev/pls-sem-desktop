@@ -69,23 +69,15 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
     }
   };
 
-  const handleImportStudy = async () => {
+  const handleImportStudy = async (targetType: 'file' | 'folder' = 'file') => {
     if (!currentWorkspace) return;
     setError(null);
     try {
       let selectedPath: string | null = null;
 
       try {
-        const pickRes = await api.pickFileOrFolder();
-        if (pickRes?.cancelled) {
-          // User clicked Cancel in dialog; exit cleanly without popping any second dialog
-          return;
-        }
-        if (pickRes?.path) {
-          selectedPath = pickRes.path;
-        } else if (pickRes?.fallback) {
-          // Only fallback if not supported natively on this OS
-          const { open } = await import('@tauri-apps/plugin-dialog');
+        const { open } = await import('@tauri-apps/plugin-dialog');
+        if (targetType === 'folder') {
           const selected = await open({
             multiple: false,
             directory: true,
@@ -94,9 +86,32 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
           if (selected && typeof selected === 'string') {
             selectedPath = selected;
           }
+        } else {
+          const selected = await open({
+            multiple: false,
+            directory: false,
+            title: 'Import Study File (.zip, .pls)',
+            filters: [
+              {
+                name: 'Study Archive or Project',
+                extensions: ['zip', 'pls', 'splsm'],
+              },
+            ],
+          });
+          if (selected && typeof selected === 'string') {
+            selectedPath = selected;
+          }
         }
       } catch (pickErr) {
-        console.warn('Native pick_file_or_folder error:', pickErr);
+        console.warn('Tauri open dialog error, falling back to prompt:', pickErr);
+        const fallback = window.prompt(
+          targetType === 'folder'
+            ? 'Enter study folder directory path:'
+            : 'Enter study file path (.zip, .pls):'
+        );
+        if (fallback) {
+          selectedPath = fallback;
+        }
       }
 
       if (!selectedPath) return;
@@ -208,31 +223,58 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
               <div style={{ color: 'var(--color-danger, #ef4444)', fontSize: '12px' }}>{error}</div>
             )}
 
-            <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: '1px solid var(--color-border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)', fontWeight: 500 }}>
+            <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: '1px solid var(--color-border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+              <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)', fontWeight: 500, whiteSpace: 'nowrap' }}>
                 Or import study
               </span>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={handleImportStudy}
-                disabled={isSubmitting}
-                style={{
-                  padding: '6px 12px',
-                  fontSize: '12px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  borderRadius: 'var(--radius-sm)',
-                  border: '1px solid var(--color-border-subtle)',
-                  background: 'var(--color-bg-base)',
-                  color: 'var(--color-text-primary)',
-                  cursor: 'pointer',
-                }}
-              >
-                <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>file_download</span>
-                <span>Import Study</span>
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => handleImportStudy('file')}
+                  disabled={isSubmitting}
+                  title="Import a SmartPLS export (.zip) or project file (.pls)"
+                  style={{
+                    padding: '6px 10px',
+                    fontSize: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--color-border-subtle)',
+                    background: 'var(--color-bg-base)',
+                    color: 'var(--color-text-primary)',
+                    cursor: 'pointer',
+                    transition: 'border-color 0.12s, background 0.12s',
+                  }}
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>draft</span>
+                  <span>From File (.zip, .pls)</span>
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => handleImportStudy('folder')}
+                  disabled={isSubmitting}
+                  title="Import an unzipped SmartPLS study directory"
+                  style={{
+                    padding: '6px 10px',
+                    fontSize: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--color-border-subtle)',
+                    background: 'var(--color-bg-base)',
+                    color: 'var(--color-text-primary)',
+                    cursor: 'pointer',
+                    transition: 'border-color 0.12s, background 0.12s',
+                  }}
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>folder_open</span>
+                  <span>From Folder</span>
+                </button>
+              </div>
             </div>
           </div>
           <div className="modal__footer">
