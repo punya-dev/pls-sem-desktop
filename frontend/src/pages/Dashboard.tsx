@@ -810,19 +810,9 @@ const Dashboard = () => {
                       
                       <div className={`study-children ${!isExpanded ? 'hidden' : ''}`} id={`study-children-${study.id}`}>
                         {isEmpty ? (
-                          <div style={{padding: '10px 16px', marginLeft: '26px', display: 'flex', flexDirection: 'column', gap: '8px'}}>
+                          <div style={{padding: '10px 16px', marginLeft: '26px'}}>
                             <div style={{color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', fontStyle: 'italic'}}>
                               No files yet.
-                            </div>
-                            <div style={{display: 'flex', gap: '8px', alignItems: 'center'}}>
-                              <button className="study-action-btn" type="button" style={{border: '1px solid var(--color-border-subtle)', background: 'var(--color-bg-base)'}} onClick={(e) => { e.stopPropagation(); setImportingStudyId(study.id); fileInputRef.current?.click(); }}>
-                                <span className="material-symbols-outlined">upload_file</span>
-                                <span>Import Dataset</span>
-                              </button>
-                              <button className="study-action-btn" type="button" style={{border: '1px solid var(--color-border-subtle)', background: 'var(--color-bg-base)'}} onClick={(e) => openModelModal(study.id, e)}>
-                                <span className="material-symbols-outlined">add</span>
-                                <span>Create Model</span>
-                              </button>
                             </div>
                           </div>
                         ) : (
