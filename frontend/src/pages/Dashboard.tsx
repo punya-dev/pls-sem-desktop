@@ -5,7 +5,6 @@ import WorkspaceModal from '../components/WorkspaceModal';
 import StudyModal from '../components/StudyModal';
 import StudyWorkspaceDropdown from '../components/StudyWorkspaceDropdown';
 import InputDialog from '../components/InputDialog';
-import { DataManagerModal } from '../components/DataManagerModal';
 import { parseDatasetFile } from '../utils/dataset-parser';
 import type { ParsedDataset } from '../utils/dataset-parser';
 import { api } from '../utils/api';
@@ -164,7 +163,6 @@ const Dashboard = () => {
   };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [datasetToImport, setDatasetToImport] = useState<ParsedDataset | null>(null);
   const [importingStudyId, setImportingStudyId] = useState<string | null>(null);
 
   // Inline workspace title renaming
@@ -224,7 +222,6 @@ const Dashboard = () => {
         console.warn('Failed to save dataset to project in Dashboard:', err);
       }
     }
-    setDatasetToImport(null);
     setImportingStudyId(null);
   };
 
@@ -749,8 +746,13 @@ const Dashboard = () => {
           label: 'Edit Settings...',
           icon: 'tune',
           action: () => {
-            setImportingStudyId(study.id);
-            setDatasetToImport(studyDataset);
+            setActiveStudy(study.id);
+            openTab({
+              type: 'dataset',
+              title: studyDataset.filename,
+              studyId: study.id,
+              workspaceId: activeWorkspaceId,
+            });
           }
         },
         {
@@ -1003,14 +1005,6 @@ const Dashboard = () => {
           </div>
         </div>
       </div>
-      )}
-
-      {datasetToImport && (
-        <DataManagerModal
-          dataset={datasetToImport}
-          onImport={handleImportComplete}
-          onCancel={() => setDatasetToImport(null)}
-        />
       )}
     </>
   );
