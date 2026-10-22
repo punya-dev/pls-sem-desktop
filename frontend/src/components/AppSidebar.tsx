@@ -271,9 +271,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ activeNav }) => {
               <span className="material-symbols-outlined">inventory_2</span>
               <span>Archive</span>
             </span>
-            {archivedWorkspaces.length > 0 && (
-              <span className="sidebar-item__badge">{archivedWorkspaces.length}</span>
-            )}
+            <span className="sidebar-item__badge">{archivedWorkspaces.length}</span>
           </button>
 
           <button
