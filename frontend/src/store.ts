@@ -177,6 +177,8 @@ interface AppState {
   removeStudy: (id: string) => void;
   renameStudy: (id: string, name: string) => void;
   duplicateStudy: (id: string) => void;
+  moveStudyToWorkspace: (studyId: string, targetWorkspaceId: string, targetWorkspacePath: string) => Promise<{ success: boolean; error?: string }>;
+  copyStudyToWorkspace: (studyId: string, targetWorkspaceId: string, targetWorkspacePath: string, newStudyName: string) => Promise<{ success: boolean; newStudyId?: string; error?: string }>;
   setActiveStudy: (id: string) => void;
   setStudyDataset: (studyId: string, dataset: ParsedDataset) => void;
   removeStudyDataset: (studyId: string) => void;
@@ -291,7 +293,7 @@ export const useStore = create<AppState>()(
             tabInput.type === 'get-started' ? 'Home' :
             tabInput.type === 'archive' ? 'Archive' :
             tabInput.type === 'docs' ? 'Documentation' :
-            tabInput.type === 'samples' ? 'Sample Projects' :
+            tabInput.type === 'samples' ? 'Sample Studies' :
             tabInput.type === 'feedback' ? 'Feedback & Reports' :
             'Changelog'
           );
@@ -785,6 +787,119 @@ export const useStore = create<AppState>()(
           models: [...curr.models, ...clonedModels],
           datasetsByStudy: dataset ? { ...curr.datasetsByStudy, [studyId]: { ...dataset, variables: dataset.variables.map(variable => ({ ...variable })), rows: dataset.rows.map(row => [...row]) } } : curr.datasetsByStudy,
         }));
+      },
+      moveStudyToWorkspace: async (studyId, targetWorkspaceId, targetWorkspacePath) => {
+        const state = get();
+        const study = state.studies.find((item) => item.id === studyId);
+        if (!study) return { success: false, error: 'Study not found' };
+
+        const sourceWs = state.workspaces.find((w) => w.id === study.workspaceId);
+        const sourceWsPath = sourceWs?.path;
+        if (!sourceWsPath) return { success: false, error: 'Source workspace path not found' };
+
+        let targetPath = study.path;
+        if (study.path && sourceWsPath && targetWorkspacePath) {
+          try {
+            const res = await api.moveProject(sourceWsPath, targetWorkspacePath, study.path, study.name);
+            if (res?.error) {
+              return { success: false, error: res.error };
+            }
+            if (res && res.project_path) {
+              targetPath = res.project_path;
+            }
+          } catch (err: any) {
+            console.warn('Could not move study file on disk:', err);
+            return { success: false, error: err?.message || 'Failed to move study on disk' };
+          }
+        }
+
+        set((curr) => ({
+          studies: curr.studies.map((s) =>
+            s.id === studyId
+              ? {
+                  ...s,
+                  workspaceId: targetWorkspaceId,
+                  path: targetPath,
+                  lastModified: 'Just now',
+                }
+              : s
+          ),
+          tabs: curr.tabs.map((tab) =>
+            tab.studyId === studyId
+              ? {
+                  ...tab,
+                  workspaceId: targetWorkspaceId,
+                }
+              : tab
+          ),
+        }));
+
+        return { success: true };
+      },
+      copyStudyToWorkspace: async (studyId, targetWorkspaceId, targetWorkspacePath, newStudyName) => {
+        const state = get();
+        const study = state.studies.find((item) => item.id === studyId);
+        if (!study) return { success: false, error: 'Study not found' };
+
+        const newStudyId = `study_${Date.now()}`;
+        const dataset = state.datasetsByStudy[studyId];
+
+        const studyModels = state.models.filter((m) => m.studyId === studyId);
+        const modelIdMap: Record<string, string> = {};
+        const clonedModels = studyModels.map((m) => {
+          const newModelId = `model_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+          modelIdMap[m.id] = newModelId;
+          return {
+            ...m,
+            id: newModelId,
+            studyId: newStudyId,
+            name: m.name,
+            lastModified: 'Just now',
+          };
+        });
+
+        let targetPath = study.path;
+        if (study.path && targetWorkspacePath) {
+          try {
+            const res = await api.duplicateProject(targetWorkspacePath, study.path, newStudyName, modelIdMap);
+            if (res?.error) {
+              return { success: false, error: res.error };
+            }
+            if (res && res.project_path) {
+              targetPath = res.project_path;
+            }
+          } catch (err: any) {
+            console.warn('Could not copy study file on disk:', err);
+            return { success: false, error: err?.message || 'Failed to copy study file' };
+          }
+        }
+
+        set((curr) => ({
+          studies: [
+            ...curr.studies,
+            {
+              ...study,
+              id: newStudyId,
+              workspaceId: targetWorkspaceId,
+              name: newStudyName,
+              path: targetPath,
+              lastModified: 'Just now',
+            },
+          ],
+          models: [...curr.models, ...clonedModels],
+          datasetsByStudy: dataset
+            ? {
+                ...curr.datasetsByStudy,
+                [newStudyId]: {
+                  ...dataset,
+                  variables: dataset.variables.map((variable) => ({ ...variable })),
+                  rows: dataset.rows.map((row) => [...row]),
+                },
+              }
+            : curr.datasetsByStudy,
+        }));
+
+        return { success: true, newStudyId };
       },
       setActiveStudy: (id) => set({ activeStudyId: id }),
       setStudyDataset: (studyId, dataset) => set((state) => ({

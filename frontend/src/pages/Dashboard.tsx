@@ -1,10 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useStore } from '../store';
+import { useStore, type Study } from '../store';
 import WorkspaceModal from '../components/WorkspaceModal';
 import StudyModal from '../components/StudyModal';
+import StudyWorkspaceDropdown from '../components/StudyWorkspaceDropdown';
 import InputDialog from '../components/InputDialog';
-import { DataManagerModal } from '../components/DataManagerModal';
 import { parseDatasetFile } from '../utils/dataset-parser';
 import type { ParsedDataset } from '../utils/dataset-parser';
 import { api } from '../utils/api';
@@ -48,6 +48,17 @@ const Dashboard = () => {
   const [expandedStudies, setExpandedStudies] = useState<Set<string>>(new Set());
   
   const [isStudyModalOpen, setIsStudyModalOpen] = useState(false);
+  const [workspaceDropdownConfig, setWorkspaceDropdownConfig] = useState<{
+    isOpen: boolean;
+    mode: 'move' | 'copy';
+    study: Study | null;
+    position: { x: number; y: number } | null;
+  }>({
+    isOpen: false,
+    mode: 'move',
+    study: null,
+    position: null,
+  });
   const [inputDialogConfig, setInputDialogConfig] = useState<{isOpen: boolean; title: string; placeholder: string; submitLabel: string; initialValue?: string; onSubmit: (val: string) => void}>({
     isOpen: false, title: '', placeholder: '', submitLabel: '', onSubmit: () => {}
   });
@@ -152,7 +163,6 @@ const Dashboard = () => {
   };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [datasetToImport, setDatasetToImport] = useState<ParsedDataset | null>(null);
   const [importingStudyId, setImportingStudyId] = useState<string | null>(null);
 
   // Inline workspace title renaming
@@ -212,7 +222,6 @@ const Dashboard = () => {
         console.warn('Failed to save dataset to project in Dashboard:', err);
       }
     }
-    setDatasetToImport(null);
     setImportingStudyId(null);
   };
 
@@ -400,10 +409,10 @@ const Dashboard = () => {
                 <span>Documentation</span>
               </span>
             </button>
-            <button className="sidebar-item" type="button" data-action="samples" onClick={() => openTab({ type: 'samples', title: 'Sample Projects' })}>
+            <button className="sidebar-item" type="button" data-action="samples" onClick={() => openTab({ type: 'samples', title: 'Sample Studies' })}>
               <span className="sidebar-item__left">
                 <span className="material-symbols-outlined">science</span>
-                <span>Sample Projects</span>
+                <span>Sample Studies</span>
               </span>
             </button>
             <button className="sidebar-item" type="button" data-action="feedback" onClick={() => openTab({ type: 'feedback', title: 'Feedback & Reports' })}>
@@ -455,9 +464,9 @@ const Dashboard = () => {
                 )}
               </div>
               <div className="ws-header__actions">
-                <button className="btn-ws-primary" type="button" onClick={handleCreateStudy}>
+                <button className="btn-ws-primary" type="button" onClick={handleCreateStudy} title="Import or create new study">
                   <span className="material-symbols-outlined">add</span>
-                  <span>New Study</span>
+                  <span>Import/New Study</span>
                   <kbd className="kbd">⌘S</kbd>
                 </button>
               </div>
@@ -615,6 +624,18 @@ const Dashboard = () => {
                                 },
                                 { id: 'duplicate', label: 'Duplicate Study', icon: 'content_copy', action: () => duplicateStudy(study.id) },
                                 {
+                                  id: 'move-study',
+                                  label: 'Move to Workspace…',
+                                  icon: 'drive_file_move',
+                                  action: () => setWorkspaceDropdownConfig({ isOpen: true, mode: 'move', study, position: { x: e.clientX, y: e.clientY } }),
+                                },
+                                {
+                                  id: 'copy-study',
+                                  label: 'Copy to Workspace…',
+                                  icon: 'file_copy',
+                                  action: () => setWorkspaceDropdownConfig({ isOpen: true, mode: 'copy', study, position: { x: e.clientX, y: e.clientY } }),
+                                },
+                                {
                                   id: 'delete', 
                                   label: 'Delete Study', 
                                   icon: 'delete', 
@@ -725,8 +746,13 @@ const Dashboard = () => {
           label: 'Edit Settings...',
           icon: 'tune',
           action: () => {
-            setImportingStudyId(study.id);
-            setDatasetToImport(studyDataset);
+            setActiveStudy(study.id);
+            openTab({
+              type: 'dataset',
+              title: studyDataset.filename,
+              studyId: study.id,
+              workspaceId: activeWorkspaceId,
+            });
           }
         },
         {
@@ -925,6 +951,13 @@ const Dashboard = () => {
         onClose={() => setIsStudyModalOpen(false)} 
         workspaceId={activeWorkspaceId || ''} 
       />
+      <StudyWorkspaceDropdown
+        isOpen={workspaceDropdownConfig.isOpen}
+        onClose={() => setWorkspaceDropdownConfig((prev) => ({ ...prev, isOpen: false }))}
+        mode={workspaceDropdownConfig.mode}
+        study={workspaceDropdownConfig.study}
+        position={workspaceDropdownConfig.position}
+      />
       <InputDialog 
         isOpen={inputDialogConfig.isOpen} 
         onClose={() => setInputDialogConfig(prev => ({...prev, isOpen: false}))}
@@ -972,14 +1005,6 @@ const Dashboard = () => {
           </div>
         </div>
       </div>
-      )}
-
-      {datasetToImport && (
-        <DataManagerModal
-          dataset={datasetToImport}
-          onImport={handleImportComplete}
-          onCancel={() => setDatasetToImport(null)}
-        />
       )}
     </>
   );

@@ -19,6 +19,7 @@ import settings_io
 from model_spec import ModelSpec, ValidateModelRequest, SaveModelRequest, RunPlsRequest, BootstrapStartRequest
 from model_validator import validate_model_spec, ValidationResult
 from engine.pls.algorithm import PLSAlgorithm, run_pls
+import smartpls_importer
 import sqlite3
 from data.importer import (
     ImportSettings,
@@ -82,7 +83,6 @@ from engine.pls.predict import run_pls_predict
 from reporting.tables import TABLE_EXTRACTORS, export_table_to_format
 from reporting.narrative import generate_narrative_report
 from reporting.pdf_export import generate_pdf_report
-from fastapi.responses import Response
 
 
 
@@ -1139,6 +1139,103 @@ def delete_project_from_ws(folder_path: str, project_filename: str):
         return {"error": str(e)}
 
 
+class SmartPlsDetectRequest(BaseModel):
+    folder_path: str
+
+
+class SmartPlsImportRequest(BaseModel):
+    folder_path: str
+    target_workspace_folder: Optional[str] = None
+    workspace_name: Optional[str] = None
+
+
+@app.post("/project/smartpls/detect")
+def detect_smartpls(req: SmartPlsDetectRequest):
+    try:
+        return smartpls_importer.detect_smartpls_folder(req.folder_path)
+    except Exception as e:
+        return {"valid": False, "error": str(e)}
+
+
+@app.post("/project/smartpls/import")
+def import_smartpls(req: SmartPlsImportRequest):
+    try:
+        return smartpls_importer.import_smartpls_folder(
+            req.folder_path,
+            target_workspace_folder=req.target_workspace_folder,
+            workspace_name=req.workspace_name,
+        )
+    except Exception as e:
+        return {"error": str(e)}
+
+
+class FolderDetectRequest(BaseModel):
+    folder_path: str
+
+
+class SmartPlsWorkspaceImportRequest(BaseModel):
+    folder_path: str
+
+
+@app.post("/workspace/detect_folder")
+def detect_folder(req: FolderDetectRequest):
+    try:
+        return smartpls_importer.detect_folder_type(req.folder_path)
+    except Exception as e:
+        return {"kind": "error", "error": str(e)}
+
+
+@app.post("/workspace/smartpls/import")
+def import_smartpls_ws(req: SmartPlsWorkspaceImportRequest):
+    try:
+        return smartpls_importer.import_smartpls_workspace(req.folder_path)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/system/pick_file_or_folder")
+def pick_file_or_folder():
+    """
+    Opens a native picker that allows choosing BOTH files (.zip) and directories
+    in a single dialog window on macOS.
+    """
+    try:
+        import platform
+        import subprocess
+
+        if platform.system() == "Darwin":
+            script = """
+            use framework "AppKit"
+            set openPanel to current application's NSOpenPanel's openPanel()
+            openPanel's setCanChooseFiles:true
+            openPanel's setCanChooseDirectories:true
+            openPanel's setAllowsMultipleSelection:false
+            openPanel's setResolvesAliases:true
+            openPanel's setTitle:"Import SmartPLS Study (ZIP or Folder)"
+            openPanel's setMessage:"Choose an exported SmartPLS ZIP file or study folder"
+            set theApp to current application's NSApplication's sharedApplication()
+            theApp's activateIgnoringOtherApps:true
+            set res to openPanel's runModal()
+            if res = 1 then
+                set chosenURL to (openPanel's |URLs|()'s objectAtIndex:0)
+                return (chosenURL's |path|()) as text
+            else
+                return "__CANCELLED__"
+            end if
+            """
+            res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+            path = res.stdout.strip()
+            if path == "__CANCELLED__" or not path:
+                return {"path": None, "cancelled": True}
+            return {"path": path, "cancelled": False}
+        return {"path": None, "fallback": True}
+    except Exception as e:
+        return {"error": str(e), "fallback": True}
+
+
+
+
+
 @app.post("/workspace/delete")
 def delete_workspace(folder_path: str):
     try:
@@ -1170,6 +1267,12 @@ class DuplicateProjectRequest(BaseModel):
     source_path: str
     new_name: str
     model_id_map: Optional[Dict[str, str]] = None
+
+class MoveProjectRequest(BaseModel):
+    source_workspace_path: str
+    target_workspace_path: str
+    source_path: str
+    project_name: Optional[str] = None
 
 class RemapModelIdsRequest(BaseModel):
     project_path: str
@@ -1312,9 +1415,25 @@ def duplicate_project_model(req: DuplicateModelRequest):
 
 
 @app.post("/project/duplicate")
+@app.post("/study/duplicate")
 def duplicate_project_file(req: DuplicateProjectRequest):
     try:
         res = project_io.duplicate_project(req.folder_path, req.source_path, req.new_name, req.model_id_map)
+        return res
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/project/move")
+@app.post("/study/move")
+def move_project_file(req: MoveProjectRequest):
+    try:
+        res = project_io.move_project(
+            req.source_workspace_path,
+            req.target_workspace_path,
+            req.source_path,
+            req.project_name
+        )
         return res
     except Exception as e:
         return {"error": str(e)}

@@ -2,7 +2,6 @@ import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
 import { initModelCanvas, exportModelSpec, getModelCanvasState, loadModelCanvasState, setCanvasResults, renderModelCanvas, clearModelCanvas, resetModelStyles } from '../utils/model-canvas';
-import { DataManagerModal } from '../components/DataManagerModal';
 import { BootstrapModal } from '../components/BootstrapModal';
 import { AnalysisModal } from '../components/AnalysisModal';
 import { AdvancedResultPanels } from '../components/AdvancedResultPanels';
@@ -140,7 +139,6 @@ const ModelEditor = () => {
   }, [theme, settings?.theme, settings?.darkVariant]);
 
   const [currentView, setCurrentView] = useState<'model' | 'results'>('model');
-  const [datasetToImport, setDatasetToImport] = useState<ParsedDataset | null>(null);
   const [activeDataset, setActiveDataset] = useState<ParsedDataset | null>(() => activeStudyId ? datasetsByStudy[activeStudyId] ?? null : null);
   const [isImporting, setIsImporting] = useState(false);
   const [isBootstrapModalOpen, setIsBootstrapModalOpen] = useState(false);
@@ -317,7 +315,6 @@ const ModelEditor = () => {
         }
       }
     }
-    setDatasetToImport(null);
   };
 
   const visibleVariables = (activeDataset?.variables ?? []).filter(variable =>

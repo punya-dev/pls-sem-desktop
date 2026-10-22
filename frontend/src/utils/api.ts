@@ -357,7 +357,25 @@ export const api = {
       });
       return await res.json();
     } catch (err: any) {
-      return { error: err?.message || 'Failed to duplicate project' };
+      return { error: err?.message || 'Failed to duplicate study' };
+    }
+  },
+
+  async moveProject(sourceWorkspacePath: string, targetWorkspacePath: string, sourcePath: string, projectName?: string): Promise<any> {
+    try {
+      const res = await fetch(`${API_BASE}/project/move`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source_workspace_path: sourceWorkspacePath,
+          target_workspace_path: targetWorkspacePath,
+          source_path: sourcePath,
+          project_name: projectName,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to move study' };
     }
   },
 
@@ -613,6 +631,136 @@ export const api = {
       return { error: err?.message || 'Failed to create model from snapshot' };
     }
   },
+
+  async detectSmartPls(folderPath: string): Promise<{
+    valid?: boolean;
+    project_name?: string;
+    folder_path?: string;
+    models_count?: number;
+    models?: Array<{ file: string; name: string }>;
+    datasets_count?: number;
+    datasets?: string[];
+    error?: string;
+  }> {
+    try {
+      const res = await fetch(`${API_BASE}/project/smartpls/detect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder_path: folderPath }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to detect SmartPLS project' };
+    }
+  },
+
+  async importSmartPls(folderPath: string, targetWorkspaceFolder?: string, workspaceName?: string): Promise<{
+    status?: string;
+    workspace?: {
+      id: string;
+      name: string;
+      path: string;
+      createdAt?: string;
+      modifiedAt?: string;
+    };
+    studies?: Array<{
+      id: string;
+      workspaceId: string;
+      name: string;
+      type: string;
+      description: string;
+      lastModified: string;
+      path: string;
+      dataset_rows: number;
+      dataset_columns: string[];
+      createdAt?: string;
+    }>;
+    models?: Array<{
+      id: string;
+      studyId: string;
+      name: string;
+      type: string;
+      lastModified: string;
+    }>;
+    imported_from?: string;
+    error?: string;
+  }> {
+    try {
+      const res = await fetch(`${API_BASE}/project/smartpls/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          folder_path: folderPath,
+          target_workspace_folder: targetWorkspaceFolder || undefined,
+          workspace_name: workspaceName || undefined,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to import SmartPLS project' };
+    }
+  },
+
+  async detectFolder(folderPath: string): Promise<{
+    kind?: 'cspls_workspace' | 'smartpls_workspace' | 'smartpls_project' | 'unknown' | 'file' | 'not_found' | 'error';
+    name?: string;
+    path?: string;
+    is_zip?: boolean;
+    project_name?: string;
+    projects_count?: number;
+    projects?: any[];
+    models_count?: number;
+    datasets_count?: number;
+    error?: string;
+  }> {
+    try {
+      const res = await fetch(`${API_BASE}/workspace/detect_folder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder_path: folderPath }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { kind: 'error', error: err?.message || 'Failed to detect folder type' };
+    }
+  },
+
+  async importSmartPlsWorkspace(folderPath: string): Promise<{
+    status?: string;
+    workspace?: {
+      id: string;
+      name: string;
+      path: string;
+      createdAt?: string;
+      modifiedAt?: string;
+      projects?: any[];
+    };
+    studies?: any[];
+    models?: any[];
+    error?: string;
+  }> {
+    try {
+      const res = await fetch(`${API_BASE}/workspace/smartpls/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder_path: folderPath }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to import SmartPLS workspace' };
+    }
+  },
+
+  async pickFileOrFolder(): Promise<{ path?: string | null; cancelled?: boolean; fallback?: boolean; error?: string }> {
+    try {
+      const res = await fetch(`${API_BASE}/system/pick_file_or_folder`, { method: 'POST' });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to pick file or folder' };
+    }
+  },
+
+
 
   // --- Phase 3-6 Advanced PLS-SEM Analyses ---
   async runBlindfolding(data: {

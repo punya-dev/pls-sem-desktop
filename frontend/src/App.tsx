@@ -18,9 +18,13 @@ import SnapshotView from './pages/SnapshotView';
 
 import { api } from './utils/api';
 import { applyAccentColor } from './utils/theme';
+import WorkspaceModal from './components/WorkspaceModal';
+import { registerCreateWorkspaceWithProject, promptOpenWorkspaceFolder } from './utils/workspace-import';
 
 function App() {
   const { tabs, activeTabId, settings, theme } = useStore();
+  const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = React.useState(false);
+  const [wsModalProject, setWsModalProject] = React.useState<{ path: string; name?: string } | null>(null);
 
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
 
@@ -158,6 +162,10 @@ function App() {
           e.preventDefault();
         }
       }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'o') {
+        e.preventDefault();
+        promptOpenWorkspaceFolder();
+      }
     };
     window.addEventListener('keydown', handleGlobalKeyDown);
 
@@ -177,7 +185,14 @@ function App() {
     };
     window.addEventListener('selectstart', handleGlobalSelectStart);
 
+    // Listen for Create Workspace with project trigger
+    const unregister = registerCreateWorkspaceWithProject((projectPath, projectName) => {
+      setWsModalProject(projectPath ? { path: projectPath, name: projectName } : null);
+      setIsWorkspaceModalOpen(true);
+    });
+
     return () => {
+      unregister();
       window.removeEventListener('keydown', handleGlobalKeyDown);
       window.removeEventListener('selectstart', handleGlobalSelectStart);
     };
@@ -190,6 +205,16 @@ function App() {
         <ContextMenu />
         <SettingsModal />
         <ConfirmDeleteModal />
+        <WorkspaceModal
+          isOpen={isWorkspaceModalOpen}
+          onClose={() => {
+            setIsWorkspaceModalOpen(false);
+            setWsModalProject(null);
+          }}
+          initialImportProject={wsModalProject?.path}
+          initialProjectName={wsModalProject?.name}
+          onClearInitialImportProject={() => setWsModalProject(null)}
+        />
         <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {renderContent()}
         </div>

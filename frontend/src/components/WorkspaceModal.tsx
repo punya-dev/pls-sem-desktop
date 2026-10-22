@@ -2,28 +2,46 @@ import React, { useState, useEffect } from 'react';
 import { useStore } from '../store';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../utils/api';
+import { processData } from '../utils/dataset-parser';
+import { promptOpenWorkspaceFolder } from '../utils/workspace-import';
 
 interface WorkspaceModalProps {
   isOpen: boolean;
   onClose: () => void;
+  initialImportProject?: string | null;
+  initialProjectName?: string | null;
+  onClearInitialImportProject?: () => void;
 }
 
-const WorkspaceModal = ({ isOpen, onClose }: WorkspaceModalProps) => {
+const WorkspaceModal = ({
+  isOpen,
+  onClose,
+  initialImportProject,
+  initialProjectName,
+  onClearInitialImportProject,
+}: WorkspaceModalProps) => {
   const [name, setName] = useState('');
   const [location, setLocation] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { workspaces, addWorkspace, setActiveWorkspace, openTab } = useStore();
+  const { workspaces, addWorkspace, setActiveWorkspace, openTab, addStudy, setStudyDataset, setActiveStudy, addModel } = useStore();
   const navigate = useNavigate();
 
   useEffect(() => {
     if (isOpen) {
-      setName('');
+      if (initialProjectName) {
+        setName(initialProjectName);
+      } else if (initialImportProject) {
+        const folderName = initialImportProject.replace(/[/\\]+$/, '').split(/[/\\]/).filter(Boolean).pop() || '';
+        setName(folderName);
+      } else {
+        setName('');
+      }
       setLocation('');
       setError(null);
       setIsCreating(false);
     }
-  }, [isOpen]);
+  }, [isOpen, initialImportProject, initialProjectName]);
 
   if (!isOpen) return null;
 
@@ -63,7 +81,7 @@ const WorkspaceModal = ({ isOpen, onClose }: WorkspaceModalProps) => {
 
   const handleCreateWorkspace = async () => {
     if (!cleanName) return;
-setError(null);
+    setError(null);
     setIsCreating(true);
 
     try {
@@ -92,6 +110,53 @@ setError(null);
     }
 
     const workspaceId = existing ? existing.id : newId;
+
+    // If an initial study/project is attached, import it into the new workspace
+    if (initialImportProject) {
+      try {
+        const importRes = await api.importSmartPls(initialImportProject, calculatedPath, cleanName);
+        if (importRes?.studies && importRes.studies.length > 0) {
+          for (const s of importRes.studies) {
+            addStudy({
+              id: s.id,
+              workspaceId,
+              name: s.name,
+              type: s.type || 'PLS-SEM',
+              description: s.description || '',
+              lastModified: 'Just now',
+              path: s.path,
+              createdAt: s.createdAt,
+            });
+            try {
+              const dRes = await api.loadProjectData(s.path);
+              if (dRes?.rows && dRes?.columns) {
+                const parsed = processData(dRes.dataset_name || s.name, dRes.columns, dRes.rows);
+                setStudyDataset(s.id, parsed);
+              }
+            } catch (e) {
+              console.warn('Could not load data for study', s.name, e);
+            }
+          }
+          if (importRes.studies.length > 0) {
+            setActiveStudy(importRes.studies[0].id);
+          }
+        }
+
+        if (importRes?.models && importRes.models.length > 0) {
+          for (const m of importRes.models) {
+            addModel({
+              id: m.id,
+              studyId: m.studyId,
+              name: m.name,
+              type: m.type || 'pls',
+              lastModified: 'Just now',
+            });
+          }
+        }
+      } catch (importErr: any) {
+        console.warn('Failed to import initial SmartPLS study:', importErr);
+      }
+    }
 
     setActiveWorkspace(workspaceId);
 
@@ -132,6 +197,61 @@ setError(null);
 
         <form onSubmit={handleSubmit}>
           <div className="modal__body">
+            {initialImportProject && (
+              <div
+                style={{
+                  marginBottom: '14px',
+                  padding: '10px 12px',
+                  background: 'var(--color-bg-base)',
+                  border: '1px solid var(--color-border-subtle)',
+                  borderRadius: 'var(--radius-sm)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '8px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                  <span className="material-symbols-outlined" style={{ fontSize: '18px', color: 'var(--color-accent)' }}>
+                    inventory_2
+                  </span>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
+                      Will import study:
+                    </div>
+                    <div
+                      style={{
+                        fontSize: '11px',
+                        color: 'var(--color-text-muted)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {initialProjectName || initialImportProject}
+                    </div>
+                  </div>
+                </div>
+                {onClearInitialImportProject && (
+                  <button
+                    type="button"
+                    onClick={onClearInitialImportProject}
+                    style={{
+                      border: 'none',
+                      background: 'transparent',
+                      color: 'var(--color-text-muted)',
+                      cursor: 'pointer',
+                      fontSize: '11px',
+                      padding: '2px 4px',
+                    }}
+                    title="Remove study"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            )}
+
             <div className="modal__field">
               <label className="modal__label" htmlFor="modal-workspace-name">Workspace Name</label>
               <input
@@ -177,6 +297,36 @@ setError(null);
                 </div>
               )}
             </div>
+
+            <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: '1px solid var(--color-border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)', fontWeight: 500 }}>
+                Or import workspace
+              </span>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={async () => {
+                  onClose();
+                  await promptOpenWorkspaceFolder();
+                }}
+                disabled={isCreating}
+                style={{
+                  padding: '6px 12px',
+                  fontSize: '12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--color-border-subtle)',
+                  background: 'var(--color-bg-base)',
+                  color: 'var(--color-text-primary)',
+                  cursor: 'pointer',
+                }}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>folder_open</span>
+                <span>Import Workspace</span>
+              </button>
+            </div>
           </div>
 
           <div className="modal__footer">
@@ -189,7 +339,7 @@ setError(null);
               type="submit" 
               disabled={!name.trim() || isCreating}
             >
-              {isCreating ? 'Creating...' : 'Create Workspace'}
+              {isCreating ? 'Creating…' : (initialImportProject ? 'Create & Import Study' : 'Create Workspace')}
             </button>
           </div>
         </form>

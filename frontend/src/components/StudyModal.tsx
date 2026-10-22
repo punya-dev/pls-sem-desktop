@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../store';
 import { api } from '../utils/api';
+import { processData } from '../utils/dataset-parser';
 
 interface StudyModalProps {
   isOpen: boolean;
   onClose: () => void;
-  workspaceId: string;
+  workspaceId?: string;
 }
 
 const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
@@ -42,7 +43,7 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
     setIsSubmitting(true);
     try {
       const res = await api.addProject(currentWorkspace.path, cleanName);
-      if (res.error) {
+      if (res?.error) {
         setError(res.error);
         setIsSubmitting(false);
         return;
@@ -62,7 +63,96 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
       setActiveStudy(newId);
       onClose();
     } catch (err: any) {
-      setError(err?.message || 'Failed to create project');
+      setError(err?.message || 'Failed to create study');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleImportStudy = async () => {
+    if (!currentWorkspace) return;
+    setError(null);
+    try {
+      let selectedPath: string | null = null;
+
+      try {
+        const pickRes = await api.pickFileOrFolder();
+        if (pickRes?.cancelled) {
+          // User clicked Cancel in dialog; exit cleanly without popping any second dialog
+          return;
+        }
+        if (pickRes?.path) {
+          selectedPath = pickRes.path;
+        } else if (pickRes?.fallback) {
+          // Only fallback if not supported natively on this OS
+          const { open } = await import('@tauri-apps/plugin-dialog');
+          const selected = await open({
+            multiple: false,
+            directory: true,
+            title: 'Import SmartPLS Study Folder',
+          });
+          if (selected && typeof selected === 'string') {
+            selectedPath = selected;
+          }
+        }
+      } catch (pickErr) {
+        console.warn('Native pick_file_or_folder error:', pickErr);
+      }
+
+      if (!selectedPath) return;
+
+      setIsSubmitting(true);
+      const detection = await api.detectSmartPls(selectedPath);
+      if (!detection?.valid) {
+        setError(detection?.error || 'Selected file/folder is not a valid SmartPLS study.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      const res = await api.importSmartPls(selectedPath, currentWorkspace.path, currentWorkspace.name);
+      if (res?.error) {
+        setError(res.error);
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (res?.studies) {
+        const state = useStore.getState();
+        for (const s of res.studies) {
+          state.addStudy({
+            ...s,
+            workspaceId: currentWorkspace.id,
+          });
+          try {
+            const dataRes = await api.loadProjectData(s.path);
+            if (dataRes && Array.isArray(dataRes.columns) && Array.isArray(dataRes.rows)) {
+              const parsed = processData(dataRes.dataset_name || s.name, dataRes.columns, dataRes.rows);
+              state.setStudyDataset(s.id, parsed);
+            }
+          } catch (e) {
+            console.warn('Could not load data for study', s.name, e);
+          }
+        }
+        if (res.studies.length > 0) {
+          state.setActiveStudy(res.studies[0].id);
+        }
+      }
+
+      if (res?.models && res.models.length > 0) {
+        const state = useStore.getState();
+        for (const m of res.models) {
+          state.addModel({
+            id: m.id,
+            studyId: m.studyId,
+            name: m.name,
+            type: m.type || 'pls',
+            lastModified: 'Just now',
+          });
+        }
+      }
+      onClose();
+    } catch (err: any) {
+      setError(err?.message || 'Failed to import SmartPLS study');
     } finally {
       setIsSubmitting(false);
     }
@@ -72,7 +162,7 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
     <div className="modal-overlay active" style={{ display: 'flex' }} onClick={onClose}>
       <div className="modal" onClick={e => e.stopPropagation()}>
         <div className="modal__header">
-          <h2 className="modal__title">New Study</h2>
+          <h2 className="modal__title">Import / New Study</h2>
           <button className="icon-btn icon-btn--sm" type="button" onClick={onClose}>
             <span className="material-symbols-outlined">close</span>
           </button>
@@ -117,6 +207,33 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
             {error && (
               <div style={{ color: 'var(--color-danger, #ef4444)', fontSize: '12px' }}>{error}</div>
             )}
+
+            <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: '1px solid var(--color-border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)', fontWeight: 500 }}>
+                Or import study
+              </span>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={handleImportStudy}
+                disabled={isSubmitting}
+                style={{
+                  padding: '6px 12px',
+                  fontSize: '12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--color-border-subtle)',
+                  background: 'var(--color-bg-base)',
+                  color: 'var(--color-text-primary)',
+                  cursor: 'pointer',
+                }}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>file_download</span>
+                <span>Import Study</span>
+              </button>
+            </div>
           </div>
           <div className="modal__footer">
             <button className="modal__btn-cancel" type="button" onClick={onClose} disabled={isSubmitting}>Cancel</button>
