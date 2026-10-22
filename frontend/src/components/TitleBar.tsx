@@ -63,63 +63,6 @@ export const TitleBar: React.FC = () => {
     };
   }, []);
 
-  const [isCornerHovered, setIsCornerHovered] = useState(false);
-  const cornerLeaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isFullscreen) return;
-
-      // Top-left corner region (where native traffic lights drop down)
-      const isInCorner = (e.clientX <= 220 && e.clientY <= 52) || (e.clientX <= 280 && e.clientY <= 6);
-      if (isInCorner) {
-        if (cornerLeaveTimer.current) {
-          clearTimeout(cornerLeaveTimer.current);
-          cornerLeaveTimer.current = null;
-        }
-        setIsCornerHovered(true);
-      } else if (e.clientX > 250 || e.clientY > 65) {
-        if (!cornerLeaveTimer.current && isCornerHovered) {
-          cornerLeaveTimer.current = setTimeout(() => {
-            setIsCornerHovered(false);
-            cornerLeaveTimer.current = null;
-          }, 200);
-        }
-      }
-    };
-
-    const handleMouseLeaveDoc = () => {
-      if (!cornerLeaveTimer.current && isCornerHovered) {
-        cornerLeaveTimer.current = setTimeout(() => {
-          setIsCornerHovered(false);
-          cornerLeaveTimer.current = null;
-        }, 220);
-      }
-    };
-
-    window.addEventListener('mousemove', handleMouseMove, { passive: true });
-    document.addEventListener('mouseleave', handleMouseLeaveDoc);
-
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseleave', handleMouseLeaveDoc);
-      if (cornerLeaveTimer.current) {
-        clearTimeout(cornerLeaveTimer.current);
-        cornerLeaveTimer.current = null;
-      }
-    };
-  }, [isFullscreen, isCornerHovered]);
-
-  useEffect(() => {
-    if (!isFullscreen) {
-      if (cornerLeaveTimer.current) {
-        clearTimeout(cornerLeaveTimer.current);
-        cornerLeaveTimer.current = null;
-      }
-      setIsCornerHovered(false);
-    }
-  }, [isFullscreen]);
-
   const [isLicenseActive, setIsLicenseActive] = useState(true);
   const [isLicenseHovered, setIsLicenseHovered] = useState(false);
   const [copiedKey, setCopiedKey] = useState(false);
@@ -151,31 +94,10 @@ export const TitleBar: React.FC = () => {
   return (
     <header className="titlebar window-drag" id="titlebar">
       {/* ─── Left Section: Traffic Lights & Brand ─── */}
-      <div 
-        className={`titlebar__left no-drag ${isCornerHovered ? 'corner-hovered' : ''}`}
-        onMouseEnter={() => {
-          if (isFullscreen) {
-            if (cornerLeaveTimer.current) {
-              clearTimeout(cornerLeaveTimer.current);
-              cornerLeaveTimer.current = null;
-            }
-            setIsCornerHovered(true);
-          }
-        }}
-        onMouseMove={() => {
-          if (isFullscreen) {
-            if (cornerLeaveTimer.current) {
-              clearTimeout(cornerLeaveTimer.current);
-              cornerLeaveTimer.current = null;
-            }
-            setIsCornerHovered(true);
-          }
-        }}
-      >
-        <div 
-          className={`titlebar__traffic-light-space ${isCornerHovered ? 'expanded' : ''}`} 
-          aria-hidden="true" 
-        />
+      <div className="titlebar__left no-drag">
+        {!isFullscreen && (
+          <div className="titlebar__traffic-light-space" aria-hidden="true" />
+        )}
         <div 
           className="brand" 
           role="button" 
