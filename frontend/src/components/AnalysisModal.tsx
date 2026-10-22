@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../utils/api';
+import { Checkbox } from './Checkbox';
 
 export interface AnalysisModalProps {
   isOpen: boolean;
@@ -660,13 +661,12 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({
                 </span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '12px' }}>
-                <input
-                  type="checkbox"
+                <Checkbox
                   id="computeQ2"
                   checked={computeQ2Effects}
-                  onChange={(e) => setComputeQ2Effects(e.target.checked)}
+                  onChange={(checked) => setComputeQ2Effects(checked)}
                 />
-                <label htmlFor="computeQ2" style={{ fontSize: '13px', color: '#334155', cursor: 'pointer' }}>
+                <label htmlFor="computeQ2" style={{ fontSize: '13px', color: 'var(--color-text-primary, #334155)', cursor: 'pointer' }}>
                   Compute relative q² predictive effect sizes for structural paths
                 </label>
               </div>
@@ -722,13 +722,12 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({
 
               {analysisType === 'mediation' && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '12px' }}>
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     id="sobelTest"
                     checked={includeSobel}
-                    onChange={(e) => setIncludeSobel(e.target.checked)}
+                    onChange={(checked) => setIncludeSobel(checked)}
                   />
-                  <label htmlFor="sobelTest" style={{ fontSize: '13px', color: '#334155', cursor: 'pointer' }}>
+                  <label htmlFor="sobelTest" style={{ fontSize: '13px', color: 'var(--color-text-primary, #334155)', cursor: 'pointer' }}>
                     Include Sobel test z-statistic alongside Zhao et al. bootstrapped decision tree
                   </label>
                 </div>
@@ -889,11 +888,10 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
                   {constructs.filter(c => c.id !== hocId).map(c => (
                     <label key={c.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={locIds.includes(c.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) setLocIds([...locIds, c.id]);
+                        onChange={(checked) => {
+                          if (checked) setLocIds([...locIds, c.id]);
                           else setLocIds(locIds.filter(id => id !== c.id));
                         }}
                       />

@@ -2,6 +2,7 @@ import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { useStore } from '../store';
 import { processData, type ParsedDataset, type ParsedVariable } from '../utils/dataset-parser';
 import { EditableCell } from '../components/EditableCell';
+import { Checkbox } from '../components/Checkbox';
 import { api } from '../utils/api';
 import AppSidebar from '../components/AppSidebar';
 import { DataScreeningPanel } from '../components/DataScreeningPanel';
@@ -257,7 +258,12 @@ export const DatasetView: React.FC = () => {
                 <thead>
                   <tr>
                     <th style={{ ...th, width: '40px', padding: '0 12px' }}>
-                      <input type="checkbox" checked={selectedCount === dataset.variables.length} onChange={toggleAllVariables} style={{ cursor: 'pointer', accentColor: 'var(--color-accent)' }} />
+                      <Checkbox
+                        checked={selectedCount === dataset.variables.length}
+                        indeterminate={selectedCount > 0 && selectedCount < dataset.variables.length}
+                        onChange={toggleAllVariables}
+                        ariaLabel="Select all variables"
+                      />
                     </th>
                     <th style={{ ...th, width: '220px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -290,7 +296,11 @@ export const DatasetView: React.FC = () => {
                     return (
                       <tr key={v.name + i} style={{ borderBottom: '1px solid var(--color-border-subtle)', opacity: v.selected ? 1 : 0.45, transition: 'opacity 0.15s' }}>
                         <td style={{ padding: '0 12px', height: '34px' }}>
-                          <input type="checkbox" checked={v.selected} onChange={() => toggleVariableSelection(colIdx)} style={{ cursor: 'pointer', accentColor: 'var(--color-accent)' }} />
+                          <Checkbox
+                            checked={v.selected}
+                            onChange={() => toggleVariableSelection(colIdx)}
+                            ariaLabel={`Select ${v.name}`}
+                          />
                         </td>
                         <td style={{ padding: '0 14px', height: '34px', fontWeight: 500, color: 'var(--color-text-primary)', maxWidth: '220px', overflow: 'hidden' }}>
                           <EditableCell value={v.name} onChange={newName => updateVariableName(colIdx, newName)} />

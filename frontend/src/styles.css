@@ -3955,3 +3955,92 @@ body.is-tab-sliding * {
   text-align: right !important;
   justify-content: flex-end;
 }
+
+/* ─── Modern Minimal Rounded-Square Checkbox ──────────────────────────────── */
+.custom-checkbox-wrapper {
+  position: relative;
+  line-height: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.custom-checkbox-native {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  margin: 0;
+  pointer-events: none;
+}
+
+.custom-checkbox-box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: var(--radius-sm, 4px);
+  border: 1.5px solid var(--color-border, #cbd5e1);
+  background: var(--color-bg-base, #ffffff);
+  color: #ffffff;
+  transition: all var(--transition-fast, 120ms) cubic-bezier(0.4, 0, 0.2, 1);
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+[data-theme="dark"] .custom-checkbox-box {
+  border-color: var(--color-border-subtle, #334155);
+  background: var(--color-bg-raised, #1e293b);
+}
+
+.custom-checkbox-wrapper:hover .custom-checkbox-box:not(.custom-checkbox-checked):not(.custom-checkbox-indeterminate) {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-subtle);
+}
+
+.custom-checkbox-native:focus-visible + .custom-checkbox-box {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-subtle);
+}
+
+.custom-checkbox-box.custom-checkbox-checked,
+.custom-checkbox-box.custom-checkbox-indeterminate {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-accent-contrast, #ffffff);
+  box-shadow: 0 0 0 1px var(--color-accent), 0 2px 5px var(--color-accent-subtle);
+}
+
+.custom-checkbox-wrapper:hover .custom-checkbox-box.custom-checkbox-checked,
+.custom-checkbox-wrapper:hover .custom-checkbox-box.custom-checkbox-indeterminate {
+  background: var(--color-accent-hover, var(--color-accent));
+  border-color: var(--color-accent-hover, var(--color-accent));
+  box-shadow: 0 0 0 3px var(--color-accent-subtle), 0 2px 6px var(--color-accent-subtle);
+}
+
+.custom-checkbox-icon {
+  width: 11px;
+  height: 11px;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  animation: checkboxPop 140ms ease-out forwards;
+}
+
+@keyframes checkboxPop {
+  0% {
+    transform: scale(0.65);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.custom-checkbox-disabled {
+  opacity: 0.45;
+  cursor: not-allowed !important;
+}
+
