@@ -8,6 +8,7 @@ import InputDialog from '../components/InputDialog';
 import { parseDatasetFile } from '../utils/dataset-parser';
 import type { ParsedDataset } from '../utils/dataset-parser';
 import { api } from '../utils/api';
+import AppSidebar from '../components/AppSidebar';
 
 export const formatModelType = (type?: string): string => {
   if (!type) return 'PLS-SEM';
@@ -128,10 +129,7 @@ const Dashboard = () => {
     return sortOrder === 'asc' ? comparison : -comparison;
   });
 
-  // Inline rename state for sidebar workspace, study, and dataset
-  const [editingSidebarWsId, setEditingSidebarWsId] = useState<string | null>(null);
-  const [editSidebarWsName, setEditSidebarWsName] = useState('');
-
+  // Inline rename state for study, dataset, and model
   const [editingStudyId, setEditingStudyId] = useState<string | null>(null);
   const [editStudyName, setEditStudyName] = useState('');
 
@@ -140,13 +138,6 @@ const Dashboard = () => {
 
   const [editingModelId, setEditingModelId] = useState<string | null>(null);
   const [editModelName, setEditModelName] = useState('');
-
-  const commitSidebarWsRename = (id: string) => {
-    if (editSidebarWsName.trim()) {
-      renameWorkspace(id, editSidebarWsName.trim());
-    }
-    setEditingSidebarWsId(null);
-  };
 
   const commitStudyRename = (id: string) => {
     if (editStudyName.trim()) {
@@ -307,13 +298,8 @@ const Dashboard = () => {
         label: 'Rename Workspace',
         icon: 'edit',
         action: () => {
-          if (activeWorkspace && activeWorkspace.id === ws.id) {
-            setEditWorkspaceTitle(ws.name);
-            setIsEditingTitle(true);
-          } else {
-            setEditingSidebarWsId(ws.id);
-            setEditSidebarWsName(ws.name);
-          }
+          setEditWorkspaceTitle(ws.name);
+          setIsEditingTitle(true);
         },
       },
       {
@@ -414,107 +400,7 @@ const Dashboard = () => {
   return (
     <>
       <div className="app-body">
-        
-        <aside className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`} id="sidebar">
-          <div className="sidebar__top">
-            <div className="sidebar-ws-container">
-              <div className="sidebar-header" style={{paddingBottom: '10px', borderBottom: 'none'}}>
-                {isWorkspaceSearchOpen ? <div className="inline-search-wrap"><input autoFocus className="sidebar-inline-search" value={workspaceQuery} onChange={event => setWorkspaceQuery(event.target.value)} onBlur={() => { if (!workspaceQuery) setIsWorkspaceSearchOpen(false); }} placeholder="Filter…" />{workspaceQuery && <button className="inline-search-clear" type="button" aria-label="Clear workspace search" onMouseDown={event => event.preventDefault()} onClick={() => setWorkspaceQuery('')}>×</button>}</div> : <span className="sidebar-header__label">Workspaces</span>}
-                <div className="sidebar-header__actions">
-                  <button className={`icon-btn icon-btn--sm ${isWorkspaceSearchOpen ? 'active' : ''}`} title="Search workspaces" type="button" onClick={() => {
-                    if (isSidebarCollapsed) {
-                      toggleSidebar();
-                      setTimeout(() => setIsWorkspaceSearchOpen(true), 150);
-                    } else {
-                      setIsWorkspaceSearchOpen(open => !open);
-                      if (isWorkspaceSearchOpen) setWorkspaceQuery('');
-                    }
-                  }}>
-                    <span className="material-symbols-outlined">search</span>
-                  </button>
-                  <button className="sidebar-create-folder-btn" title="Create Workspace" type="button" onClick={() => setIsWorkspaceModalOpen(true)}>
-                    <svg fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
-                      <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path>
-                      <line x1="12" x2="12" y1="10" y2="16"></line>
-                      <line x1="9" x2="15" y1="13" y2="13"></line>
-                    </svg>
-                  </button>
-                  <button className="icon-btn icon-btn--sm" id="sidebar-collapse-btn" title={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} type="button" onClick={toggleSidebar}>
-                    <span className="material-symbols-outlined">left_panel_close</span>
-                  </button>
-                </div>
-              </div>
-
-              <div id="sidebar-ws-list" style={{display: 'flex', flexDirection: 'column', gap: '2px'}}>
-                {filteredWorkspaces.map(ws => (
-                  <div 
-                    key={ws.id} 
-                    className={`sidebar-item ${ws.id === activeWorkspaceId ? 'active' : ''}`}
-                    onClick={() => {
-                      if (editingSidebarWsId !== ws.id) {
-                        setActiveWorkspace(ws.id);
-                        openTab({ type: 'workspace', title: ws.name, workspaceId: ws.id });
-                      }
-                    }}
-                    onContextMenu={(e) => openWorkspaceContextMenu(e, ws)}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    <span className="sidebar-item__left" style={{ width: '100%', overflow: 'hidden' }}>
-                      <span className="material-symbols-outlined">folder</span>
-                      {editingSidebarWsId === ws.id ? (
-                        <input
-                          autoFocus
-                          type="text"
-                          className="inline-seamless-rename-input"
-                          value={editSidebarWsName}
-                          size={Math.max(editSidebarWsName.length, 1)}
-                          onChange={(e) => setEditSidebarWsName(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') commitSidebarWsRename(ws.id);
-                            else if (e.key === 'Escape') setEditingSidebarWsId(null);
-                          }}
-                          onBlur={() => commitSidebarWsRename(ws.id)}
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                      ) : (
-                        <span>{ws.name}</span>
-                      )}
-                    </span>
-                  </div>
-                ))}
-                {isWorkspaceSearchOpen && workspaceQuery && filteredWorkspaces.length === 0 && <span className="inline-search-empty">No workspaces found</span>}
-              </div>
-            </div>
-          </div>
-
-          <div className="sidebar__bottom">
-            <button className="sidebar-item" type="button" data-action="archive" onClick={() => openTab({ id: 'tab-archive', type: 'archive', title: 'Archive' })}>
-              <span className="sidebar-item__left">
-                <span className="material-symbols-outlined">inventory_2</span>
-                <span>Archive</span>
-              </span>
-              <span className="sidebar-item__badge">{archivedWorkspaces.length}</span>
-            </button>
-            <button className="sidebar-item" type="button" data-action="docs" onClick={() => openTab({ type: 'docs', title: 'Documentation' })}>
-              <span className="sidebar-item__left">
-                <span className="material-symbols-outlined">menu_book</span>
-                <span>Documentation</span>
-              </span>
-            </button>
-            <button className="sidebar-item" type="button" data-action="samples" onClick={() => openTab({ type: 'samples', title: 'Sample Studies' })}>
-              <span className="sidebar-item__left">
-                <span className="material-symbols-outlined">science</span>
-                <span>Sample Studies</span>
-              </span>
-            </button>
-            <button className="sidebar-item" type="button" data-action="feedback" onClick={() => openTab({ type: 'feedback', title: 'Feedback & Reports' })}>
-              <span className="sidebar-item__left">
-                <span className="material-symbols-outlined">feedback</span>
-                <span className="truncate">Feedback & Reports</span>
-              </span>
-            </button>
-          </div>
-        </aside>
+        <AppSidebar activeNav="workspace" />
 
         <main className="ws-main">
           <div className="ws-inner">

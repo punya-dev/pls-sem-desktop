@@ -292,11 +292,11 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ activeNav }) => {
             className={`sidebar-item ${activeNav === 'samples' ? 'active' : ''}`}
             type="button"
             data-action="samples"
-            onClick={() => openTab({ id: 'tab-samples', type: 'samples', title: 'Sample Projects' })}
+            onClick={() => openTab({ id: 'tab-samples', type: 'samples', title: 'Sample Studies' })}
           >
             <span className="sidebar-item__left">
               <span className="material-symbols-outlined">science</span>
-              <span>Sample Projects</span>
+              <span>Sample Studies</span>
             </span>
           </button>
 

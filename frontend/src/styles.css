@@ -1666,6 +1666,10 @@ body.is-tab-sliding * {
   pointer-events: none;
 }
 
+.sidebar.collapsed .sidebar-item__badge {
+  display: none !important;
+}
+
 .sidebar.collapsed .sidebar-item__left span:not(.material-symbols-outlined) {
   max-width: 0;
   margin: 0;
@@ -2001,8 +2005,6 @@ body.is-tab-sliding * {
 .main-content__inner {
   padding: 28px 32px 32px 32px;
   width: 100%;
-  max-width: 1200px;
-  margin: 0 auto;
   display: flex;
   flex-direction: column;
   min-height: 100%;
@@ -2024,10 +2026,11 @@ body.is-tab-sliding * {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  padding-bottom: 16px;
+  padding-bottom: 12px;
   border-bottom: 1px solid var(--color-border-subtle);
   gap: 16px;
   flex-wrap: wrap;
+  min-height: 44px;
 }
 
 .page-header__text {
@@ -3048,9 +3051,15 @@ body.is-tab-sliding * {
 
     /* ─── Workspace-specific overrides ─── */
     .ws-main { flex: 1; overflow-y: auto; background: var(--color-bg-base); display: flex; flex-direction: column; min-width: 0; }
-    .ws-inner { padding: 24px 32px; width: 100%; display: flex; flex-direction: column; min-height: 100%; }
+    .ws-inner { padding: 28px 32px 32px 32px; width: 100%; display: flex; flex-direction: column; min-height: 100%; box-sizing: border-box; }
 
-    .ws-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--color-border-subtle); }
+    @media (max-width: 900px) {
+      .ws-inner {
+        padding: 20px 20px 24px 20px;
+      }
+    }
+
+    .ws-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--color-border-subtle); min-height: 44px; }
     .ws-header__left { display: flex; align-items: center; gap: 8px; min-width: 0; }
     .ws-header__greeting { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; color: var(--color-text-primary); white-space: nowrap; }
     .ws-header__workspace-pill { display: flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: var(--radius-md); background: var(--color-accent-subtle); cursor: pointer; transition: background-color var(--transition-fast); }
