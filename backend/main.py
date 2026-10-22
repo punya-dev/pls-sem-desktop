@@ -83,7 +83,6 @@ from engine.pls.predict import run_pls_predict
 from reporting.tables import TABLE_EXTRACTORS, export_table_to_format
 from reporting.narrative import generate_narrative_report
 from reporting.pdf_export import generate_pdf_report
-from fastapi.responses import Response
 
 
 

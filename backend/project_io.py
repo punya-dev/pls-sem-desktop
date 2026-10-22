@@ -161,10 +161,13 @@ def save_data(path: str, rows: list, columns: list, dtypes: list, dataset_name: 
             return "REAL"
         return "TEXT"
 
-    col_defs = ", ".join(f'"{c}" {sql_type(t)}' for c, t in zip(columns, dtypes))
+    def escape_col(c: Any) -> str:
+        return '"' + str(c).replace('"', '""') + '"'
+
+    col_defs = ", ".join(f"{escape_col(c)} {sql_type(t)}" for c, t in zip(columns, dtypes))
     cur.execute(f"CREATE TABLE raw_data ({col_defs})")
     placeholders = ", ".join("?" for _ in columns)
-    col_names = ", ".join(f'"{c}"' for c in columns)
+    col_names = ", ".join(escape_col(c) for c in columns)
     cur.executemany(f"INSERT INTO raw_data ({col_names}) VALUES ({placeholders})", rows)
 
     # Save to multi-dataset table

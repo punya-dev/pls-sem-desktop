@@ -138,12 +138,15 @@ def save_dataset(
             return "REAL"
         return "TEXT"
 
-    col_defs = ", ".join(f'"{c}" {sql_type(c)}' for c in df.columns)
+    def escape_col(c: Any) -> str:
+        return '"' + str(c).replace('"', '""') + '"'
+
+    col_defs = ", ".join(f"{escape_col(c)} {sql_type(c)}" for c in df.columns)
     cur.execute(f"CREATE TABLE {table_name} ({col_defs})")
 
     # Insert rows
     placeholders = ", ".join("?" for _ in df.columns)
-    col_names_quoted = ", ".join(f'"{c}"' for c in df.columns)
+    col_names_quoted = ", ".join(escape_col(c) for c in df.columns)
     clean_records = df.astype(object).where(pd.notnull(df), None).values.tolist()
     cur.executemany(f"INSERT INTO {table_name} ({col_names_quoted}) VALUES ({placeholders})", clean_records)
 

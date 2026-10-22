@@ -1,6 +1,6 @@
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 import settings_io
 def create_workspace(folder_path: str, name: str):
     folder_path = os.path.expanduser(folder_path)
@@ -9,7 +9,7 @@ def create_workspace(folder_path: str, name: str):
 
     os.makedirs(folder_path)
 
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     metadata = {
         "name": name,
         "created_at": now,
@@ -50,7 +50,7 @@ def add_project_to_workspace(folder_path: str, project_filename: str, project_na
 
     if not any(p.get("path") == project_filename for p in ws["projects"]):
         ws["projects"].append({"path": project_filename, "name": project_name})
-        ws["modified_at"] = datetime.utcnow().isoformat()
+        ws["modified_at"] = datetime.now(timezone.utc).isoformat()
 
         with open(os.path.join(folder_path, "workspace.json"), "w") as f:
             json.dump(ws, f, indent=2)
@@ -65,7 +65,7 @@ def remove_project_from_workspace(folder_path: str, project_filename: str):
         raise FileNotFoundError("Not a valid workspace")
 
     ws["projects"] = [p for p in ws["projects"] if p["path"] != project_filename]
-    ws["modified_at"] = datetime.utcnow().isoformat()
+    ws["modified_at"] = datetime.now(timezone.utc).isoformat()
 
     with open(os.path.join(folder_path, "workspace.json"), "w") as f:
         json.dump(ws, f, indent=2)
@@ -127,7 +127,7 @@ def duplicate_workspace(source_folder_path: str, new_name: str):
     if os.path.exists(ws_file):
         with open(ws_file, "r") as f:
             data = json.load(f)
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         data["name"] = new_name
         data["created_at"] = now
         data["modified_at"] = now
