@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
-import { useStore } from '../store';
+import { useStore, getStudyDatasets } from '../store';
 import { processData, type ParsedDataset, type ParsedVariable } from '../utils/dataset-parser';
 import { EditableCell } from '../components/EditableCell';
 import { Checkbox } from '../components/Checkbox';
@@ -28,8 +28,15 @@ export const DatasetView: React.FC = () => {
   const activeStudy = studies.find(s => s.id === currentStudyId);
   const studyModels = useMemo(() => models.filter(m => m.studyId === currentStudyId), [models, currentStudyId]);
 
-  const initialDataset = currentStudyId ? datasetsByStudy[currentStudyId] : null;
-  const [dataset, setDataset] = useState<ParsedDataset | null>(initialDataset);
+  const studyDatasets = useMemo(() => getStudyDatasets(datasetsByStudy, currentStudyId), [datasetsByStudy, currentStudyId]);
+  const activeDataset = useMemo(() => {
+    if (activeTab?.datasetId) {
+      return studyDatasets.find(d => d.id === activeTab.datasetId) || studyDatasets[0] || null;
+    }
+    return studyDatasets[0] || null;
+  }, [studyDatasets, activeTab?.datasetId]);
+
+  const [dataset, setDataset] = useState<ParsedDataset | null>(activeDataset);
   const [currentView, setCurrentView] = useState<'variables' | 'data' | 'screening'>('variables');
   const [searchFilter, setSearchFilter] = useState('');
   const [isVariableSearchOpen, setIsVariableSearchOpen] = useState(false);
@@ -38,8 +45,8 @@ export const DatasetView: React.FC = () => {
   const [saveToast, setSaveToast] = useState<string | null>(null);
 
   useEffect(() => {
-    if (initialDataset) setDataset(initialDataset);
-  }, [initialDataset]);
+    if (activeDataset) setDataset(activeDataset);
+  }, [activeDataset]);
 
   const detectedMarker = useMemo(() => {
     if (!dataset?.rows) return '';
@@ -61,7 +68,7 @@ export const DatasetView: React.FC = () => {
       touchStudy(currentStudyId);
       if (activeStudy?.path) {
         const headers = updated.variables.map(v => v.name);
-        api.saveProjectDataJson(activeStudy.path, updated.filename, headers, updated.rows)
+        api.saveProjectDataJson(activeStudy.path, updated.filename, headers, updated.rows, updated.id)
           .catch(err => console.warn('Failed auto-saving dataset:', err));
       }
     }

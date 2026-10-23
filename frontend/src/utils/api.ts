@@ -24,6 +24,7 @@ export interface RecentWorkspace {
 export interface ProjectResponse {
   status?: string;
   project_path?: string;
+  project_name?: string;
   workspace?: WorkspaceMetadata;
   error?: string;
 }
@@ -49,6 +50,8 @@ export interface ModelSpec {
   constructs: ConstructSpec[];
   indicators: IndicatorSpec[];
   paths: PathSpec[];
+  dataset_id?: string;
+  [key: string]: any;
 }
 
 export interface ValidationResponse {
@@ -206,14 +209,16 @@ export const api = {
     columns: string[],
     rows: any[][],
     missingValue?: string,
-    treatment?: string
-  ): Promise<{ status?: string; row_count?: number; dataset_name?: string; error?: string }> {
+    treatment?: string,
+    datasetId?: string
+  ): Promise<{ status?: string; row_count?: number; dataset_name?: string; dataset_id?: string; error?: string }> {
     try {
       const res = await fetch(`${API_BASE}/project/save-data-json`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           path,
+          dataset_id: datasetId,
           dataset_name: datasetName,
           columns,
           rows,
@@ -242,19 +247,31 @@ export const api = {
     }
   },
 
-  async loadProjectData(path: string): Promise<{ columns?: string[]; rows?: any[][]; dataset_name?: string; error?: string }> {
+  async listProjectDatasets(path: string): Promise<{ datasets?: Array<{ id: string; name: string; n_rows: number; n_cols: number; hash: string }>; error?: string }> {
     try {
-      const res = await fetch(`${API_BASE}/project/load-data?path=${encodeURIComponent(path)}`);
+      const res = await fetch(`${API_BASE}/project/datasets?path=${encodeURIComponent(path)}`);
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to list project datasets' };
+    }
+  },
+
+  async loadProjectData(path: string, datasetId?: string): Promise<{ id?: string; columns?: string[]; rows?: any[][]; dataset_name?: string; error?: string }> {
+    try {
+      const query = datasetId ? `&dataset_id=${encodeURIComponent(datasetId)}` : '';
+      const res = await fetch(`${API_BASE}/project/load-data?path=${encodeURIComponent(path)}${query}`);
       return await res.json();
     } catch (err: any) {
       return { error: err?.message || 'Failed to load project data' };
     }
   },
 
-  async deleteProjectData(path: string): Promise<{ status?: string; error?: string }> {
+  async deleteProjectData(path: string, datasetId?: string): Promise<{ status?: string; error?: string }> {
     try {
-      const res = await fetch(`${API_BASE}/project/delete-data?path=${encodeURIComponent(path)}`, {
-        method: 'POST'
+      const res = await fetch(`${API_BASE}/project/delete-data`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path, dataset_id: datasetId })
       });
       return await res.json();
     } catch (err: any) {
@@ -308,9 +325,14 @@ export const api = {
           model_id: modelId,
         }),
       });
-      return await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const errorMsg = data?.error || data?.detail?.[0]?.msg || (typeof data?.detail === 'string' ? data.detail : null) || `Server error (${res.status})`;
+        return { error: errorMsg };
+      }
+      return data;
     } catch (err: any) {
-      return { error: err?.message || 'Failed to save model' };
+      return { error: err?.message || 'Cannot connect to backend server (port 8721)' };
     }
   },
 
@@ -702,7 +724,8 @@ export const api = {
   },
 
   async detectFolder(folderPath: string): Promise<{
-    kind?: 'cspls_workspace' | 'smartpls_workspace' | 'smartpls_project' | 'unknown' | 'file' | 'not_found' | 'error';
+    kind?: 'cspls_workspace' | 'cspls_workspace_zip' | 'cspls_project' | 'smartpls_workspace' | 'smartpls_project' | 'unknown' | 'file' | 'not_found' | 'error';
+    valid?: boolean;
     name?: string;
     path?: string;
     is_zip?: boolean;
@@ -751,16 +774,105 @@ export const api = {
     }
   },
 
-  async pickFileOrFolder(): Promise<{ path?: string | null; cancelled?: boolean; fallback?: boolean; error?: string }> {
+  async exportProjectZip(projectPath: string, outZipPath: string): Promise<{ status?: string; zip_path?: string; error?: string }> {
     try {
-      const res = await fetch(`${API_BASE}/system/pick_file_or_folder`, { method: 'POST' });
+      const res = await fetch(`${API_BASE}/project/export-zip`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: projectPath, out_path: outZipPath, include_results: true }),
+      });
       return await res.json();
     } catch (err: any) {
-      return { error: err?.message || 'Failed to pick file or folder' };
+      return { error: err?.message || 'Failed to export project archive' };
     }
   },
 
+  async exportWorkspaceZip(workspacePath: string, outZipPath: string): Promise<{ status?: string; zip_path?: string; error?: string }> {
+    try {
+      const res = await fetch(`${API_BASE}/workspace/export-zip`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspace_path: workspacePath, out_path: outZipPath }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to export workspace archive' };
+    }
+  },
 
+  async importWorkspaceZip(zipPath: string, targetParentFolder?: string): Promise<{
+    status?: string;
+    path?: string;
+    workspace?: {
+      id: string;
+      name: string;
+      path: string;
+      projects?: any[];
+    };
+    studies?: any[];
+    models?: any[];
+    error?: string;
+  }> {
+    try {
+      const res = await fetch(`${API_BASE}/workspace/import-zip`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          zip_path: zipPath,
+          target_parent_folder: targetParentFolder || undefined,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to import workspace archive' };
+    }
+  },
+
+  async importProjectZip(zipPath: string, workspaceDir: string, onConflict: string = 'rename'): Promise<{
+    status?: string;
+    project_path?: string;
+    studies?: any[];
+    models?: any[];
+    error?: string;
+  }> {
+    try {
+      const res = await fetch(`${API_BASE}/project/import-zip`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          zip_path: zipPath,
+          workspace_dir: workspaceDir,
+          on_conflict: onConflict,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to import project archive' };
+    }
+  },
+
+  async importProjectFile(filePath: string, workspaceDir: string, onConflict: string = 'rename'): Promise<{
+    status?: string;
+    project_path?: string;
+    studies?: any[];
+    models?: any[];
+    error?: string;
+  }> {
+    try {
+      const res = await fetch(`${API_BASE}/project/import-file`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file_path: filePath,
+          workspace_dir: workspaceDir,
+          on_conflict: onConflict,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to import project file' };
+    }
+  },
 
   // --- Phase 3-6 Advanced PLS-SEM Analyses ---
   async runBlindfolding(data: {

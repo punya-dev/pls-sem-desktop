@@ -62,17 +62,22 @@ class TestSmartPLSImporter(unittest.TestCase):
         try:
             res = import_smartpls_folder(self.sample_dir, target_workspace_folder=temp_ws, workspace_name="Test Import")
             self.assertEqual(res["status"], "success")
-            self.assertEqual(len(res["studies"]), 3)
+            self.assertEqual(len(res["studies"]), 1)
             self.assertEqual(len(res["models"]), 8)
 
-            # Find Complete data study
-            comp_study = next((s for s in res["studies"] if "Complete_data.pls" in s["path"]), None)
+            # Single unified study contains all datasets
+            comp_study = res["studies"][0]
             self.assertIsNotNone(comp_study)
+            self.assertEqual(comp_study["datasets_count"], 3)
 
             import sqlite3
             conn = sqlite3.connect(comp_study["path"])
             df = pd.read_sql_query("SELECT * FROM raw_data", conn)
             self.assertEqual(len(df), 344)
+
+            # Check that datasets table contains all 3 datasets
+            datasets_df = pd.read_sql_query("SELECT * FROM datasets", conn)
+            self.assertEqual(len(datasets_df), 3)
 
             # Load the first model spec and fit
             cur = conn.cursor()
@@ -108,8 +113,9 @@ class TestSmartPLSImporter(unittest.TestCase):
 
             res = import_smartpls_folder(temp_zip, target_workspace_folder=temp_ws, workspace_name="Zip Test WS")
             self.assertEqual(res["status"], "success")
-            self.assertEqual(len(res["studies"]), 3)
+            self.assertEqual(len(res["studies"]), 1)
             self.assertEqual(len(res["models"]), 8)
+            self.assertEqual(res["studies"][0]["datasets_count"], 3)
         finally:
             if os.path.exists(temp_zip):
                 os.remove(temp_zip)
@@ -121,14 +127,14 @@ class TestSmartPLSImporter(unittest.TestCase):
         self.assertEqual(res_proj["kind"], "smartpls_project")
         self.assertEqual(res_proj["models_count"], 8)
 
-        # 2. CSPLS Workspace
+        # 2. StatSEM Workspace
         temp_cspls_ws = tempfile.mkdtemp(prefix="cspls_ws_test_")
         try:
             with open(os.path.join(temp_cspls_ws, "workspace.json"), "w") as f:
-                json.dump({"name": "Test CSPLS WS", "projects": []}, f)
+                json.dump({"name": "Test StatSEM WS", "projects": []}, f)
             res_cspls = detect_folder_type(temp_cspls_ws)
             self.assertEqual(res_cspls["kind"], "cspls_workspace")
-            self.assertEqual(res_cspls["name"], "Test CSPLS WS")
+            self.assertEqual(res_cspls["name"], "Test StatSEM WS")
         finally:
             shutil.rmtree(temp_cspls_ws, ignore_errors=True)
 

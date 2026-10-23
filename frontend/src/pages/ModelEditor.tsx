@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useStore } from '../store';
-import { initModelCanvas, exportModelSpec, getModelCanvasState, loadModelCanvasState, setCanvasResults, renderModelCanvas, clearModelCanvas, resetModelStyles } from '../utils/model-canvas';
+import { useStore, getStudyDatasets } from '../store';
+import { initModelCanvas, exportModelSpec, getModelCanvasState, loadModelCanvasState, setCanvasResults, renderModelCanvas, clearModelCanvas, resetModelStyles, setCanvasDatasetColumns } from '../utils/model-canvas';
 import { BootstrapModal } from '../components/BootstrapModal';
 import { AnalysisModal } from '../components/AnalysisModal';
 import { AdvancedResultPanels } from '../components/AdvancedResultPanels';
@@ -124,7 +124,28 @@ function isModelTopologyEqual(specA: any, specB: any): boolean {
 
 const ModelEditor = () => {
   const navigate = useNavigate();
-  const { workspaces, activeWorkspaceId, studies, activeStudyId, activeModelId, models, datasetsByStudy, setStudyDataset, touchStudy, openTab, addStudySnapshot, theme, settings, tabs, activeTabId } = useStore();
+  const {
+    workspaces,
+    activeWorkspaceId,
+    studies,
+    activeStudyId,
+    activeModelId,
+    models,
+    datasetsByStudy,
+    setStudyDataset,
+    addStudyDataset,
+    setStudyDatasets,
+    setModelDatasetId,
+    lastUsedDatasetByStudy,
+    setStudyLastDatasetId,
+    touchStudy,
+    openTab,
+    addStudySnapshot,
+    theme,
+    settings,
+    tabs,
+    activeTabId,
+  } = useStore();
   
   const currentTab = tabs.find(t => t.id === activeTabId);
   const effectiveModelId = currentTab?.modelId || activeModelId;
@@ -134,12 +155,42 @@ const ModelEditor = () => {
   const activeModel = models.find(model => model.id === effectiveModelId);
   const isCanvasLoadingRef = useRef(true);
 
+  const studyDatasets = useMemo(
+    () => getStudyDatasets(datasetsByStudy, effectiveStudyId || ''),
+    [datasetsByStudy, effectiveStudyId]
+  );
+
   useEffect(() => {
     renderModelCanvas();
   }, [theme, settings?.theme, settings?.darkVariant]);
 
   const [currentView, setCurrentView] = useState<'model' | 'results'>('model');
-  const [activeDataset, setActiveDataset] = useState<ParsedDataset | null>(() => activeStudyId ? datasetsByStudy[activeStudyId] ?? null : null);
+  const [activeDataset, setActiveDataset] = useState<ParsedDataset | null>(() => {
+    if (!effectiveStudyId) return null;
+    const list = getStudyDatasets(datasetsByStudy, effectiveStudyId || '');
+    if (activeModel?.datasetId) {
+      const found = list.find(d => d.id === activeModel.datasetId);
+      if (found) return found;
+    }
+    const lastUsedDsId = lastUsedDatasetByStudy[effectiveStudyId]
+      || models.find(m => m.studyId === effectiveStudyId && m.datasetId)?.datasetId;
+    if (lastUsedDsId) {
+      const found = list.find(d => d.id === lastUsedDsId);
+      if (found) return found;
+    }
+    if (list.length === 1) return list[0];
+    return null;
+  });
+
+  const activeDatasetRef = useRef<ParsedDataset | null>(activeDataset);
+  useEffect(() => {
+    activeDatasetRef.current = activeDataset;
+  }, [activeDataset]);
+
+  const [isDatasetMenuOpen, setIsDatasetMenuOpen] = useState(false);
+  const datasetDropdownRef = useRef<HTMLDivElement>(null);
+  const datasetButtonRef = useRef<HTMLButtonElement>(null);
+
   const [isImporting, setIsImporting] = useState(false);
   const [isBootstrapModalOpen, setIsBootstrapModalOpen] = useState(false);
   const [isAnalysisModalOpen, setIsAnalysisModalOpen] = useState(false);
@@ -163,14 +214,22 @@ const ModelEditor = () => {
       if (calcDropdownRef.current && !calcDropdownRef.current.contains(e.target as Node)) {
         setIsCalcMenuOpen(false);
       }
+      if (
+        datasetDropdownRef.current &&
+        !datasetDropdownRef.current.contains(e.target as Node) &&
+        datasetButtonRef.current &&
+        !datasetButtonRef.current.contains(e.target as Node)
+      ) {
+        setIsDatasetMenuOpen(false);
+      }
     };
-    if (isCalcMenuOpen) {
+    if (isCalcMenuOpen || isDatasetMenuOpen) {
       document.addEventListener('mousedown', handleClickOutside);
     }
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [isCalcMenuOpen]);
+  }, [isCalcMenuOpen, isDatasetMenuOpen]);
 
   useEffect(() => {
     // Default to collapsed sidebar in canvas/results page to maximize space
@@ -190,6 +249,7 @@ const ModelEditor = () => {
   const [activeText, setActiveText] = useState<string>('#1e293b');
 
   const [autoSaveStatus, setAutoSaveStatus] = useState<'saved' | 'saving' | 'error' | null>('saved');
+  const [autoSaveError, setAutoSaveError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveToast, setSaveToast] = useState<string | null>(null);
   const [isValidating, setIsValidating] = useState(false);
@@ -222,6 +282,11 @@ const ModelEditor = () => {
   const [lastCalculatedModel, setLastCalculatedModel] = useState<{ spec: any; layout: any } | null>(null);
   const lastCalculatedModelRef = useRef<{ spec: any; layout: any } | null>(null);
 
+  // Live Auto-Recalculate After First Calculation
+  const [hasCalculatedOnce, setHasCalculatedOnce] = useState(false);
+  const hasCalculatedOnceRef = useRef(false);
+  const isAutoCalculatingRef = useRef(false);
+
   // Snapshot modal state
   const [isSnapshotModalOpen, setIsSnapshotModalOpen] = useState(false);
   const [snapshotName, setSnapshotName] = useState('');
@@ -247,36 +312,140 @@ const ModelEditor = () => {
 
 
   useEffect(() => {
-    if (activeStudyId && datasetsByStudy[activeStudyId]) {
-      const ds = datasetsByStudy[activeStudyId];
-      setActiveDataset(ds);
-      // If dataset exists in store, ensure it is synced to the SQLite project file
-      if (activeStudy?.path && ds.rows && ds.rows.length > 0) {
-        api.loadProjectData(activeStudy.path).then((dataRes) => {
-          if (!dataRes || !Array.isArray(dataRes.rows) || dataRes.rows.length === 0) {
-            const headers = ds.variables.map(v => v.name);
-            api.saveProjectDataJson(activeStudy.path, ds.filename || 'dataset', headers, ds.rows).catch(console.warn);
-          }
-        }).catch(console.warn);
-      }
-    } else if (activeStudyId && activeStudy?.path) {
-      // Try to load dataset from project file if not in store
-      api.loadProjectData(activeStudy.path).then((dataRes) => {
-        if (dataRes && Array.isArray(dataRes.columns) && Array.isArray(dataRes.rows) && dataRes.rows.length > 0) {
-          const datasetName = dataRes.dataset_name || `${activeStudy.name} Data`;
-          const parsed = processData(datasetName, dataRes.columns, dataRes.rows);
-          setStudyDataset(activeStudyId, parsed);
-          setActiveDataset(parsed);
-        } else {
-          setActiveDataset(null);
+    if (!effectiveStudyId) {
+      setActiveDataset(null);
+      activeDatasetRef.current = null;
+      return;
+    }
+
+    const currentDatasets = getStudyDatasets(datasetsByStudy, effectiveStudyId || '');
+
+    if (currentDatasets.length > 0) {
+      // 1. If model has an assigned datasetId, use it
+      if (activeModel?.datasetId) {
+        const found = currentDatasets.find(d => d.id === activeModel.datasetId);
+        if (found) {
+          setActiveDataset(found);
+          activeDatasetRef.current = found;
+          return;
         }
-      }).catch(() => {
-        setActiveDataset(null);
-      });
+      }
+
+      // 2. If study has a last-used dataset or any model in this study used a dataset, or only 1 dataset, remember and use it!
+      const lastUsedDsId = lastUsedDatasetByStudy[effectiveStudyId]
+        || models.find(m => m.studyId === effectiveStudyId && m.datasetId)?.datasetId;
+      const fallbackDs = (lastUsedDsId && currentDatasets.find(d => d.id === lastUsedDsId))
+        || (currentDatasets.length === 1 ? currentDatasets[0] : null);
+
+      if (fallbackDs) {
+        setActiveDataset(fallbackDs);
+        activeDatasetRef.current = fallbackDs;
+        if (effectiveModelId && fallbackDs.id) {
+          setModelDatasetId(effectiveModelId, fallbackDs.id);
+        }
+        return;
+      }
+
+      // 3. Otherwise (multiple datasets and none chosen yet for this study), show picker
+      setActiveDataset(null);
+      activeDatasetRef.current = null;
+      return;
+    }
+
+    // If store has no datasets for this study yet, try to load from backend SQLite
+    if (activeStudy?.path) {
+      api.listProjectDatasets(activeStudy.path).then(async (res) => {
+        if (res && Array.isArray(res.datasets) && res.datasets.length > 0) {
+          const loaded: ParsedDataset[] = [];
+          for (const summary of res.datasets) {
+            try {
+              const dataRes = await api.loadProjectData(activeStudy.path, summary.id);
+              if (dataRes && Array.isArray(dataRes.columns) && Array.isArray(dataRes.rows)) {
+                const parsed = processData(dataRes.dataset_name || summary.name || 'Dataset', dataRes.columns, dataRes.rows);
+                parsed.id = summary.id;
+                loaded.push(parsed);
+              }
+            } catch (err) {
+              console.warn('Failed loading dataset item:', summary.id, err);
+            }
+          }
+          if (loaded.length > 0) {
+            setStudyDatasets(effectiveStudyId, loaded);
+            const targetDsId = activeModel?.datasetId
+              || lastUsedDatasetByStudy[effectiveStudyId]
+              || models.find(m => m.studyId === effectiveStudyId && m.datasetId)?.datasetId;
+            const found = (targetDsId && loaded.find(d => d.id === targetDsId))
+              || (loaded.length === 1 ? loaded[0] : null);
+            if (found) {
+              setActiveDataset(found);
+              activeDatasetRef.current = found;
+              if (effectiveModelId && found.id) {
+                setModelDatasetId(effectiveModelId, found.id);
+              }
+            } else {
+              setActiveDataset(null);
+              activeDatasetRef.current = null;
+            }
+          }
+        } else {
+          // Fallback to legacy single loadProjectData
+          api.loadProjectData(activeStudy.path).then((dataRes) => {
+            if (dataRes && Array.isArray(dataRes.columns) && Array.isArray(dataRes.rows) && dataRes.rows.length > 0) {
+              const datasetName = dataRes.dataset_name || `${activeStudy.name} Data`;
+              const parsed = processData(datasetName, dataRes.columns, dataRes.rows);
+              parsed.id = (dataRes as any).dataset_id || dataRes.id || `ds_${Date.now()}`;
+              setStudyDatasets(effectiveStudyId, [parsed]);
+              setActiveDataset(parsed);
+              activeDatasetRef.current = parsed;
+              if (effectiveModelId && parsed.id) {
+                setModelDatasetId(effectiveModelId, parsed.id);
+              }
+            } else {
+              setActiveDataset(null);
+              activeDatasetRef.current = null;
+            }
+          }).catch(() => {
+            setActiveDataset(null);
+            activeDatasetRef.current = null;
+          });
+        }
+      }).catch(console.warn);
     } else {
       setActiveDataset(null);
+      activeDatasetRef.current = null;
     }
-  }, [activeStudyId, datasetsByStudy, activeStudy?.path, activeStudy?.name, setStudyDataset]);
+  }, [effectiveStudyId, activeModel?.datasetId, activeStudy?.path, datasetsByStudy, lastUsedDatasetByStudy]);
+
+  useEffect(() => {
+    const cols = activeDataset?.variables?.map(v => v.name) || [];
+    setCanvasDatasetColumns(cols);
+  }, [activeDataset]);
+
+  const handleSelectDataset = async (dataset: ParsedDataset) => {
+    setActiveDataset(dataset);
+    activeDatasetRef.current = dataset;
+    if (effectiveModelId && dataset.id) {
+      setModelDatasetId(effectiveModelId, dataset.id);
+    }
+    if (effectiveStudyId && dataset.id) {
+      setStudyLastDatasetId(effectiveStudyId, dataset.id);
+    }
+    const cols = dataset.variables.map(v => v.name);
+    setCanvasDatasetColumns(cols);
+
+    // Save model spec with dataset_id directly to disk immediately!
+    if (activeStudy?.path) {
+      try {
+        const spec = exportModelSpec();
+        spec.dataset_id = dataset.id;
+        const layout = getModelCanvasState();
+        await api.saveProjectModel(activeStudy.path, spec, layout, effectiveModelId || undefined);
+        setAutoSaveStatus('saved');
+      } catch (err) {
+        console.warn('Failed to save dataset_id with model:', err);
+      }
+    }
+  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -285,11 +454,12 @@ const ModelEditor = () => {
       setIsImporting(true);
       const parsed = await parseDatasetFile(file);
       await handleImportComplete(parsed);
-      if (activeStudyId) {
+      if (effectiveStudyId) {
         openTab({
           type: 'dataset',
           title: parsed.filename,
-          studyId: activeStudyId,
+          studyId: effectiveStudyId,
+          datasetId: parsed.id,
           workspaceId: activeWorkspaceId,
         });
       }
@@ -302,19 +472,35 @@ const ModelEditor = () => {
   };
 
   const handleImportComplete = async (dataset: ParsedDataset) => {
-    setActiveDataset(dataset);
-    if (activeStudyId) {
-      setStudyDataset(activeStudyId, dataset);
-      touchStudy(activeStudyId);
+    const dsId = dataset.id || `ds_${Date.now()}`;
+    const newDs = { ...dataset, id: dsId };
+    setActiveDataset(newDs);
+    activeDatasetRef.current = newDs;
+    if (effectiveStudyId) {
+      addStudyDataset(effectiveStudyId, newDs);
+      setStudyLastDatasetId(effectiveStudyId, dsId);
+      touchStudy(effectiveStudyId);
+      if (effectiveModelId) {
+        setModelDatasetId(effectiveModelId, dsId);
+      }
       if (activeStudy?.path) {
         try {
-          const headers = dataset.variables.map(v => v.name);
-          await api.saveProjectDataJson(activeStudy.path, dataset.filename, headers, dataset.rows);
+          const headers = newDs.variables.map(v => v.name);
+          await api.saveProjectDataJson(activeStudy.path, newDs.filename, headers, newDs.rows, undefined, undefined, dsId);
+          // Also save model spec with dataset_id
+          const spec = exportModelSpec();
+          spec.dataset_id = dsId;
+          const layout = getModelCanvasState();
+          await api.saveProjectModel(activeStudy.path, spec, layout, effectiveModelId || undefined);
         } catch (err) {
           console.warn('Failed to save dataset to project in ModelEditor:', err);
         }
       }
     }
+    const cols = newDs.variables.map(v => v.name);
+    setCanvasDatasetColumns(cols);
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(performAutoSave, 300);
   };
 
   const visibleVariables = (activeDataset?.variables ?? []).filter(variable =>
@@ -411,16 +597,70 @@ const ModelEditor = () => {
     try {
       setAutoSaveStatus('saving');
       const spec = exportModelSpec();
+      const currentDs = activeDatasetRef.current || activeDataset;
+      if (currentDs?.id) {
+        spec.dataset_id = currentDs.id;
+      }
       const layout = getModelCanvasState();
       const res = await api.saveProjectModel(activeStudy.path, spec, layout, effectiveModelId || undefined);
       if (res.error) {
+        console.warn('Auto-save failed:', res.error);
+        setAutoSaveError(res.error);
         setAutoSaveStatus('error');
       } else {
+        setAutoSaveError(null);
         setAutoSaveStatus('saved');
+        if (hasCalculatedOnceRef.current) {
+          performSilentRecalculate();
+        }
       }
     } catch (err: any) {
       console.warn('Auto-save error:', err);
+      setAutoSaveError(err?.message || 'Unknown save error');
       setAutoSaveStatus('error');
+    }
+  };
+
+  const performSilentRecalculate = async () => {
+    if (!hasCalculatedOnceRef.current || isAutoCalculatingRef.current || !activeStudy?.path) return;
+    try {
+      isAutoCalculatingRef.current = true;
+      const spec = exportModelSpec();
+      const currentDs = activeDatasetRef.current || activeDataset;
+      if (currentDs?.id) {
+        spec.dataset_id = currentDs.id;
+      }
+      const layout = getModelCanvasState();
+      const datasetHeaders = currentDs?.variables?.map(v => v.name);
+
+      // Validate quietly - if model is currently invalid/incomplete while editing, skip gracefully
+      const valRes = await api.validateModel(spec, activeStudy.path, datasetHeaders);
+      if (!valRes.is_valid) {
+        setIsModelOutdated(true);
+        return;
+      }
+
+      const runRes = await api.runPlsModel(activeStudy.path, spec, {
+        columns: datasetHeaders,
+        rows: activeDataset?.rows,
+        dataset_name: activeDataset?.filename,
+        model_id: effectiveModelId || undefined,
+        diagram_layout: layout,
+      });
+
+      if (runRes && runRes.results) {
+        setPlsResults(runRes.results);
+        plsResultsRef.current = runRes.results;
+        setCanvasResults(runRes.results);
+        const calculatedSnapshot = { spec, layout };
+        setLastCalculatedModel(calculatedSnapshot);
+        lastCalculatedModelRef.current = calculatedSnapshot;
+        setIsModelOutdated(false);
+      }
+    } catch (err) {
+      console.debug('Silent recalculate skipped:', err);
+    } finally {
+      isAutoCalculatingRef.current = false;
     }
   };
 
@@ -490,6 +730,9 @@ const ModelEditor = () => {
     try {
       setIsCalculating(true);
       const spec = exportModelSpec();
+      if (activeDataset?.id) {
+        spec.dataset_id = activeDataset.id;
+      }
       const layout = getModelCanvasState();
 
       // Ensure dataset is saved to project file if activeDataset is present
@@ -500,7 +743,10 @@ const ModelEditor = () => {
             activeStudy.path,
             activeDataset.filename || 'dataset',
             datasetHeaders || [],
-            activeDataset.rows
+            activeDataset.rows,
+            undefined,
+            undefined,
+            activeDataset.id
           );
         } catch (err) {
           console.warn('Failed auto-saving active dataset before calculate:', err);
@@ -538,6 +784,8 @@ const ModelEditor = () => {
         setLastCalculatedModel(calculatedSnapshot);
         lastCalculatedModelRef.current = calculatedSnapshot;
         setIsModelOutdated(false);
+        setHasCalculatedOnce(true);
+        hasCalculatedOnceRef.current = true;
       }
 
       setValidationSuccessToast(`PLS-SEM Calculation Complete! Converged in ${runRes.results?.iterations || 0} iterations`);
@@ -557,6 +805,8 @@ const ModelEditor = () => {
         if (res && res.results) {
           setPlsResults(res.results);
           plsResultsRef.current = res.results;
+          setHasCalculatedOnce(true);
+          hasCalculatedOnceRef.current = true;
           const calculatedSpec = res.spec || exportModelSpec();
           const calculatedLayout = res.diagram_layout || getModelCanvasState();
           const calculatedSnapshot = { spec: calculatedSpec, layout: calculatedLayout };
@@ -568,8 +818,8 @@ const ModelEditor = () => {
             try {
               const currentSpec = exportModelSpec();
               if (!isModelTopologyEqual(currentSpec, calculatedSpec)) {
-                setCanvasResults(null);
                 setIsModelOutdated(true);
+                setCanvasResults(res.results);
               } else {
                 setCanvasResults(res.results);
                 setIsModelOutdated(false);
@@ -588,6 +838,8 @@ const ModelEditor = () => {
             (viewSlider as HTMLElement).style.display = 'flex';
           }
         } else {
+          setHasCalculatedOnce(false);
+          hasCalculatedOnceRef.current = false;
           setPlsResults(null);
           plsResultsRef.current = null;
           setCanvasResults(null);
@@ -596,6 +848,8 @@ const ModelEditor = () => {
           setIsModelOutdated(false);
         }
       }).catch(() => {
+        setHasCalculatedOnce(false);
+        hasCalculatedOnceRef.current = false;
         setPlsResults(null);
         plsResultsRef.current = null;
         setCanvasResults(null);
@@ -1091,6 +1345,32 @@ const ModelEditor = () => {
           } else {
             loadModelCanvasState({ nodes: [], edges: [] });
           }
+          if (modelRes && modelRes.spec && modelRes.spec.dataset_id && effectiveModelId) {
+            const boundDsId = modelRes.spec.dataset_id;
+            setModelDatasetId(effectiveModelId, boundDsId);
+            if (effectiveStudyId) {
+              setStudyLastDatasetId(effectiveStudyId, boundDsId);
+            }
+            const currentList = getStudyDatasets(useStore.getState().datasetsByStudy, effectiveStudyId || '');
+            let matching = currentList.find(d => d.id === boundDsId);
+            if (!matching && activeStudy?.path && effectiveStudyId) {
+              try {
+                const dataRes = await api.loadProjectData(activeStudy.path, boundDsId);
+                if (dataRes && Array.isArray(dataRes.columns) && Array.isArray(dataRes.rows)) {
+                  matching = processData(dataRes.dataset_name || 'Dataset', dataRes.columns, dataRes.rows);
+                  matching.id = boundDsId;
+                  addStudyDataset(effectiveStudyId, matching);
+                }
+              } catch (e) {
+                console.warn('Could not load bound dataset directly:', e);
+              }
+            }
+            if (matching) {
+              setActiveDataset(matching);
+              activeDatasetRef.current = matching;
+              setCanvasDatasetColumns(matching.variables.map(v => v.name));
+            }
+          }
         } catch (err) {
           console.warn('Could not load saved model layout:', err);
         } finally {
@@ -1162,8 +1442,10 @@ const ModelEditor = () => {
         try {
           const currentSpec = exportModelSpec();
           if (!isModelTopologyEqual(currentSpec, lastCalculatedModelRef.current.spec)) {
-            setCanvasResults(null);
             setIsModelOutdated(true);
+            if (!hasCalculatedOnceRef.current) {
+              setCanvasResults(null);
+            }
           } else {
             setIsModelOutdated(false);
             if (plsResultsRef.current || plsResults) {
@@ -1236,7 +1518,13 @@ const ModelEditor = () => {
           color: autoSaveStatus === 'error' ? '#ef4444' : 'var(--color-text-muted)',
           userSelect: 'none',
         }}
-        title={autoSaveStatus === 'saving' ? 'Saving changes...' : (autoSaveStatus === 'error' ? 'Failed to auto-save' : 'All changes saved automatically')}
+        title={
+          autoSaveStatus === 'saving'
+            ? 'Saving changes...'
+            : autoSaveStatus === 'error'
+            ? (autoSaveError ? `Auto-save error: ${autoSaveError}` : 'Failed to auto-save')
+            : 'All changes saved automatically'
+        }
       >
         <span
           style={{
@@ -1622,9 +1910,36 @@ const ModelEditor = () => {
                 )}
               </div>
             ) : (
-              <span className="var-sidebar__header-label" title={activeDataset.filename}>
-                {activeDataset.filename}
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', minWidth: 0, flex: 1 }}>
+                <span className="var-sidebar__header-label" title={activeDataset.filename}>
+                  {activeDataset.filename}
+                </span>
+                <button
+                  ref={datasetButtonRef}
+                  className="icon-btn icon-btn--sm"
+                  title="Change Dataset"
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsDatasetMenuOpen((prev) => !prev);
+                  }}
+                  style={{
+                    flexShrink: 0,
+                    padding: '2px',
+                    width: '24px',
+                    height: '24px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: '4px',
+                    color: isDatasetMenuOpen ? 'var(--color-primary)' : 'inherit',
+                    background: isDatasetMenuOpen ? 'var(--color-bg-hover, rgba(0,0,0,0.06))' : 'transparent',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>swap_horiz</span>
+                </button>
+              </div>
             )}
             <div className="var-sidebar__header-actions">
               <button
@@ -1657,6 +1972,63 @@ const ModelEditor = () => {
             </div>
           </div>
         ) : null}
+
+        {/* Floating Dataset Switch Dropdown attached to sidebar */}
+        {isDatasetMenuOpen && activeDataset && (
+          <div
+            ref={datasetDropdownRef}
+            className="canvas-dataset-dropdown animate-scale-in"
+            style={{
+              position: 'absolute',
+              top: '42px',
+              left: '8px',
+              right: '8px',
+              width: 'calc(100% - 16px)',
+              maxWidth: 'none',
+              zIndex: 99999,
+              boxShadow: '0 8px 24px rgba(0,0,0,0.25), 0 2px 6px rgba(0,0,0,0.1)'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="canvas-dataset-dropdown__header">Switch Dataset</div>
+            <div className="canvas-dataset-dropdown__list">
+              {studyDatasets.map((ds) => {
+                const isCurrent = ds.id === activeDataset.id || ds.filename === activeDataset.filename;
+                return (
+                  <div
+                    key={ds.id || ds.filename}
+                    className={`canvas-dataset-dropdown__item ${isCurrent ? 'selected' : ''}`}
+                    onClick={() => {
+                      handleSelectDataset(ds);
+                      setIsDatasetMenuOpen(false);
+                    }}
+                  >
+                    <span className="material-symbols-outlined" style={{ fontSize: '16px', color: isCurrent ? 'var(--color-primary)' : 'inherit' }}>
+                      {isCurrent ? 'check_circle' : 'dataset'}
+                    </span>
+                    <div className="canvas-dataset-dropdown__item-info">
+                      <span className="canvas-dataset-dropdown__item-name">{ds.filename}</span>
+                      <span className="canvas-dataset-dropdown__item-meta">{ds.rows?.length || 0} rows • {ds.variables?.length || 0} vars</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="canvas-dataset-dropdown__footer">
+              <button
+                type="button"
+                className="canvas-dataset-dropdown__add-btn"
+                onClick={() => {
+                  setIsDatasetMenuOpen(false);
+                  fileInputRef.current?.click();
+                }}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>add</span>
+                <span>Import New Dataset…</span>
+              </button>
+            </div>
+          </div>
+        )}
 
         {activeDataset ? (
           <div className="var-sidebar__list" id="var-list">
@@ -1704,27 +2076,72 @@ const ModelEditor = () => {
             })}
           </div>
         ) : (
-          <div style={{ padding: '16px 12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isImporting}
-              className="var-sidebar__insert-btn"
-            >
-              <svg style={{ width: '14px', height: '14px' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path d="M12 4v16m8-8H4" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
-              </svg>
-              <span>{isImporting ? 'Parsing...' : 'Insert Dataset'}</span>
-            </button>
-            <input 
-              type="file" 
-              accept=".csv,.txt,.xlsx,.xls,.sav"
-              ref={fileInputRef}
-              onChange={handleFileUpload}
-              style={{ display: 'none' }}
-            />
+          <div className="dataset-picker-sidebar animate-fade-in">
+            <div className="var-sidebar__header">
+              <span className="var-sidebar__header-label" style={{ fontWeight: 600 }}>Available Datasets</span>
+              <div className="var-sidebar__header-actions">
+                <span className="sidebar-item__badge">{studyDatasets.length}</span>
+              </div>
+            </div>
+            
+            <div className="dataset-picker-content">
+              <div className="dataset-picker-intro">
+                Select a dataset for this model to populate indicators:
+              </div>
+
+              {studyDatasets.length > 0 ? (
+                <div className="dataset-picker-list">
+                  {studyDatasets.map((ds) => (
+                    <div
+                      key={ds.id || ds.filename}
+                      className="dataset-picker-card"
+                      onClick={() => handleSelectDataset(ds)}
+                      title={`Click to use ${ds.filename}`}
+                    >
+                      <div className="dataset-picker-card__icon">
+                        <span className="material-symbols-outlined">dataset</span>
+                      </div>
+                      <div className="dataset-picker-card__details">
+                        <div className="dataset-picker-card__title">{ds.filename}</div>
+                        <div className="dataset-picker-card__meta">
+                          <span className="file-badge file-badge--default">{ds.rows?.length || 0} rows</span>
+                          <span className="file-badge file-badge--default">{ds.variables?.length || 0} vars</span>
+                        </div>
+                      </div>
+                      <div className="dataset-picker-card__arrow">
+                        <span className="material-symbols-outlined">chevron_right</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ textAlign: 'center', padding: '16px 8px', color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)' }}>
+                  No datasets imported yet.
+                </div>
+              )}
+
+              <div className="dataset-picker-divider" />
+
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isImporting}
+                className="var-sidebar__insert-btn"
+                style={{ marginTop: '4px' }}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>upload_file</span>
+                <span>{isImporting ? 'Parsing...' : 'Import New Dataset'}</span>
+              </button>
+            </div>
           </div>
         )}
+        <input 
+          type="file" 
+          accept=".csv,.txt,.xlsx,.xls,.sav"
+          ref={fileInputRef}
+          onChange={handleFileUpload}
+          style={{ display: 'none' }}
+        />
       </aside>
       {/* ─── Center Canvas Area ─── */}
       <main

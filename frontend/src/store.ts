@@ -20,7 +20,19 @@ export interface Model {
   name: string;
   type: string;
   lastModified: string;
+  datasetId?: string;
 }
+
+export const getStudyDatasets = (
+  datasetsByStudy: Record<string, any> | undefined,
+  studyId: string
+): ParsedDataset[] => {
+  if (!datasetsByStudy) return [];
+  const raw = datasetsByStudy[studyId];
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  return [raw];
+};
 
 export interface Study {
   id: string;
@@ -90,6 +102,14 @@ export interface AppSettings {
   accentColor: string;
 }
 
+export const LICENSE_INFO = {
+  type: 'Faculty Multi-Seat',
+  licensee: 'Academic Licensee',
+  key: 'STATSEM-8492-7104-FAC-2026',
+  expiryDate: 'Dec 31, 2026',
+  daysRemaining: 108,
+};
+
 export interface DeleteConfirmDialog {
   title?: string;
   message?: string;
@@ -113,6 +133,7 @@ export interface AppTab {
   workspaceId?: string | null;
   studyId?: string | null;
   modelId?: string | null;
+  datasetId?: string | null;
   snapshotId?: string | null;
 }
 
@@ -124,6 +145,11 @@ interface AppState {
   updateSettings: (partial: Partial<AppSettings>) => void;
   isSettingsOpen: boolean;
   setIsSettingsOpen: (open: boolean) => void;
+  settingsActiveTab: 'about' | 'appearance' | 'calculation' | 'canvas';
+  setSettingsActiveTab: (tab: 'about' | 'appearance' | 'calculation' | 'canvas') => void;
+  openSettings: (tab?: 'about' | 'appearance' | 'calculation' | 'canvas') => void;
+  isLicenseActive: boolean;
+  setIsLicenseActive: (active: boolean) => void;
   isSidebarCollapsed: boolean;
   toggleSidebar: () => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
@@ -138,6 +164,7 @@ interface AppState {
   activeTabId: string;
   openTab: (tab: Omit<AppTab, 'id'> & { id?: string }) => void;
   closeTab: (id: string) => void;
+  closeTabs: (ids: string[]) => void;
   setActiveTab: (id: string) => void;
   updateTabTitle: (id: string, title: string) => void;
   reorderTabs: (fromIndex: number, toIndex: number) => void;
@@ -149,7 +176,7 @@ interface AppState {
   studies: Study[];
   activeStudyId: string | null;
   models: Model[];
-  datasetsByStudy: Record<string, ParsedDataset>;
+  datasetsByStudy: Record<string, ParsedDataset[]>;
   snapshotsByStudy: Record<string, StudySnapshot[]>;
   setStudySnapshots: (studyId: string, snapshots: StudySnapshot[]) => void;
   addStudySnapshot: (studyId: string, snapshot: StudySnapshot) => void;
@@ -160,6 +187,7 @@ interface AppState {
   renameModel: (id: string, name: string) => void;
   duplicateModel: (id: string) => void;
   setActiveModel: (id: string) => void;
+  setModelDatasetId: (modelId: string, datasetId: string) => void;
 
   addWorkspace: (ws: Workspace) => void;
   removeWorkspace: (id: string) => void;
@@ -168,7 +196,7 @@ interface AppState {
   deleteWorkspace: (id: string) => void;
   deleteStudy: (id: string) => void;
   deleteModel: (id: string) => void;
-  deleteDataset: (studyId: string) => void;
+  deleteDataset: (studyId: string, datasetId?: string) => void;
   renameWorkspace: (id: string, name: string) => void;
   duplicateWorkspace: (id: string) => void | Promise<void>;
   setActiveWorkspace: (id: string) => void;
@@ -181,7 +209,11 @@ interface AppState {
   copyStudyToWorkspace: (studyId: string, targetWorkspaceId: string, targetWorkspacePath: string, newStudyName: string) => Promise<{ success: boolean; newStudyId?: string; error?: string }>;
   setActiveStudy: (id: string) => void;
   setStudyDataset: (studyId: string, dataset: ParsedDataset) => void;
-  removeStudyDataset: (studyId: string) => void;
+  addStudyDataset: (studyId: string, dataset: ParsedDataset) => void;
+  setStudyDatasets: (studyId: string, datasets: ParsedDataset[]) => void;
+  removeStudyDataset: (studyId: string, datasetId?: string) => void;
+  lastUsedDatasetByStudy: Record<string, string>;
+  setStudyLastDatasetId: (studyId: string, datasetId: string) => void;
   touchStudy: (id: string) => void;
   
   // Variables (Sidebar)
@@ -231,7 +263,7 @@ const INITIAL_VARIABLES: Variable[] = [
 
 const INITIAL_SETTINGS: AppSettings = {
   version: '0.1.0',
-  websiteUrl: 'https://cspls.org',
+  websiteUrl: 'https://statsem.org',
   theme: 'light',
   darkVariant: 'default',
   fontFamily: 'Inter',
@@ -269,6 +301,11 @@ export const useStore = create<AppState>()(
       }),
       isSettingsOpen: false,
       setIsSettingsOpen: (open) => set({ isSettingsOpen: open }),
+      settingsActiveTab: 'about',
+      setSettingsActiveTab: (tab) => set({ settingsActiveTab: tab }),
+      openSettings: (tab = 'about') => set({ isSettingsOpen: true, settingsActiveTab: tab }),
+      isLicenseActive: true,
+      setIsLicenseActive: (active) => set({ isLicenseActive: active }),
       isSidebarCollapsed: false,
       toggleSidebar: () => set((state) => ({ isSidebarCollapsed: !state.isSidebarCollapsed })),
       setSidebarCollapsed: (collapsed) => set({ isSidebarCollapsed: collapsed }),
@@ -349,7 +386,11 @@ export const useStore = create<AppState>()(
         }
 
         if (tabInput.type === 'dataset' && tabInput.studyId) {
-          const existing = state.tabs.find(t => t.type === 'dataset' && t.studyId === tabInput.studyId);
+          const existing = state.tabs.find(
+            t => t.type === 'dataset' &&
+                 t.studyId === tabInput.studyId &&
+                 (tabInput.datasetId ? t.datasetId === tabInput.datasetId : true)
+          );
           if (existing) {
             return {
               activeTabId: existing.id,
@@ -357,13 +398,14 @@ export const useStore = create<AppState>()(
               activeWorkspaceId: tabInput.workspaceId ?? state.activeWorkspaceId,
             };
           }
-          const id = tabInput.id || `tab-dataset-${tabInput.studyId}`;
+          const id = tabInput.id || (tabInput.datasetId ? `tab-dataset-${tabInput.studyId}-${tabInput.datasetId}` : `tab-dataset-${tabInput.studyId}`);
           const newTab: AppTab = {
             id,
             type: 'dataset',
             title: tabInput.title || 'Dataset',
             workspaceId: tabInput.workspaceId,
             studyId: tabInput.studyId,
+            datasetId: tabInput.datasetId,
           };
           return {
             tabs: [...state.tabs, newTab],
@@ -430,6 +472,55 @@ export const useStore = create<AppState>()(
           } else if (nextTab.type === 'dataset') {
             nextStudyId = nextTab.studyId ?? null;
             nextWsId = nextTab.workspaceId ?? null;
+          }
+        }
+
+        return {
+          tabs: newTabs,
+          activeTabId: nextActiveId,
+          activeWorkspaceId: nextWsId,
+          activeStudyId: nextStudyId,
+          activeModelId: nextModelId,
+        };
+      }),
+      closeTabs: (ids) => set((state) => {
+        if (!ids || ids.length === 0) return state;
+        const idsSet = new Set(ids);
+        const newTabs = state.tabs.filter((t) => !idsSet.has(t.id));
+
+        if (newTabs.length === 0) {
+          const homeTab: AppTab = { id: 'get-started', type: 'get-started', title: 'Home' };
+          return {
+            tabs: [homeTab],
+            activeTabId: 'get-started',
+            activeWorkspaceId: null,
+            activeStudyId: null,
+            activeModelId: null,
+          };
+        }
+
+        let nextActiveId = state.activeTabId;
+        let nextWsId = state.activeWorkspaceId;
+        let nextStudyId = state.activeStudyId;
+        let nextModelId = state.activeModelId;
+
+        if (state.activeTabId && idsSet.has(state.activeTabId)) {
+          const oldIndex = state.tabs.findIndex((t) => t.id === state.activeTabId);
+          const nextTab = newTabs[Math.max(0, Math.min(oldIndex, newTabs.length - 1))];
+          nextActiveId = nextTab.id;
+          if (nextTab.type === 'workspace' && nextTab.workspaceId) {
+            nextWsId = nextTab.workspaceId;
+          } else if (nextTab.type === 'model') {
+            nextModelId = nextTab.modelId ?? null;
+            nextStudyId = nextTab.studyId ?? null;
+            nextWsId = nextTab.workspaceId ?? null;
+          } else if (nextTab.type === 'dataset') {
+            nextStudyId = nextTab.studyId ?? null;
+            nextWsId = nextTab.workspaceId ?? null;
+          } else {
+            nextWsId = null;
+            nextStudyId = null;
+            nextModelId = null;
           }
         }
 
@@ -557,7 +648,7 @@ export const useStore = create<AppState>()(
         const sourceStudies = state.studies.filter(s => s.workspaceId === id);
         const newStudies: Study[] = [];
         const newModels: Model[] = [];
-        const newDatasetsByStudy: Record<string, ParsedDataset> = {};
+        const newDatasetsByStudy: Record<string, ParsedDataset[]> = {};
 
         for (const s of sourceStudies) {
           const newStudyId = `study_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
@@ -589,13 +680,13 @@ export const useStore = create<AppState>()(
             api.remapModelIds(newStudyPath, modelIdMap).catch(console.warn);
           }
 
-          const dataset = state.datasetsByStudy[s.id];
-          if (dataset) {
-            newDatasetsByStudy[newStudyId] = {
+          const sDatasets = getStudyDatasets(state.datasetsByStudy, s.id);
+          if (sDatasets.length > 0) {
+            newDatasetsByStudy[newStudyId] = sDatasets.map((dataset) => ({
               ...dataset,
-              variables: dataset.variables.map(v => ({ ...v })),
-              rows: dataset.rows.map(r => [...r]),
-            };
+              variables: dataset.variables.map((v) => ({ ...v })),
+              rows: dataset.rows.map((r) => [...r]),
+            }));
           }
         }
 
@@ -675,17 +766,15 @@ export const useStore = create<AppState>()(
           activeTabId: nextActiveTabId,
         };
       }),
-      deleteDataset: (studyId) => set((state) => ({
-        datasetsByStudy: Object.fromEntries(Object.entries(state.datasetsByStudy).filter(([id]) => id !== studyId))
-      })),
       renameWorkspace: (id, name) => set((state) => ({
         workspaces: state.workspaces.map(workspace => workspace.id === id ? { ...workspace, name } : workspace),
         tabs: state.tabs.map(tab => tab.type === 'workspace' && tab.workspaceId === id ? { ...tab, title: name } : tab),
       })),
       setActiveWorkspace: (id) => set({ activeWorkspaceId: id }),
       addStudy: (study) => set((state) => {
+        // If it's the exact same study by ID or non-empty path, update it in place
         const existingIdx = state.studies.findIndex(
-          s => s.id === study.id || (s.workspaceId === study.workspaceId && (s.path === study.path || s.name.toLowerCase() === study.name.toLowerCase()))
+          s => s.id === study.id || (Boolean(study.path) && Boolean(s.path) && s.path === study.path)
         );
         if (existingIdx >= 0) {
           const updated = [...state.studies];
@@ -695,9 +784,27 @@ export const useStore = create<AppState>()(
             activeStudyId: study.id
           };
         }
+
+        // It's a new study; ensure unique name within the target workspace
+        let uniqueName = study.name.trim();
+        const wsStudies = state.studies.filter(s => s.workspaceId === study.workspaceId);
+        const existingNames = new Set(wsStudies.map(s => s.name.trim().toLowerCase()));
+
+        if (existingNames.has(uniqueName.toLowerCase())) {
+          const match = uniqueName.match(/^(.*?)(?:\s*\(([0-9]+)\))?$/);
+          const base = match ? match[1].trim() : uniqueName;
+          let counter = 1;
+          while (existingNames.has(`${base}(${counter})`.toLowerCase())) {
+            counter++;
+          }
+          uniqueName = `${base}(${counter})`;
+        }
+
+        const studyWithUniqueName = uniqueName !== study.name ? { ...study, name: uniqueName } : study;
+
         return {
-          studies: [...state.studies, study],
-          activeStudyId: study.id
+          studies: [...state.studies, studyWithUniqueName],
+          activeStudyId: studyWithUniqueName.id
         };
       }),
       syncWorkspaceStudies: (workspaceId, diskProjects) => set((state) => {
@@ -753,7 +860,7 @@ export const useStore = create<AppState>()(
         if (!study) return;
         const studyId = `study_${Date.now()}`;
         const newStudyName = `${study.name} copy`;
-        const dataset = state.datasetsByStudy[id];
+        const sourceDatasets = getStudyDatasets(state.datasetsByStudy, id);
 
         const studyModels = state.models.filter(m => m.studyId === id);
         const modelIdMap: Record<string, string> = {};
@@ -785,7 +892,14 @@ export const useStore = create<AppState>()(
         set((curr) => ({
           studies: [...curr.studies, { ...study, id: studyId, name: newStudyName, path: targetPath, lastModified: 'Just now' }],
           models: [...curr.models, ...clonedModels],
-          datasetsByStudy: dataset ? { ...curr.datasetsByStudy, [studyId]: { ...dataset, variables: dataset.variables.map(variable => ({ ...variable })), rows: dataset.rows.map(row => [...row]) } } : curr.datasetsByStudy,
+          datasetsByStudy: sourceDatasets.length > 0 ? {
+            ...curr.datasetsByStudy,
+            [studyId]: sourceDatasets.map((dataset) => ({
+              ...dataset,
+              variables: dataset.variables.map((variable) => ({ ...variable })),
+              rows: dataset.rows.map((row) => [...row]),
+            })),
+          } : curr.datasetsByStudy,
         }));
       },
       moveStudyToWorkspace: async (studyId, targetWorkspaceId, targetWorkspacePath) => {
@@ -874,6 +988,7 @@ export const useStore = create<AppState>()(
           }
         }
 
+        const sourceDatasets = getStudyDatasets(state.datasetsByStudy, studyId);
         set((curr) => ({
           studies: [
             ...curr.studies,
@@ -887,14 +1002,14 @@ export const useStore = create<AppState>()(
             },
           ],
           models: [...curr.models, ...clonedModels],
-          datasetsByStudy: dataset
+          datasetsByStudy: sourceDatasets.length > 0
             ? {
                 ...curr.datasetsByStudy,
-                [newStudyId]: {
+                [newStudyId]: sourceDatasets.map((dataset) => ({
                   ...dataset,
                   variables: dataset.variables.map((variable) => ({ ...variable })),
                   rows: dataset.rows.map((row) => [...row]),
-                },
+                })),
               }
             : curr.datasetsByStudy,
         }));
@@ -902,12 +1017,71 @@ export const useStore = create<AppState>()(
         return { success: true, newStudyId };
       },
       setActiveStudy: (id) => set({ activeStudyId: id }),
-      setStudyDataset: (studyId, dataset) => set((state) => ({
-        datasetsByStudy: { ...state.datasetsByStudy, [studyId]: dataset }
+      setStudyDataset: (studyId, dataset) => set((state) => {
+        const existing = getStudyDatasets(state.datasetsByStudy, studyId);
+        const idx = existing.findIndex((d) => (d.id && d.id === dataset.id) || d.filename === dataset.filename);
+        let updatedList: ParsedDataset[];
+        if (idx >= 0) {
+          updatedList = [...existing];
+          updatedList[idx] = dataset;
+        } else {
+          updatedList = [...existing, dataset];
+        }
+        return {
+          datasetsByStudy: { ...state.datasetsByStudy, [studyId]: updatedList },
+        };
+      }),
+      addStudyDataset: (studyId, dataset) => set((state) => {
+        const existing = getStudyDatasets(state.datasetsByStudy, studyId);
+        const dsId = dataset.id || `ds_${Date.now()}`;
+        const newDs = { ...dataset, id: dsId };
+        return {
+          datasetsByStudy: { ...state.datasetsByStudy, [studyId]: [...existing, newDs] },
+        };
+      }),
+      setStudyDatasets: (studyId, datasets) => set((state) => ({
+        datasetsByStudy: { ...state.datasetsByStudy, [studyId]: datasets },
       })),
-      removeStudyDataset: (studyId) => set((state) => ({
-        datasetsByStudy: Object.fromEntries(Object.entries(state.datasetsByStudy).filter(([id]) => id !== studyId))
+      removeStudyDataset: (studyId, datasetId) => set((state) => {
+        if (!datasetId) {
+          return {
+            datasetsByStudy: Object.fromEntries(
+              Object.entries(state.datasetsByStudy).filter(([id]) => id !== studyId)
+            ),
+          };
+        }
+        const existing = getStudyDatasets(state.datasetsByStudy, studyId);
+        const updatedList = existing.filter((d) => d.id !== datasetId && d.filename !== datasetId);
+        return {
+          datasetsByStudy: { ...state.datasetsByStudy, [studyId]: updatedList },
+        };
+      }),
+      deleteDataset: (studyId, datasetId) => set((state) => {
+        if (!datasetId) {
+          return {
+            datasetsByStudy: Object.fromEntries(
+              Object.entries(state.datasetsByStudy).filter(([id]) => id !== studyId)
+            ),
+          };
+        }
+        const existing = getStudyDatasets(state.datasetsByStudy, studyId);
+        const updatedList = existing.filter((d) => d.id !== datasetId && d.filename !== datasetId);
+        return {
+          datasetsByStudy: { ...state.datasetsByStudy, [studyId]: updatedList },
+        };
+      }),
+      lastUsedDatasetByStudy: {},
+      setStudyLastDatasetId: (studyId, datasetId) => set((state) => ({
+        lastUsedDatasetByStudy: { ...state.lastUsedDatasetByStudy, [studyId]: datasetId }
       })),
+      setModelDatasetId: (modelId, datasetId) => set((state) => {
+        const model = state.models.find((m) => m.id === modelId);
+        const studyId = model?.studyId;
+        return {
+          models: state.models.map((m) => m.id === modelId ? { ...m, datasetId } : m),
+          lastUsedDatasetByStudy: studyId ? { ...state.lastUsedDatasetByStudy, [studyId]: datasetId } : state.lastUsedDatasetByStudy,
+        };
+      }),
       touchStudy: (id) => set((state) => ({ studies: state.studies.map(study => study.id === id ? { ...study, lastModified: 'Just now' } : study) })),
       
       // Variables
@@ -962,10 +1136,12 @@ export const useStore = create<AppState>()(
         studies: state.studies,
         models: state.models,
         datasetsByStudy: state.datasetsByStudy,
+        lastUsedDatasetByStudy: state.lastUsedDatasetByStudy,
         activeWorkspaceId: state.activeWorkspaceId,
         theme: state.theme,
         settings: state.settings,
         isSidebarCollapsed: state.isSidebarCollapsed,
+        isLicenseActive: state.isLicenseActive,
       }), // only persist these fields
       merge: (persistedState: any, currentState: AppState) => ({
         ...currentState,
