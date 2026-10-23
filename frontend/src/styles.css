@@ -3388,13 +3388,13 @@ body.is-tab-sliding * {
 }
 
 .settings-section {
-  padding-bottom: 24px;
+  padding-bottom: 12px;
   margin-bottom: 0;
 }
 
 .settings-section + .settings-section {
   border-top: 1px solid var(--color-border-subtle);
-  padding-top: 20px;
+  padding-top: 12px;
 }
 
 .settings-section__header {
@@ -3403,7 +3403,7 @@ body.is-tab-sliding * {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--color-text-muted);
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 /* Row: label + control */

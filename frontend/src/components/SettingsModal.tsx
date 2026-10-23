@@ -217,7 +217,7 @@ export const SettingsModal: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="settings-row" style={{ borderBottom: 'none', paddingTop: '14px' }}>
+                <div className="settings-row" style={{ borderBottom: 'none' }}>
                   <div>
                     <div className="settings-row__label">Manage Seat</div>
                     <div className="settings-row__desc">
