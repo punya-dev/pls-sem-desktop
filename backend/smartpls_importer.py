@@ -10,8 +10,10 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Tuple
 import pandas as pd
 
+import sqlite3
 import project_io
 import workspace_io
+from data.datasets import save_dataset as ds_save, list_datasets as ds_list
 
 SMARTPLS_AES_KEY = bytes.fromhex("cd2a06087b5b9dcfda8e517ae0db395e")
 
@@ -539,96 +541,108 @@ def import_smartpls_folder(
             except Exception as e:
                 print(f"Warning: could not decrypt or convert {mfilename}: {e}")
 
-        # 4. Create Studies (.pls SQLite files) per dataset
+        # 4. Create a SINGLE Study (.pls SQLite file) for the entire SmartPLS project
         created_studies = []
         created_models = []
         now_iso = datetime.now(timezone.utc).isoformat()
 
-        primary_datafile = list(datasets_cache.keys())[0] if datasets_cache else None
+        study_clean_name = proj_name.replace(" ", "_").replace("/", "_")
+        study_filename = f"{study_clean_name}.pls"
+        study_path = os.path.join(target_workspace_folder, study_filename)
 
-        for datafile_name, (df, ds_name) in datasets_cache.items():
-            study_clean_name = ds_name.replace(" ", "_").replace("/", "_")
-            study_filename = f"{study_clean_name}.pls"
+        # Avoid collision with existing unrelated studies in workspace
+        counter = 1
+        while os.path.exists(study_path) and any(
+            p.get("path") == study_filename and p.get("name") != proj_name
+            for p in ws_meta.get("projects", [])
+        ):
+            study_filename = f"{study_clean_name}_{counter}.pls"
             study_path = os.path.join(target_workspace_folder, study_filename)
+            counter += 1
 
-            # Avoid collision with existing unrelated studies in workspace
-            counter = 1
-            while os.path.exists(study_path) and any(
-                p.get("path") == study_filename and p.get("name") != ds_name
-                for p in ws_meta.get("projects", [])
-            ):
-                study_filename = f"{study_clean_name}_{counter}.pls"
-                study_path = os.path.join(target_workspace_folder, study_filename)
-                counter += 1
+        # Create or overwrite SQLite project file
+        if os.path.exists(study_path):
+            os.remove(study_path)
+        project_io.create_project(study_path, proj_name)
 
-            # Create or overwrite SQLite project file
-            if os.path.exists(study_path):
-                os.remove(study_path)
-            project_io.create_project(study_path, ds_name)
-
-            # Save dataset into raw_data table
+        # Save all datasets into this study's SQLite DB
+        conn = sqlite3.connect(study_path)
+        datafile_to_ds_id: Dict[str, str] = {}
+        for idx, (datafile_name, (df, ds_name)) in enumerate(datasets_cache.items()):
+            ds_id = str(idx + 1)
+            datafile_to_ds_id[datafile_name] = ds_id
             if df is not None and not df.empty:
-                df_clean = df.astype(object).where(pd.notnull(df), None)
-                dtypes = list(df.dtypes.astype(str))
-                project_io.save_data(study_path, df_clean.values.tolist(), list(df.columns), dtypes, dataset_name=ds_name)
+                ds_save(conn, dataset_id=ds_id, name=ds_name, df=df)
+                if idx == 0:
+                    # Also populate raw_data table for legacy compatibility
+                    df_clean = df.astype(object).where(pd.notnull(df), None)
+                    dtypes = list(df.dtypes.astype(str))
+                    project_io.save_data(study_path, df_clean.values.tolist(), list(df.columns), dtypes, dataset_name=ds_name, dataset_id=ds_id)
+        conn.close()
 
-            study_id = f"study_smartpls_{int(datetime.now().timestamp()*1000)}_{len(created_studies)}"
-            study_models_list = models_by_datafile.get(datafile_name, [])
-            if datafile_name == primary_datafile:
-                for df_key, orphan_models in models_by_datafile.items():
-                    if df_key not in datasets_cache:
-                        study_models_list.extend(orphan_models)
+        study_id = f"study_smartpls_{int(datetime.now().timestamp()*1000)}"
 
-            # Save all models into this study's SQLite DB
-            for m_idx, m_info in enumerate(study_models_list):
-                model_key = f"model_smartpls_{int(datetime.now().timestamp()*1000)}_{m_idx}"
-                project_io.save_model_spec(
-                    study_path,
-                    m_info["spec"],
-                    diagram_layout=m_info["layout"],
-                    model_id=model_key,
-                )
+        # Save all models into this study's SQLite DB
+        all_models = [m for m_list in models_by_datafile.values() for m in m_list]
+        for m_idx, m_info in enumerate(all_models):
+            model_key = f"model_smartpls_{int(datetime.now().timestamp()*1000)}_{m_idx}"
+            target_datafile = m_info["splsm_dict"].get("dataFileId") or (list(datasets_cache.keys())[0] if datasets_cache else None)
+            bound_ds_id = datafile_to_ds_id.get(target_datafile, "1")
 
-                # Matching reports
-                model_base = m_info["name"]
-                matching_reports = glob.glob(os.path.join(active_source_dir, f"{model_base}*.splsrp"))
-                if matching_reports:
-                    try:
-                        rep_dict = decrypt_smartpls_file(matching_reports[0])
-                        project_io.save_results(
-                            study_path,
-                            "pls",
-                            {"smartpls_imported_report": rep_dict.get("reports", [])},
-                            model_id=model_key,
-                            spec=m_info["spec"],
-                            diagram_layout=m_info["layout"],
-                        )
-                    except Exception as ex:
-                        print(f"Notice: could not import report for {model_base}: {ex}")
+            spec_copy = dict(m_info["spec"])
+            spec_copy["dataset_id"] = bound_ds_id
 
-                created_models.append({
-                    "id": model_key,
-                    "studyId": study_id,
-                    "name": m_info["name"],
-                    "type": "PLS-SEM",
-                    "lastModified": "Just now",
-                })
+            project_io.save_model_spec(
+                study_path,
+                spec_copy,
+                diagram_layout=m_info["layout"],
+                model_id=model_key,
+            )
 
-            # Register study in workspace
-            created_studies.append({
-                "id": study_id,
-                "workspaceId": target_workspace_folder,
-                "name": ds_name,
+            # Matching reports
+            model_base = m_info["name"]
+            matching_reports = glob.glob(os.path.join(active_source_dir, f"{model_base}*.splsrp"))
+            if matching_reports:
+                try:
+                    rep_dict = decrypt_smartpls_file(matching_reports[0])
+                    project_io.save_results(
+                        study_path,
+                        "pls",
+                        {"smartpls_imported_report": rep_dict.get("reports", [])},
+                        model_id=model_key,
+                        spec=spec_copy,
+                        diagram_layout=m_info["layout"],
+                        dataset_id=bound_ds_id,
+                    )
+                except Exception as ex:
+                    print(f"Notice: could not import report for {model_base}: {ex}")
+
+            created_models.append({
+                "id": model_key,
+                "studyId": study_id,
+                "name": m_info["name"],
                 "type": "PLS-SEM",
-                "description": f"Imported from SmartPLS project: {proj_name}",
                 "lastModified": "Just now",
-                "createdAt": now_iso,
-                "path": study_path,
-                "dataset_rows": len(df) if df is not None else 0,
-                "dataset_columns": list(df.columns) if df is not None else [],
+                "datasetId": bound_ds_id,
             })
 
-            workspace_io.add_project_to_workspace(target_workspace_folder, study_filename, ds_name)
+        # Register single unified study in workspace
+        first_df = list(datasets_cache.values())[0][0] if datasets_cache else None
+        created_studies.append({
+            "id": study_id,
+            "workspaceId": target_workspace_folder,
+            "name": proj_name,
+            "type": "PLS-SEM",
+            "description": f"Imported from SmartPLS project: {proj_name}",
+            "lastModified": "Just now",
+            "createdAt": now_iso,
+            "path": study_path,
+            "dataset_rows": len(first_df) if first_df is not None else 0,
+            "dataset_columns": list(first_df.columns) if first_df is not None else [],
+            "datasets_count": len(datasets_cache),
+        })
+
+        workspace_io.add_project_to_workspace(target_workspace_folder, study_filename, proj_name)
 
         if not created_studies and models_by_datafile:
             study_filename = f"{proj_name.replace(' ', '_')}.pls"

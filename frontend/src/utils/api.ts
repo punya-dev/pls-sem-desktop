@@ -50,6 +50,8 @@ export interface ModelSpec {
   constructs: ConstructSpec[];
   indicators: IndicatorSpec[];
   paths: PathSpec[];
+  dataset_id?: string;
+  [key: string]: any;
 }
 
 export interface ValidationResponse {
@@ -207,14 +209,16 @@ export const api = {
     columns: string[],
     rows: any[][],
     missingValue?: string,
-    treatment?: string
-  ): Promise<{ status?: string; row_count?: number; dataset_name?: string; error?: string }> {
+    treatment?: string,
+    datasetId?: string
+  ): Promise<{ status?: string; row_count?: number; dataset_name?: string; dataset_id?: string; error?: string }> {
     try {
       const res = await fetch(`${API_BASE}/project/save-data-json`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           path,
+          dataset_id: datasetId,
           dataset_name: datasetName,
           columns,
           rows,
@@ -243,19 +247,31 @@ export const api = {
     }
   },
 
-  async loadProjectData(path: string): Promise<{ columns?: string[]; rows?: any[][]; dataset_name?: string; error?: string }> {
+  async listProjectDatasets(path: string): Promise<{ datasets?: Array<{ id: string; name: string; n_rows: number; n_cols: number; hash: string }>; error?: string }> {
     try {
-      const res = await fetch(`${API_BASE}/project/load-data?path=${encodeURIComponent(path)}`);
+      const res = await fetch(`${API_BASE}/project/datasets?path=${encodeURIComponent(path)}`);
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to list project datasets' };
+    }
+  },
+
+  async loadProjectData(path: string, datasetId?: string): Promise<{ id?: string; columns?: string[]; rows?: any[][]; dataset_name?: string; error?: string }> {
+    try {
+      const query = datasetId ? `&dataset_id=${encodeURIComponent(datasetId)}` : '';
+      const res = await fetch(`${API_BASE}/project/load-data?path=${encodeURIComponent(path)}${query}`);
       return await res.json();
     } catch (err: any) {
       return { error: err?.message || 'Failed to load project data' };
     }
   },
 
-  async deleteProjectData(path: string): Promise<{ status?: string; error?: string }> {
+  async deleteProjectData(path: string, datasetId?: string): Promise<{ status?: string; error?: string }> {
     try {
-      const res = await fetch(`${API_BASE}/project/delete-data?path=${encodeURIComponent(path)}`, {
-        method: 'POST'
+      const res = await fetch(`${API_BASE}/project/delete-data`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path, dataset_id: datasetId })
       });
       return await res.json();
     } catch (err: any) {

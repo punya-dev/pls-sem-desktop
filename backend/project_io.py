@@ -146,7 +146,7 @@ def create_project(path: str, project_name: str):
     conn.close()
 
 
-def save_data(path: str, rows: list, columns: list, dtypes: list, dataset_name: str = None, dataset_id: str = "1"):
+def save_data(path: str, rows: list, columns: list, dtypes: list, dataset_name: str = None, dataset_id: str = None):
     migrate_project(path)
     conn = sqlite3.connect(path)
     cur = conn.cursor()
@@ -154,30 +154,47 @@ def save_data(path: str, rows: list, columns: list, dtypes: list, dataset_name: 
     df = pd.DataFrame(rows, columns=columns)
     name = dataset_name or "Imported data"
 
-    # Also keep legacy raw_data for complete backward compatibility
-    cur.execute("DROP TABLE IF EXISTS raw_data")
-    def sql_type(dtype: str) -> str:
-        if "int" in dtype or "float" in dtype:
-            return "REAL"
-        return "TEXT"
-
-    def escape_col(c: Any) -> str:
-        return '"' + str(c).replace('"', '""') + '"'
-
-    col_defs = ", ".join(f"{escape_col(c)} {sql_type(t)}" for c, t in zip(columns, dtypes))
-    cur.execute(f"CREATE TABLE raw_data ({col_defs})")
-    placeholders = ", ".join("?" for _ in columns)
-    col_names = ", ".join(escape_col(c) for c in columns)
-    cur.executemany(f"INSERT INTO raw_data ({col_names}) VALUES ({placeholders})", rows)
+    existing = ds_list(conn)
+    if dataset_id is None:
+        # Check if a dataset with this exact name already exists
+        match = next((d for d in existing if d["name"] == name), None)
+        if match:
+            dataset_id = match["id"]
+        else:
+            base_id = str(len(existing) + 1)
+            candidate = base_id
+            while any(d["id"] == candidate for d in existing):
+                candidate = f"{candidate}_1"
+            dataset_id = candidate
 
     # Save to multi-dataset table
     ds_save(conn, dataset_id=dataset_id, name=name, df=df)
 
+    # Maintain raw_data table for legacy tools / backward compatibility
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='raw_data'")
+    has_raw = cur.fetchone() is not None
+    if not has_raw or dataset_id in ("1", "ds_1"):
+        cur.execute("DROP TABLE IF EXISTS raw_data")
+        def sql_type(dtype: str) -> str:
+            if "int" in dtype or "float" in dtype:
+                return "REAL"
+            return "TEXT"
+
+        def escape_col(c: Any) -> str:
+            return '"' + str(c).replace('"', '""') + '"'
+
+        col_defs = ", ".join(f"{escape_col(c)} {sql_type(t)}" for c, t in zip(columns, dtypes))
+        cur.execute(f"CREATE TABLE raw_data ({col_defs})")
+        placeholders = ", ".join("?" for _ in columns)
+        col_names = ", ".join(escape_col(c) for c in columns)
+        cur.executemany(f"INSERT INTO raw_data ({col_names}) VALUES ({placeholders})", rows)
+        if dataset_name:
+            cur.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('dataset_name', ?)", (dataset_name,))
+
     cur.execute("UPDATE metadata SET value = ? WHERE key = 'modified_at'", (datetime.now(timezone.utc).isoformat(),))
-    if dataset_name:
-        cur.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('dataset_name', ?)", (dataset_name,))
     conn.commit()
     conn.close()
+    return dataset_id
 
 
 def load_data(path: str, dataset_id: Optional[str] = None):

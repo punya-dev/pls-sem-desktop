@@ -98,6 +98,7 @@ app.add_middleware(
 
 class SaveDataJsonRequest(BaseModel):
     path: str
+    dataset_id: Optional[str] = None
     dataset_name: Optional[str] = None
     columns: List[str]
     rows: List[List[Any]]
@@ -1133,24 +1134,32 @@ def save_project_data_json(req: SaveDataJsonRequest):
         dtypes = req.dtypes
         if not dtypes:
             dtypes = list(df.dtypes.astype(str))
-        project_io.save_data(req.path, df_clean.values.tolist(), list(df.columns), dtypes, dataset_name=req.dataset_name)
-        return {"status": "saved", "row_count": len(df), "dataset_name": req.dataset_name}
+        res_ds_id = project_io.save_data(req.path, df_clean.values.tolist(), list(df.columns), dtypes, dataset_name=req.dataset_name, dataset_id=req.dataset_id)
+        return {"status": "saved", "row_count": len(df), "dataset_name": req.dataset_name, "dataset_id": res_ds_id}
     except Exception as e:
         return {"error": str(e)}
 
 
+class DeleteDataRequest(BaseModel):
+    path: str
+    dataset_id: Optional[str] = None
+
+
 @app.post("/project/delete-data")
-def delete_project_data(path: str):
+def delete_project_data(req: DeleteDataRequest):
     try:
-        project_io.delete_data(path)
+        if req.dataset_id:
+            project_io.delete_project_dataset(req.path, req.dataset_id)
+        else:
+            project_io.delete_data(req.path)
         return {"status": "deleted"}
     except Exception as e:
         return {"error": str(e)}
 
 
 @app.get("/project/load-data")
-def load_project_data(path: str):
-    data = project_io.load_data(path)
+def load_project_data(path: str, dataset_id: Optional[str] = None):
+    data = project_io.load_data(path, dataset_id=dataset_id)
     if data is None:
         return {"error": "No data found in this project"}
     return data
@@ -1336,7 +1345,8 @@ def delete_workspace(folder_path: str):
 def validate_model(req: ValidateModelRequest):
     dataset_cols = req.dataset_columns or req.columns
     if dataset_cols is None and req.project_path:
-        project_data = project_io.load_data(req.project_path)
+        ds_id = req.spec.dataset_id if req.spec else None
+        project_data = project_io.load_data(req.project_path, dataset_id=ds_id)
         if project_data and "columns" in project_data:
             dataset_cols = project_data["columns"]
 
@@ -1458,7 +1468,8 @@ def save_project_model(req: SaveModelRequest):
     if not os.path.exists(req.project_path):
         return {"error": "Project file does not exist"}
 
-    project_data = project_io.load_data(req.project_path)
+    ds_id = req.spec.dataset_id if req.spec else None
+    project_data = project_io.load_data(req.project_path, dataset_id=ds_id)
     dataset_cols = project_data["columns"] if (project_data and "columns" in project_data) else None
 
     validation = validate_model_spec(req.spec, dataset_columns=dataset_cols)
@@ -1577,14 +1588,15 @@ def run_project_pls(req: RunPlsRequest):
         return {"error": "Project file does not exist"}
 
     # 1. Load project data
-    data_dict = project_io.load_data(req.project_path)
+    target_ds_id = req.dataset_id or (req.spec.dataset_id if req.spec else None)
+    data_dict = project_io.load_data(req.project_path, dataset_id=target_ds_id)
     if (not data_dict or not data_dict.get("rows")) and req.columns and req.rows:
         try:
             df_temp = pd.DataFrame(req.rows, columns=req.columns)
             df_clean = df_temp.astype(object).where(pd.notnull(df_temp), None)
             dtypes = list(df_clean.dtypes.astype(str))
-            project_io.save_data(req.project_path, df_clean.values.tolist(), list(df_clean.columns), dtypes, dataset_name=req.dataset_name)
-            data_dict = {"columns": list(df_clean.columns), "rows": df_clean.values.tolist(), "dataset_name": req.dataset_name}
+            saved_ds_id = project_io.save_data(req.project_path, df_clean.values.tolist(), list(df_clean.columns), dtypes, dataset_name=req.dataset_name, dataset_id=target_ds_id)
+            data_dict = {"columns": list(df_clean.columns), "rows": df_clean.values.tolist(), "dataset_name": req.dataset_name, "dataset_id": saved_ds_id}
         except Exception as e:
             print(f"Failed to auto-save dataset in run_project_pls: {e}")
 
@@ -1704,14 +1716,15 @@ async def start_bootstrap_job(req: BootstrapStartRequest):
         return {"error": "Project file does not exist"}
 
     # 1. Load or persist project data
-    data_dict = project_io.load_data(req.project_path)
+    target_ds_id = req.dataset_id or (req.spec.dataset_id if req.spec else None)
+    data_dict = project_io.load_data(req.project_path, dataset_id=target_ds_id)
     if (not data_dict or not data_dict.get("rows")) and req.columns and req.rows:
         try:
             df_temp = pd.DataFrame(req.rows, columns=req.columns)
             df_clean = df_temp.astype(object).where(pd.notnull(df_temp), None)
             dtypes = list(df_clean.dtypes.astype(str))
-            project_io.save_data(req.project_path, df_clean.values.tolist(), list(df_clean.columns), dtypes, dataset_name=req.dataset_name)
-            data_dict = {"columns": list(df_clean.columns), "rows": df_clean.values.tolist(), "dataset_name": req.dataset_name}
+            saved_ds_id = project_io.save_data(req.project_path, df_clean.values.tolist(), list(df_clean.columns), dtypes, dataset_name=req.dataset_name, dataset_id=target_ds_id)
+            data_dict = {"columns": list(df_clean.columns), "rows": df_clean.values.tolist(), "dataset_name": req.dataset_name, "dataset_id": saved_ds_id}
         except Exception as e:
             print(f"Failed to auto-save dataset in start_bootstrap_job: {e}")
 

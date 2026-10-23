@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useStore } from '../store';
+import { useStore, getStudyDatasets } from '../store';
 import AppSidebar from '../components/AppSidebar';
 import { formatModelType } from './Dashboard';
 
@@ -132,15 +132,15 @@ export const ArchiveView: React.FC = () => {
                                 <span className="file-row__time">{study.lastModified}</span>
                               </div>
                             </div>
-                            {datasetsByStudy[study.id] && (
-                              <div className="file-row archive-readonly archive-file">
+                            {getStudyDatasets(datasetsByStudy, study.id).map(ds => (
+                              <div className="file-row archive-readonly archive-file" key={ds.id || ds.filename}>
                                 <div className="file-row__left">
                                   <span className="material-symbols-outlined">dataset</span>
-                                  <span>{datasetsByStudy[study.id].filename}</span>
-                                  <span className="file-badge file-badge--default">{datasetsByStudy[study.id].rows.length} rows</span>
+                                  <span>{ds.filename}</span>
+                                  <span className="file-badge file-badge--default">{ds.rows.length} rows</span>
                                 </div>
                               </div>
-                            )}
+                            ))}
                             {models.filter(model => model.studyId === study.id).map(model => (
                               <div className="file-row archive-readonly archive-file" key={model.id}>
                                 <div className="file-row__left">
