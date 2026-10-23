@@ -160,14 +160,32 @@ export function initModelCanvas() {
     applyTransform();
   }
 
-  // --- Zoom & Pan ---
+  // --- Zoom & Pan (Trackpad two-finger move to pan, pinch to zoom) ---
   svg.addEventListener('wheel', (e) => {
     e.preventDefault();
-    const zoomIntensity = 0.08;
-    const wheel = e.deltaY < 0 ? 1 : -1;
-    const zoomFactor = Math.exp(wheel * zoomIntensity);
-    const newK = Math.max(0.1, Math.min(transform.k * zoomFactor, 3));
-    zoomToCenterOfMass(newK);
+    if (e.ctrlKey || e.metaKey) {
+      // Pinch to zoom (trackpad pinch gesture or Ctrl/Cmd + wheel)
+      const zoomIntensity = 0.008;
+      const zoomFactor = Math.exp(-e.deltaY * zoomIntensity);
+      const newK = Math.max(0.1, Math.min(transform.k * zoomFactor, 3));
+      
+      const rect = svg.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      const ratio = newK / transform.k;
+      transform.x = mouseX - (mouseX - transform.x) * ratio;
+      transform.y = mouseY - (mouseY - transform.y) * ratio;
+      transform.k = newK;
+      applyTransform();
+
+      const zoomLevelEl = document.getElementById('hud-zoom-level');
+      if (zoomLevelEl) zoomLevelEl.textContent = `${Math.round(transform.k * 100)}%`;
+    } else {
+      // Moving two fingers on trackpad or scrolling mouse wheel -> pan canvas
+      transform.x -= e.deltaX;
+      transform.y -= e.deltaY;
+      applyTransform();
+    }
   }, { passive: false });
 
   let isPanning = false;
@@ -2621,10 +2639,16 @@ export function initModelCanvas() {
 
   window.addEventListener('click', hideContextMenu);
 
+  let contextMenuMousePos = null;
+
   function showContextMenu(e, id) {
     e.preventDefault();
     e.stopPropagation();
     ctxTargetId = id;
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX;
+    pt.y = e.clientY;
+    contextMenuMousePos = pt.matrixTransform(zoomLayer.getScreenCTM().inverse());
     
     // Select the item
     if (!e.shiftKey) clearSelection();
@@ -2667,6 +2691,11 @@ export function initModelCanvas() {
   }
 
   svg.addEventListener('contextmenu', (e) => {
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX;
+    pt.y = e.clientY;
+    contextMenuMousePos = pt.matrixTransform(zoomLayer.getScreenCTM().inverse());
+
     if (e.target === svg || e.target === bgRect) {
       e.preventDefault();
       ctxTargetId = null;
@@ -2747,7 +2776,58 @@ export function initModelCanvas() {
     const currentDatasetCols = (window.__activeDatasetColumns || []).map(c => String(c).trim().toLowerCase());
     const hasDataset = currentDatasetCols.length > 0;
 
-    const OFFSET = 35;
+    // Calculate bounding box of copied elements
+    let copiedMinX = Infinity, copiedMaxX = -Infinity;
+    let copiedMinY = Infinity, copiedMaxY = -Infinity;
+    payload.nodes.forEach(n => {
+      copiedMinX = Math.min(copiedMinX, n.x);
+      copiedMaxX = Math.max(copiedMaxX, n.x);
+      copiedMinY = Math.min(copiedMinY, n.y);
+      copiedMaxY = Math.max(copiedMaxY, n.y);
+    });
+    const copiedCenterX = (copiedMinX + copiedMaxX) / 2;
+    const copiedCenterY = (copiedMinY + copiedMaxY) / 2;
+
+    const isSameModel = payload.nodes.some(pn => nodes.some(n => n.id === pn.id));
+
+    let shiftX = 0;
+    let shiftY = 0;
+
+    if (contextMenuMousePos) {
+      // User right-clicked on canvas to paste -> place center at right-click location!
+      shiftX = contextMenuMousePos.x - copiedCenterX;
+      shiftY = contextMenuMousePos.y - copiedCenterY;
+      contextMenuMousePos = null;
+    } else if (isSameModel) {
+      // Pasting within the same model -> offset slightly
+      shiftX = 40;
+      shiftY = 40;
+    } else if (nodes.length > 0) {
+      // Cross-model paste into a canvas that has an existing model:
+      // Find bounding box of the existing model
+      let existMinX = Infinity, existMaxX = -Infinity;
+      let existMinY = Infinity, existMaxY = -Infinity;
+      nodes.forEach(n => {
+        existMinX = Math.min(existMinX, n.x);
+        existMaxX = Math.max(existMaxX, n.x);
+        existMinY = Math.min(existMinY, n.y);
+        existMaxY = Math.max(existMaxY, n.y);
+      });
+
+      // Place neatly to the right of the existing model (with 80px gap), top-aligned
+      shiftX = (existMaxX + 80) - copiedMinX;
+      shiftY = existMinY - copiedMinY;
+    } else {
+      // Target model is empty -> center in the visible viewport!
+      const rect = svg.getBoundingClientRect();
+      const pt = svg.createSVGPoint();
+      pt.x = rect.left + rect.width / 2;
+      pt.y = rect.top + rect.height / 2;
+      const viewCenter = pt.matrixTransform(zoomLayer.getScreenCTM().inverse());
+      shiftX = viewCenter.x - copiedCenterX;
+      shiftY = viewCenter.y - copiedCenterY;
+    }
+
     const idMap = new Map();
 
     // Generate new unique IDs
@@ -2764,8 +2844,8 @@ export function initModelCanvas() {
       if (oldNode.parentId && idMap.has(oldNode.parentId)) {
         newNode.parentId = idMap.get(oldNode.parentId);
       }
-      newNode.x = (oldNode.x || 0) + OFFSET;
-      newNode.y = (oldNode.y || 0) + OFFSET;
+      newNode.x = (oldNode.x || 0) + shiftX;
+      newNode.y = (oldNode.y || 0) + shiftY;
 
       // Dataset compatibility check:
       // If indicator, check if its label exists in current dataset!
@@ -2796,8 +2876,8 @@ export function initModelCanvas() {
         newEdge.targetId = newTarget;
         if (newEdge.waypoints) {
           newEdge.waypoints.forEach(wp => {
-            wp.x += OFFSET;
-            wp.y += OFFSET;
+            wp.x += shiftX;
+            wp.y += shiftY;
           });
         }
         newEdges.push(newEdge);
