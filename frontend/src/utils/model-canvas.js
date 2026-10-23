@@ -2057,6 +2057,20 @@ export function initModelCanvas() {
   function handleNodeMouseDown(e, node) {
     hideLatentHoverPopup();
     e.stopPropagation();
+
+    // Only LEFT-click (e.button === 0) initiates dragging or canvas operations
+    if (e.button !== 0) {
+      if (e.button === 2) {
+        // Right-click: ensure target node is selected for context actions, but NEVER drag!
+        if (!e.shiftKey && !selectedIds.has(node.id)) {
+          clearSelection();
+        }
+        selectedIds.add(node.id);
+        render();
+      }
+      return;
+    }
+    
     e.preventDefault();
     
     if (mode === 'erase') {
@@ -2097,6 +2111,13 @@ export function initModelCanvas() {
   }
 
   window.addEventListener('mousemove', (e) => {
+    // If context menu is open, completely freeze any node movement!
+    if (contextMenu && contextMenu.style.display === 'block') {
+      draggingNode = null;
+      isMarquee = false;
+      return;
+    }
+
     if (pendingWaypoint) {
       const pt = svg.createSVGPoint();
       pt.x = e.clientX;
@@ -2510,6 +2531,8 @@ export function initModelCanvas() {
 
   function hideContextMenu() {
     contextMenu.style.display = 'none';
+    draggingNode = null;
+    isMarquee = false;
   }
   
   contextMenu.innerHTML = `
@@ -2644,6 +2667,8 @@ export function initModelCanvas() {
   function showContextMenu(e, id) {
     e.preventDefault();
     e.stopPropagation();
+    draggingNode = null;
+    isMarquee = false;
     ctxTargetId = id;
     const pt = svg.createSVGPoint();
     pt.x = e.clientX;
@@ -2651,7 +2676,9 @@ export function initModelCanvas() {
     contextMenuMousePos = pt.matrixTransform(zoomLayer.getScreenCTM().inverse());
     
     // Select the item
-    if (!e.shiftKey) clearSelection();
+    if (!e.shiftKey && !selectedIds.has(id)) {
+      clearSelection();
+    }
     selectedIds.add(id);
     render();
     
@@ -2691,6 +2718,8 @@ export function initModelCanvas() {
   }
 
   svg.addEventListener('contextmenu', (e) => {
+    draggingNode = null;
+    isMarquee = false;
     const pt = svg.createSVGPoint();
     pt.x = e.clientX;
     pt.y = e.clientY;
