@@ -337,7 +337,7 @@ a:hover {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 6px;
   flex-shrink: 0;
 }
 
@@ -1544,9 +1544,13 @@ body.is-tab-sliding * {
 .v-divider {
   height: 14px;
   width: 1px;
-  background-color: rgba(0, 0, 0, 0.08);
-  margin: 0 4px;
+  background-color: var(--color-border-divider, rgba(0, 0, 0, 0.12));
+  margin: 0;
   flex-shrink: 0;
+}
+
+[data-theme="dark"] .v-divider {
+  background-color: rgba(255, 255, 255, 0.2);
 }
 
 .v-divider--sm {
