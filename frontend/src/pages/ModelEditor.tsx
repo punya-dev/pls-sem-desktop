@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
-import { initModelCanvas, exportModelSpec, getModelCanvasState, loadModelCanvasState, setCanvasResults, renderModelCanvas, clearModelCanvas, resetModelStyles } from '../utils/model-canvas';
+import { initModelCanvas, exportModelSpec, getModelCanvasState, loadModelCanvasState, setCanvasResults, renderModelCanvas, clearModelCanvas, resetModelStyles, setCanvasDatasetColumns } from '../utils/model-canvas';
 import { BootstrapModal } from '../components/BootstrapModal';
 import { AnalysisModal } from '../components/AnalysisModal';
 import { AdvancedResultPanels } from '../components/AdvancedResultPanels';
@@ -223,6 +223,11 @@ const ModelEditor = () => {
   const [lastCalculatedModel, setLastCalculatedModel] = useState<{ spec: any; layout: any } | null>(null);
   const lastCalculatedModelRef = useRef<{ spec: any; layout: any } | null>(null);
 
+  // Live Auto-Recalculate After First Calculation
+  const [hasCalculatedOnce, setHasCalculatedOnce] = useState(false);
+  const hasCalculatedOnceRef = useRef(false);
+  const isAutoCalculatingRef = useRef(false);
+
   // Snapshot modal state
   const [isSnapshotModalOpen, setIsSnapshotModalOpen] = useState(false);
   const [snapshotName, setSnapshotName] = useState('');
@@ -278,6 +283,11 @@ const ModelEditor = () => {
       setActiveDataset(null);
     }
   }, [activeStudyId, datasetsByStudy, activeStudy?.path, activeStudy?.name, setStudyDataset]);
+
+  useEffect(() => {
+    const cols = activeDataset?.variables?.map(v => v.name) || [];
+    setCanvasDatasetColumns(cols);
+  }, [activeDataset]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -421,11 +431,53 @@ const ModelEditor = () => {
       } else {
         setAutoSaveError(null);
         setAutoSaveStatus('saved');
+        if (hasCalculatedOnceRef.current) {
+          performSilentRecalculate();
+        }
       }
     } catch (err: any) {
       console.warn('Auto-save error:', err);
       setAutoSaveError(err?.message || 'Unknown save error');
       setAutoSaveStatus('error');
+    }
+  };
+
+  const performSilentRecalculate = async () => {
+    if (!hasCalculatedOnceRef.current || isAutoCalculatingRef.current || !activeStudy?.path) return;
+    try {
+      isAutoCalculatingRef.current = true;
+      const spec = exportModelSpec();
+      const layout = getModelCanvasState();
+      const datasetHeaders = activeDataset?.variables?.map(v => v.name);
+
+      // Validate quietly - if model is currently invalid/incomplete while editing, skip gracefully
+      const valRes = await api.validateModel(spec, activeStudy.path, datasetHeaders);
+      if (!valRes.is_valid) {
+        setIsModelOutdated(true);
+        return;
+      }
+
+      const runRes = await api.runPlsModel(activeStudy.path, spec, {
+        columns: datasetHeaders,
+        rows: activeDataset?.rows,
+        dataset_name: activeDataset?.filename,
+        model_id: effectiveModelId || undefined,
+        diagram_layout: layout,
+      });
+
+      if (runRes && runRes.results) {
+        setPlsResults(runRes.results);
+        plsResultsRef.current = runRes.results;
+        setCanvasResults(runRes.results);
+        const calculatedSnapshot = { spec, layout };
+        setLastCalculatedModel(calculatedSnapshot);
+        lastCalculatedModelRef.current = calculatedSnapshot;
+        setIsModelOutdated(false);
+      }
+    } catch (err) {
+      console.debug('Silent recalculate skipped:', err);
+    } finally {
+      isAutoCalculatingRef.current = false;
     }
   };
 
@@ -543,6 +595,8 @@ const ModelEditor = () => {
         setLastCalculatedModel(calculatedSnapshot);
         lastCalculatedModelRef.current = calculatedSnapshot;
         setIsModelOutdated(false);
+        setHasCalculatedOnce(true);
+        hasCalculatedOnceRef.current = true;
       }
 
       setValidationSuccessToast(`PLS-SEM Calculation Complete! Converged in ${runRes.results?.iterations || 0} iterations`);
@@ -562,6 +616,8 @@ const ModelEditor = () => {
         if (res && res.results) {
           setPlsResults(res.results);
           plsResultsRef.current = res.results;
+          setHasCalculatedOnce(true);
+          hasCalculatedOnceRef.current = true;
           const calculatedSpec = res.spec || exportModelSpec();
           const calculatedLayout = res.diagram_layout || getModelCanvasState();
           const calculatedSnapshot = { spec: calculatedSpec, layout: calculatedLayout };
@@ -573,8 +629,8 @@ const ModelEditor = () => {
             try {
               const currentSpec = exportModelSpec();
               if (!isModelTopologyEqual(currentSpec, calculatedSpec)) {
-                setCanvasResults(null);
                 setIsModelOutdated(true);
+                setCanvasResults(res.results);
               } else {
                 setCanvasResults(res.results);
                 setIsModelOutdated(false);
@@ -593,6 +649,8 @@ const ModelEditor = () => {
             (viewSlider as HTMLElement).style.display = 'flex';
           }
         } else {
+          setHasCalculatedOnce(false);
+          hasCalculatedOnceRef.current = false;
           setPlsResults(null);
           plsResultsRef.current = null;
           setCanvasResults(null);
@@ -601,6 +659,8 @@ const ModelEditor = () => {
           setIsModelOutdated(false);
         }
       }).catch(() => {
+        setHasCalculatedOnce(false);
+        hasCalculatedOnceRef.current = false;
         setPlsResults(null);
         plsResultsRef.current = null;
         setCanvasResults(null);
@@ -1167,8 +1227,10 @@ const ModelEditor = () => {
         try {
           const currentSpec = exportModelSpec();
           if (!isModelTopologyEqual(currentSpec, lastCalculatedModelRef.current.spec)) {
-            setCanvasResults(null);
             setIsModelOutdated(true);
+            if (!hasCalculatedOnceRef.current) {
+              setCanvasResults(null);
+            }
           } else {
             setIsModelOutdated(false);
             if (plsResultsRef.current || plsResults) {

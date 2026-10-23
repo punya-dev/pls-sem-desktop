@@ -173,12 +173,37 @@ export function initModelCanvas() {
   let isPanning = false;
   let panStart = { x: 0, y: 0 };
   let panTransformStart = { x: 0, y: 0 };
+  let isSpacePressed = false;
+
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'Space' && !e.repeat) {
+      const isInput = e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable);
+      if (!isInput) {
+        isSpacePressed = true;
+        svg.style.cursor = 'grab';
+      }
+    }
+  });
+
+  window.addEventListener('keyup', (e) => {
+    if (e.code === 'Space') {
+      isSpacePressed = false;
+      if (!isPanning) {
+        svg.style.cursor = 'default';
+      }
+    }
+  });
+
+  let isMarquee = false;
+  let marqueeStart = { x: 0, y: 0 };
+  let marqueeInitialSelected = new Set();
+  let marqueeEl = null;
 
   svg.addEventListener('mousedown', (e) => {
     // Prevent browser native text selection dragging on canvas
     e.preventDefault();
 
-    if (e.button === 1 || (e.button === 0 && e.shiftKey)) { // Middle click or Shift+Left
+    if (e.button === 1 || (e.button === 0 && isSpacePressed)) { // Middle click or Space+Left
       isPanning = true;
       panStart = { x: e.clientX, y: e.clientY };
       panTransformStart = { x: transform.x, y: transform.y };
@@ -196,6 +221,34 @@ export function initModelCanvas() {
       }
       setMode('select');
       updateToolbarUI(document.querySelector('.tb-btn[title*="Select"]'));
+    } else if (mode === 'select' && e.button === 0 && (e.target === svg || e.target === bgRect)) {
+      // Marquee drag-to-select on empty canvas
+      isMarquee = true;
+      const pt = svg.createSVGPoint();
+      pt.x = e.clientX;
+      pt.y = e.clientY;
+      const svgPt = pt.matrixTransform(zoomLayer.getScreenCTM().inverse());
+      marqueeStart = { x: svgPt.x, y: svgPt.y };
+      marqueeInitialSelected = e.shiftKey ? new Set(selectedIds) : new Set();
+      if (!e.shiftKey) {
+        selectedIds.clear();
+      }
+
+      if (!marqueeEl) {
+        marqueeEl = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        marqueeEl.setAttribute('class', 'selection-marquee');
+        marqueeEl.style.fill = 'rgba(107, 78, 230, 0.12)';
+        marqueeEl.style.stroke = 'var(--color-accent, #6B4EE6)';
+        marqueeEl.style.strokeWidth = '1.5px';
+        marqueeEl.style.strokeDasharray = '4 4';
+        marqueeEl.style.pointerEvents = 'none';
+      }
+      marqueeEl.setAttribute('x', marqueeStart.x);
+      marqueeEl.setAttribute('y', marqueeStart.y);
+      marqueeEl.setAttribute('width', 0);
+      marqueeEl.setAttribute('height', 0);
+      guidesLayer.appendChild(marqueeEl);
+      render();
     } else if (e.target === svg || e.target === bgRect) {
       clearSelection();
     }
@@ -208,13 +261,65 @@ export function initModelCanvas() {
       transform.x = panTransformStart.x + dx;
       transform.y = panTransformStart.y + dy;
       applyTransform();
+      return;
+    }
+
+    if (isMarquee && marqueeEl) {
+      const pt = svg.createSVGPoint();
+      pt.x = e.clientX;
+      pt.y = e.clientY;
+      const svgPt = pt.matrixTransform(zoomLayer.getScreenCTM().inverse());
+
+      const minX = Math.min(marqueeStart.x, svgPt.x);
+      const minY = Math.min(marqueeStart.y, svgPt.y);
+      const width = Math.abs(svgPt.x - marqueeStart.x);
+      const height = Math.abs(svgPt.y - marqueeStart.y);
+
+      marqueeEl.setAttribute('x', minX);
+      marqueeEl.setAttribute('y', minY);
+      marqueeEl.setAttribute('width', width);
+      marqueeEl.setAttribute('height', height);
+
+      selectedIds.clear();
+      marqueeInitialSelected.forEach(id => selectedIds.add(id));
+
+      nodes.forEach(n => {
+        const nw = n.width || (n.isLatent !== false ? (NODE_R * 2) : 64);
+        const nh = n.height || (n.isLatent !== false ? (NODE_R * 2) : 24);
+        const nx1 = n.x - nw / 2;
+        const ny1 = n.y - nh / 2;
+        const nx2 = n.x + nw / 2;
+        const ny2 = n.y + nh / 2;
+
+        const intersects = (nx2 >= minX && nx1 <= minX + width && ny2 >= minY && ny1 <= minY + height);
+        if (intersects) {
+          selectedIds.add(n.id);
+        }
+      });
+
+      edges.forEach(edge => {
+        if (selectedIds.has(edge.sourceId) && selectedIds.has(edge.targetId)) {
+          selectedIds.add(edge.id);
+        }
+      });
+
+      render();
+      return;
     }
   });
 
   window.addEventListener('mouseup', (e) => {
     if (isPanning) {
       isPanning = false;
-      svg.style.cursor = 'default';
+      svg.style.cursor = isSpacePressed ? 'grab' : 'default';
+    }
+    if (isMarquee) {
+      isMarquee = false;
+      if (marqueeEl && marqueeEl.parentNode) {
+        marqueeEl.parentNode.removeChild(marqueeEl);
+      }
+      marqueeEl = null;
+      render();
     }
   });
 
@@ -1595,7 +1700,9 @@ export function initModelCanvas() {
         let w = node.width || indWidth;
         let h = node.height || indHeight;
         
-        g.appendChild(createNodeShape(node, indWidth, indHeight, 'var(--canvas-manifest-fill)', 'var(--canvas-manifest-stroke)', isSelected));
+        const defaultFill = node.isMissingInDataset ? 'var(--canvas-missing-fill, #fef2f2)' : 'var(--canvas-manifest-fill)';
+        const defaultStroke = node.isMissingInDataset ? '#ef4444' : 'var(--canvas-manifest-stroke)';
+        g.appendChild(createNodeShape(node, indWidth, indHeight, defaultFill, defaultStroke, isSelected));
 
         if (isSelected) {
           const gap = 8;
@@ -1606,7 +1713,7 @@ export function initModelCanvas() {
           selShape.setAttribute('height', h + gap*2);
           selShape.setAttribute('rx', '4');
           selShape.setAttribute('fill', 'none');
-          selShape.setAttribute('stroke', 'var(--color-accent, #6B4EE6)');
+          selShape.setAttribute('stroke', node.isMissingInDataset ? '#ef4444' : 'var(--color-accent, #6B4EE6)');
           selShape.setAttribute('stroke-width', '2');
           selShape.setAttribute('stroke-dasharray', '6 6');
           g.appendChild(selShape);
@@ -1617,7 +1724,7 @@ export function initModelCanvas() {
           handle.setAttribute('y', h/2 + gap - 4);
           handle.setAttribute('width', '8');
           handle.setAttribute('height', '8');
-          handle.setAttribute('fill', 'var(--color-accent, #6B4EE6)');
+          handle.setAttribute('fill', node.isMissingInDataset ? '#ef4444' : 'var(--color-accent, #6B4EE6)');
           handle.style.cursor = 'se-resize';
           handle.addEventListener('mousedown', (e) => {
             e.stopPropagation();
@@ -1637,12 +1744,41 @@ export function initModelCanvas() {
         indText.textContent = node.label;
         indText.setAttribute('y', 4);
         indText.setAttribute('text-anchor', 'middle');
-        indText.setAttribute('fill', node.color || 'var(--canvas-manifest-text)');
+        indText.setAttribute('fill', node.isMissingInDataset ? '#ef4444' : (node.color || 'var(--canvas-manifest-text)'));
         indText.setAttribute('font-size', node.fontSize || '10');
         if (node.bold) indText.setAttribute('font-weight', 'bold');
         if (node.italic) indText.setAttribute('font-style', 'italic');
         if (node.underline) indText.setAttribute('text-decoration', 'underline');
         indText.setAttribute('font-family', node.fontFamily || 'var(--font-mono)');
+        g.appendChild(indText);
+
+        if (node.isMissingInDataset) {
+          const warnBadge = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+          warnBadge.setAttribute('transform', `translate(${w/2 - 4}, ${-h/2 + 4})`);
+          warnBadge.style.cursor = 'help';
+          
+          const warnCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          warnCircle.setAttribute('r', '6');
+          warnCircle.setAttribute('fill', '#ef4444');
+          warnCircle.setAttribute('stroke', '#ffffff');
+          warnCircle.setAttribute('stroke-width', '1.2');
+          
+          const warnText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          warnText.textContent = '!';
+          warnText.setAttribute('text-anchor', 'middle');
+          warnText.setAttribute('dominant-baseline', 'central');
+          warnText.setAttribute('fill', '#ffffff');
+          warnText.setAttribute('font-size', '9');
+          warnText.setAttribute('font-weight', 'bold');
+          
+          const titleEl = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+          titleEl.textContent = node.datasetError || `Column "${node.label}" not found in current dataset`;
+          warnBadge.appendChild(titleEl);
+
+          warnBadge.appendChild(warnCircle);
+          warnBadge.appendChild(warnText);
+          g.appendChild(warnBadge);
+        }
         g.appendChild(indText);
         
         // Path between parent latent and this indicator
@@ -2130,8 +2266,22 @@ export function initModelCanvas() {
         }
       }
       
-      draggingNode.x = newX;
-      draggingNode.y = newY;
+      const dx = newX - draggingNode.x;
+      const dy = newY - draggingNode.y;
+      if (dx !== 0 || dy !== 0) {
+        const nodesToMove = new Set(selectedIds);
+        nodes.forEach(n => {
+          if (n.parentId && nodesToMove.has(n.parentId)) {
+            nodesToMove.add(n.id);
+          }
+        });
+        nodes.forEach(n => {
+          if (nodesToMove.has(n.id)) {
+            n.x += dx;
+            n.y += dy;
+          }
+        });
+      }
       render();
     }
     
@@ -2189,6 +2339,7 @@ export function initModelCanvas() {
       draggingNode = null;
       guidesLayer.innerHTML = ''; // clear guides
       pushHistory();
+      window.dispatchEvent(new CustomEvent('canvas-changed'));
     }
     
     if (tempConnecting) {
@@ -2344,8 +2495,14 @@ export function initModelCanvas() {
   }
   
   contextMenu.innerHTML = `
+    <div class="ctx-item" id="ctx-copy" style="padding: 6px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
+      <span class="material-symbols-outlined" style="font-size: 16px;">content_copy</span> Copy
+    </div>
+    <div class="ctx-item" id="ctx-paste" style="padding: 6px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
+      <span class="material-symbols-outlined" style="font-size: 16px;">content_paste</span> Paste
+    </div>
     <div class="ctx-item" id="ctx-duplicate" style="padding: 6px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
-      <span class="material-symbols-outlined" style="font-size: 16px;">content_copy</span> Duplicate
+      <span class="material-symbols-outlined" style="font-size: 16px;">control_point_duplicate</span> Duplicate
     </div>
     <div class="ctx-item" id="ctx-rename" style="padding: 6px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
       <span class="material-symbols-outlined" style="font-size: 16px;">edit</span> Rename
@@ -2366,6 +2523,20 @@ export function initModelCanvas() {
   });
 
   let ctxTargetId = null;
+
+  contextMenu.querySelector('#ctx-copy')?.addEventListener('click', () => {
+    if (ctxTargetId && !selectedIds.has(ctxTargetId)) {
+      selectedIds.clear();
+      selectedIds.add(ctxTargetId);
+    }
+    copySelected();
+    hideContextMenu();
+  });
+
+  contextMenu.querySelector('#ctx-paste')?.addEventListener('click', () => {
+    pasteClipboard();
+    hideContextMenu();
+  });
 
   contextMenu.querySelector('#ctx-delete').addEventListener('click', () => {
     if (ctxTargetId) {
@@ -2481,6 +2652,11 @@ export function initModelCanvas() {
       }
     }
     
+    const ctxCopy = contextMenu.querySelector('#ctx-copy');
+    const ctxPaste = contextMenu.querySelector('#ctx-paste');
+    if (ctxCopy) ctxCopy.style.display = 'flex';
+    if (ctxPaste) ctxPaste.style.display = 'flex';
+
     // Position menu
     let x = e.clientX;
     let y = e.clientY;
@@ -2493,9 +2669,178 @@ export function initModelCanvas() {
   svg.addEventListener('contextmenu', (e) => {
     if (e.target === svg || e.target === bgRect) {
       e.preventDefault();
-      hideContextMenu();
+      ctxTargetId = null;
+      contextMenu.style.display = 'block';
+      const ctxCopy = contextMenu.querySelector('#ctx-copy');
+      const ctxPaste = contextMenu.querySelector('#ctx-paste');
+      const ctxDuplicate = contextMenu.querySelector('#ctx-duplicate');
+      const ctxRename = contextMenu.querySelector('#ctx-rename');
+      const ctxToggleMode = contextMenu.querySelector('#ctx-toggle-mode');
+      const ctxDelete = contextMenu.querySelector('#ctx-delete');
+
+      if (ctxCopy) ctxCopy.style.display = selectedIds.size > 0 ? 'flex' : 'none';
+      if (ctxPaste) ctxPaste.style.display = 'flex';
+      if (ctxDuplicate) ctxDuplicate.style.display = 'none';
+      if (ctxRename) ctxRename.style.display = 'none';
+      if (ctxToggleMode) ctxToggleMode.style.display = 'none';
+      if (ctxDelete) ctxDelete.style.display = selectedIds.size > 0 ? 'flex' : 'none';
+
+      let x = e.clientX;
+      let y = e.clientY;
+      if (x + 120 > window.innerWidth) x -= 120;
+      if (y + 100 > window.innerHeight) y -= 100;
+      contextMenu.style.left = `${x}px`;
+      contextMenu.style.top = `${y}px`;
     }
   });
+
+  function copySelected() {
+    if (selectedIds.size === 0) return;
+    
+    // Find all selected latent and text nodes
+    const selectedNodes = nodes.filter(n => selectedIds.has(n.id));
+    
+    // Automatically include child indicators of copied latent constructs
+    const latentIds = new Set(selectedNodes.filter(n => n.isLatent).map(n => n.id));
+    const childIndicators = nodes.filter(n => n.parentId && latentIds.has(n.parentId));
+    
+    const allNodesToCopy = [...selectedNodes];
+    childIndicators.forEach(ind => {
+      if (!allNodesToCopy.some(n => n.id === ind.id)) {
+        allNodesToCopy.push(ind);
+      }
+    });
+
+    const copiedNodeIds = new Set(allNodesToCopy.map(n => n.id));
+
+    // Copy edges between any of these nodes
+    const copiedEdges = edges.filter(e => copiedNodeIds.has(e.sourceId) && copiedNodeIds.has(e.targetId));
+
+    const payload = {
+      version: '1.0',
+      timestamp: Date.now(),
+      nodes: JSON.parse(JSON.stringify(allNodesToCopy)),
+      edges: JSON.parse(JSON.stringify(copiedEdges)),
+      datasetColumns: window.__activeDatasetColumns || []
+    };
+
+    window.__statsem_clipboard = payload;
+    try {
+      localStorage.setItem('statsem_model_clipboard', JSON.stringify(payload));
+    } catch (e) {}
+
+    console.log(`[Canvas] Copied ${allNodesToCopy.length} nodes and ${copiedEdges.length} edges.`);
+  }
+
+  function pasteClipboard() {
+    let payload = window.__statsem_clipboard;
+    if (!payload) {
+      try {
+        const stored = localStorage.getItem('statsem_model_clipboard');
+        if (stored) payload = JSON.parse(stored);
+      } catch (e) {}
+    }
+
+    if (!payload || !payload.nodes || payload.nodes.length === 0) return;
+
+    // Determine current active dataset columns
+    const currentDatasetCols = (window.__activeDatasetColumns || []).map(c => String(c).trim().toLowerCase());
+    const hasDataset = currentDatasetCols.length > 0;
+
+    const OFFSET = 35;
+    const idMap = new Map();
+
+    // Generate new unique IDs
+    payload.nodes.forEach(n => {
+      idMap.set(n.id, generateId());
+    });
+
+    const newNodes = [];
+    let hasMissingVariables = false;
+
+    payload.nodes.forEach(oldNode => {
+      const newNode = JSON.parse(JSON.stringify(oldNode));
+      newNode.id = idMap.get(oldNode.id);
+      if (oldNode.parentId && idMap.has(oldNode.parentId)) {
+        newNode.parentId = idMap.get(oldNode.parentId);
+      }
+      newNode.x = (oldNode.x || 0) + OFFSET;
+      newNode.y = (oldNode.y || 0) + OFFSET;
+
+      // Dataset compatibility check:
+      // If indicator, check if its label exists in current dataset!
+      if (!newNode.isLatent && !newNode.isText) {
+        const colName = String(newNode.label || '').trim().toLowerCase();
+        if (hasDataset && !currentDatasetCols.includes(colName)) {
+          newNode.isMissingInDataset = true;
+          newNode.datasetError = `Column "${newNode.label}" is missing from active dataset`;
+          newNode.stroke = '#ef4444';
+          newNode.fill = '#fef2f2';
+          hasMissingVariables = true;
+        } else {
+          newNode.isMissingInDataset = false;
+        }
+      }
+
+      newNodes.push(newNode);
+    });
+
+    const newEdges = [];
+    payload.edges.forEach(oldEdge => {
+      const newSource = idMap.get(oldEdge.sourceId);
+      const newTarget = idMap.get(oldEdge.targetId);
+      if (newSource && newTarget) {
+        const newEdge = JSON.parse(JSON.stringify(oldEdge));
+        newEdge.id = generateId();
+        newEdge.sourceId = newSource;
+        newEdge.targetId = newTarget;
+        if (newEdge.waypoints) {
+          newEdge.waypoints.forEach(wp => {
+            wp.x += OFFSET;
+            wp.y += OFFSET;
+          });
+        }
+        newEdges.push(newEdge);
+      }
+    });
+
+    // Add to canvas
+    nodes.push(...newNodes);
+    edges.push(...newEdges);
+
+    // Select the pasted elements
+    selectedIds.clear();
+    newNodes.forEach(n => selectedIds.add(n.id));
+
+    if (emptyHint) {
+      emptyHint.style.display = nodes.length === 0 ? 'block' : 'none';
+    }
+
+    render();
+    pushHistory();
+    window.dispatchEvent(new CustomEvent('canvas-changed'));
+
+    if (hasMissingVariables) {
+      console.warn('[Canvas] Pasted elements contain indicators not in active dataset (marked in red).');
+    }
+  }
+
+  function validateDatasetVariables() {
+    const currentDatasetCols = (window.__activeDatasetColumns || []).map(c => String(c).trim().toLowerCase());
+    if (currentDatasetCols.length === 0) return;
+    nodes.forEach(n => {
+      if (n.isLatent === false && !n.isText) {
+        const colName = String(n.label || '').trim().toLowerCase();
+        if (!currentDatasetCols.includes(colName)) {
+          n.isMissingInDataset = true;
+          n.datasetError = `Column "${n.label}" is missing from active dataset`;
+        } else {
+          n.isMissingInDataset = false;
+          n.datasetError = null;
+        }
+      }
+    });
+  }
 
   function deleteSelected() {
     if (selectedIds.size === 0) return;
@@ -2565,6 +2910,26 @@ export function initModelCanvas() {
 
     // Classic Undo & Redo shortcuts
     if (e.metaKey || e.ctrlKey) {
+      if (e.key.toLowerCase() === 'c') {
+        e.preventDefault();
+        e.stopPropagation();
+        copySelected();
+        return;
+      }
+      if (e.key.toLowerCase() === 'v') {
+        e.preventDefault();
+        e.stopPropagation();
+        pasteClipboard();
+        return;
+      }
+      if (e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        e.stopPropagation();
+        selectedIds.clear();
+        nodes.forEach(n => selectedIds.add(n.id));
+        render();
+        return;
+      }
       if (e.key.toLowerCase() === 'z') {
         e.preventDefault();
         e.stopPropagation();
@@ -2697,6 +3062,9 @@ export function initModelCanvas() {
   window.deleteSelectedModelPart = deleteSelected;
   window.canvasUndo = undo;
   window.canvasRedo = redo;
+  window.copySelected = copySelected;
+  window.pasteClipboard = pasteClipboard;
+  window.validateDatasetVariables = validateDatasetVariables;
   window.setCanvasResults = setCanvasResults;
   window.renderModelCanvas = render;
   window.clearModelCanvas = clearModelCanvas;
@@ -2713,6 +3081,28 @@ export function initModelCanvas() {
       });
     }
   } catch (e) {}
+}
+
+export function copySelected() {
+  if (typeof window !== 'undefined' && window.copySelected) {
+    window.copySelected();
+  }
+}
+
+export function pasteClipboard() {
+  if (typeof window !== 'undefined' && window.pasteClipboard) {
+    window.pasteClipboard();
+  }
+}
+
+export function setCanvasDatasetColumns(columns) {
+  if (typeof window !== 'undefined') {
+    window.__activeDatasetColumns = columns || [];
+    if (window.validateDatasetVariables) {
+      window.validateDatasetVariables();
+      if (window.renderModelCanvas) window.renderModelCanvas();
+    }
+  }
 }
 
 export function resetModelStyles() {
