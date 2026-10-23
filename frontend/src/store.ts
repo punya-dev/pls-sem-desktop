@@ -90,6 +90,14 @@ export interface AppSettings {
   accentColor: string;
 }
 
+export const LICENSE_INFO = {
+  type: 'Faculty Multi-Seat',
+  licensee: 'Academic Licensee',
+  key: 'STATSEM-8492-7104-FAC-2026',
+  expiryDate: 'Dec 31, 2026',
+  daysRemaining: 108,
+};
+
 export interface DeleteConfirmDialog {
   title?: string;
   message?: string;
@@ -124,6 +132,11 @@ interface AppState {
   updateSettings: (partial: Partial<AppSettings>) => void;
   isSettingsOpen: boolean;
   setIsSettingsOpen: (open: boolean) => void;
+  settingsActiveTab: 'about' | 'appearance' | 'calculation' | 'canvas';
+  setSettingsActiveTab: (tab: 'about' | 'appearance' | 'calculation' | 'canvas') => void;
+  openSettings: (tab?: 'about' | 'appearance' | 'calculation' | 'canvas') => void;
+  isLicenseActive: boolean;
+  setIsLicenseActive: (active: boolean) => void;
   isSidebarCollapsed: boolean;
   toggleSidebar: () => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
@@ -269,6 +282,11 @@ export const useStore = create<AppState>()(
       }),
       isSettingsOpen: false,
       setIsSettingsOpen: (open) => set({ isSettingsOpen: open }),
+      settingsActiveTab: 'about',
+      setSettingsActiveTab: (tab) => set({ settingsActiveTab: tab }),
+      openSettings: (tab = 'about') => set({ isSettingsOpen: true, settingsActiveTab: tab }),
+      isLicenseActive: true,
+      setIsLicenseActive: (active) => set({ isLicenseActive: active }),
       isSidebarCollapsed: false,
       toggleSidebar: () => set((state) => ({ isSidebarCollapsed: !state.isSidebarCollapsed })),
       setSidebarCollapsed: (collapsed) => set({ isSidebarCollapsed: collapsed }),
@@ -985,6 +1003,7 @@ export const useStore = create<AppState>()(
         theme: state.theme,
         settings: state.settings,
         isSidebarCollapsed: state.isSidebarCollapsed,
+        isLicenseActive: state.isLicenseActive,
       }), // only persist these fields
       merge: (persistedState: any, currentState: AppState) => ({
         ...currentState,

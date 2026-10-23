@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { useStore } from '../store';
+import { useStore, LICENSE_INFO } from '../store';
 import TabBar from './TabBar';
 
 export const TitleBar: React.FC = () => {
-  const { theme, toggleTheme, openTab, setIsSettingsOpen } = useStore();
+  const { theme, toggleTheme, openTab, openSettings, isLicenseActive, setIsLicenseActive } = useStore();
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   useEffect(() => {
@@ -63,7 +63,6 @@ export const TitleBar: React.FC = () => {
     };
   }, []);
 
-  const [isLicenseActive, setIsLicenseActive] = useState(true);
   const [isLicenseHovered, setIsLicenseHovered] = useState(false);
   const [copiedKey, setCopiedKey] = useState(false);
   const licenseHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -77,16 +76,8 @@ export const TitleBar: React.FC = () => {
     licenseHideTimer.current = setTimeout(() => setIsLicenseHovered(false), 400);
   };
 
-  const licenseInfo = {
-    type: 'Faculty Multi-Seat',
-    licensee: 'Academic Licensee',
-    key: 'STATSEM-8492-7104-FAC-2026',
-    expiryDate: 'Dec 31, 2026',
-    daysRemaining: 108,
-  };
-
   const handleCopyKey = () => {
-    navigator.clipboard.writeText(licenseInfo.key);
+    navigator.clipboard.writeText(LICENSE_INFO.key);
     setCopiedKey(true);
     setTimeout(() => setCopiedKey(false), 2000);
   };
@@ -136,7 +127,7 @@ export const TitleBar: React.FC = () => {
             {theme === 'light' ? 'dark_mode' : 'light_mode'}
           </span>
         </button>
-        <button className="icon-btn" title="Settings" type="button" onClick={() => setIsSettingsOpen(true)}>
+        <button className="icon-btn" title="Settings" type="button" onClick={() => openSettings('about')}>
           <span className="material-symbols-outlined">settings</span>
         </button>
 
@@ -185,23 +176,23 @@ export const TitleBar: React.FC = () => {
                 <span className="license-popup-card__status-text" style={{ color: isLicenseActive ? '#059669' : '#DC2626' }}>
                   {isLicenseActive ? 'Active' : 'Inactive'}
                 </span>
-                <span className="license-popup-card__type">{licenseInfo.type}</span>
+                <span className="license-popup-card__type">{LICENSE_INFO.type}</span>
               </div>
 
               <div className="license-popup-card__rows">
                 <div className="license-popup-card__row">
                   <span className="license-popup-card__key-label">Licensee</span>
-                  <span className="license-popup-card__key-value">{licenseInfo.licensee}</span>
+                  <span className="license-popup-card__key-value">{LICENSE_INFO.licensee}</span>
                 </div>
                 <div className="license-popup-card__row">
                   <span className="license-popup-card__key-label">Expiry</span>
                   <span className="license-popup-card__key-value">
-                    {isLicenseActive ? `${licenseInfo.daysRemaining} days (${licenseInfo.expiryDate})` : 'Inactive'}
+                    {isLicenseActive ? `${LICENSE_INFO.daysRemaining} days (${LICENSE_INFO.expiryDate})` : 'Inactive'}
                   </span>
                 </div>
                 <div className="license-popup-card__row license-popup-card__row--mono">
                   <span className="license-popup-card__key-label">Key</span>
-                  <span className="license-popup-card__key-mono">{licenseInfo.key}</span>
+                  <span className="license-popup-card__key-mono">{LICENSE_INFO.key}</span>
                   <button
                     type="button"
                     className="license-popup-card__copy-btn"
@@ -226,7 +217,7 @@ export const TitleBar: React.FC = () => {
                 <button
                   type="button"
                   className="license-popup-card__action license-popup-card__action--manage"
-                  onClick={() => { setIsSettingsOpen(true); setIsLicenseHovered(false); }}
+                  onClick={() => { openSettings('about'); setIsLicenseHovered(false); }}
                 >
                   Manage
                 </button>
