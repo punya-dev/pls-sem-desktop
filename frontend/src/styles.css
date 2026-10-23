@@ -349,11 +349,6 @@ a:hover {
   flex-shrink: 0;
 }
 
-/* In compact / windowed mode, vertically center the logo and text to align directly with macOS traffic lights */
-.titlebar__left .brand {
-  transform: translateY(-3.5px);
-}
-
 /* In expanded (fullscreen) screen, left-align completely flush without traffic light space */
 body[data-window-fullscreen="true"] .titlebar__left {
   padding-left: 14px;
@@ -364,10 +359,6 @@ body[data-window-fullscreen="true"] .titlebar__traffic-light-space {
   width: 0 !important;
   min-width: 0 !important;
   margin: 0 !important;
-}
-
-body[data-window-fullscreen="true"] .titlebar__left .brand {
-  transform: none;
 }
 
 .titlebar__right .icon-btn {
@@ -1500,6 +1491,7 @@ body.is-tab-sliding * {
   font-size: var(--text-md);
   letter-spacing: -0.01em;
   color: var(--color-text-primary);
+  line-height: 1;
 }
 
 
