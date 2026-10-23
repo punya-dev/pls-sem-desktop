@@ -309,9 +309,14 @@ export const api = {
           model_id: modelId,
         }),
       });
-      return await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const errorMsg = data?.error || data?.detail?.[0]?.msg || (typeof data?.detail === 'string' ? data.detail : null) || `Server error (${res.status})`;
+        return { error: errorMsg };
+      }
+      return data;
     } catch (err: any) {
-      return { error: err?.message || 'Failed to save model' };
+      return { error: err?.message || 'Cannot connect to backend server (port 8721)' };
     }
   },
 

@@ -190,6 +190,7 @@ const ModelEditor = () => {
   const [activeText, setActiveText] = useState<string>('#1e293b');
 
   const [autoSaveStatus, setAutoSaveStatus] = useState<'saved' | 'saving' | 'error' | null>('saved');
+  const [autoSaveError, setAutoSaveError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveToast, setSaveToast] = useState<string | null>(null);
   const [isValidating, setIsValidating] = useState(false);
@@ -414,12 +415,16 @@ const ModelEditor = () => {
       const layout = getModelCanvasState();
       const res = await api.saveProjectModel(activeStudy.path, spec, layout, effectiveModelId || undefined);
       if (res.error) {
+        console.warn('Auto-save failed:', res.error);
+        setAutoSaveError(res.error);
         setAutoSaveStatus('error');
       } else {
+        setAutoSaveError(null);
         setAutoSaveStatus('saved');
       }
     } catch (err: any) {
       console.warn('Auto-save error:', err);
+      setAutoSaveError(err?.message || 'Unknown save error');
       setAutoSaveStatus('error');
     }
   };
@@ -1236,7 +1241,13 @@ const ModelEditor = () => {
           color: autoSaveStatus === 'error' ? '#ef4444' : 'var(--color-text-muted)',
           userSelect: 'none',
         }}
-        title={autoSaveStatus === 'saving' ? 'Saving changes...' : (autoSaveStatus === 'error' ? 'Failed to auto-save' : 'All changes saved automatically')}
+        title={
+          autoSaveStatus === 'saving'
+            ? 'Saving changes...'
+            : autoSaveStatus === 'error'
+            ? (autoSaveError ? `Auto-save error: ${autoSaveError}` : 'Failed to auto-save')
+            : 'All changes saved automatically'
+        }
       >
         <span
           style={{
