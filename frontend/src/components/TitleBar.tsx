@@ -142,31 +142,43 @@ export const TitleBar: React.FC = () => {
         >
           <button
             type="button"
-            className="license-status-btn"
+            className="icon-btn license-status-btn"
             style={{
+              padding: 0,
+              cursor: 'pointer',
+              background: 'transparent',
+              border: 'none',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              width: '28px',
-              height: '28px',
-              borderRadius: '50%',
-              border: `1.5px solid ${isLicenseActive ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
-              backgroundColor: isLicenseActive ? 'rgba(16, 185, 129, 0.08)' : 'rgba(239, 68, 68, 0.08)',
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
-              padding: 0,
             }}
             title={isLicenseActive ? 'License Active' : 'License Inactive'}
           >
             <span
+              className="license-status-circle"
               style={{
-                width: '8px',
-                height: '8px',
+                width: '20px',
+                height: '20px',
                 borderRadius: '50%',
-                backgroundColor: isLicenseActive ? '#10B981' : '#EF4444',
-                boxShadow: isLicenseActive ? '0 0 6px rgba(16, 185, 129, 0.6)' : '0 0 6px rgba(239, 68, 68, 0.6)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: `1.5px solid ${isLicenseActive ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)'}`,
+                backgroundColor: isLicenseActive ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+                transition: 'all 0.15s ease',
+                boxSizing: 'border-box',
               }}
-            />
+            >
+              <span
+                style={{
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '50%',
+                  backgroundColor: isLicenseActive ? '#10B981' : '#EF4444',
+                  boxShadow: isLicenseActive ? '0 0 6px rgba(16, 185, 129, 0.6)' : '0 0 6px rgba(239, 68, 68, 0.6)',
+                }}
+              />
+            </span>
           </button>
 
           {isLicenseHovered && (
