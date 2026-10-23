@@ -154,10 +154,26 @@ class ExportZipRequest(BaseModel):
     include_results: bool = True
 
 
+class ExportWorkspaceRequest(BaseModel):
+    workspace_path: str
+    out_path: str
+
+
 class ImportZipRequest(BaseModel):
     zip_path: str
     workspace_dir: str
     on_conflict: str = "rename"
+
+
+class ImportFileRequest(BaseModel):
+    file_path: str
+    workspace_dir: str
+    on_conflict: str = "rename"
+
+
+class ImportWorkspaceZipRequest(BaseModel):
+    zip_path: str
+    target_parent_folder: Optional[str] = None
 
 
 class DeriveDatasetRequest(BaseModel):
@@ -957,7 +973,80 @@ def project_export_zip(req: ExportZipRequest):
 def project_import_zip(req: ImportZipRequest):
     try:
         proj_path = project_io.import_project_zip(req.zip_path, req.workspace_dir, on_conflict=req.on_conflict)
-        return {"status": "imported", "project_path": proj_path}
+        proj_name = os.path.splitext(os.path.basename(proj_path))[0]
+        try:
+            workspace_io.add_project_to_workspace(req.workspace_dir, os.path.basename(proj_path), proj_name)
+        except Exception:
+            pass
+
+        models = []
+        try:
+            tree = project_io.get_project_tree(proj_path)
+            for m in tree.get("models", []):
+                models.append({
+                    "id": m["id"],
+                    "studyId": proj_path,
+                    "name": m["name"],
+                    "type": "PLS-SEM",
+                    "lastModified": "Just now",
+                })
+        except Exception:
+            pass
+
+        return {
+            "status": "imported",
+            "project_path": proj_path,
+            "studies": [{
+                "id": proj_path,
+                "name": proj_name,
+                "type": "PLS-SEM",
+                "path": proj_path,
+                "createdAt": "Just now",
+                "lastModified": "Just now",
+            }],
+            "models": models,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/project/import-file")
+def project_import_file(req: ImportFileRequest):
+    try:
+        proj_path = project_io.import_project_file(req.file_path, req.workspace_dir, on_conflict=req.on_conflict)
+        proj_name = os.path.splitext(os.path.basename(proj_path))[0]
+        try:
+            workspace_io.add_project_to_workspace(req.workspace_dir, os.path.basename(proj_path), proj_name)
+        except Exception:
+            pass
+
+        models = []
+        try:
+            tree = project_io.get_project_tree(proj_path)
+            for m in tree.get("models", []):
+                models.append({
+                    "id": m["id"],
+                    "studyId": proj_path,
+                    "name": m["name"],
+                    "type": "PLS-SEM",
+                    "lastModified": "Just now",
+                })
+        except Exception:
+            pass
+
+        return {
+            "status": "imported",
+            "project_path": proj_path,
+            "studies": [{
+                "id": proj_path,
+                "name": proj_name,
+                "type": "PLS-SEM",
+                "path": proj_path,
+                "createdAt": "Just now",
+                "lastModified": "Just now",
+            }],
+            "models": models,
+        }
     except Exception as e:
         return {"error": str(e)}
 
@@ -1105,14 +1194,50 @@ def recent_workspaces():
 @app.post("/workspace/add-project")
 def add_project(folder_path: str, project_name: str):
     try:
-        project_filename = f"{project_name}.pls"
-        full_project_path = os.path.join(folder_path, project_filename)
+        import re
+        folder_path = os.path.expanduser(folder_path)
+        clean_name = project_name.strip()
+        m = re.match(r"^(.*?)(?:\s*\(([0-9]+)\))?$", clean_name)
+        base_name = m.group(1).strip() if m else clean_name
+        if not base_name:
+            base_name = "Untitled Study"
 
-        project_io.create_project(full_project_path, project_name)
+        ws = workspace_io.load_workspace(folder_path)
+        existing_names = set()
+        existing_files = set()
+        if ws and "projects" in ws and isinstance(ws["projects"], list):
+            for p in ws["projects"]:
+                if isinstance(p, dict):
+                    if p.get("name"):
+                        existing_names.add(p["name"].strip().lower())
+                    if p.get("path"):
+                        existing_files.add(p["path"].strip().lower())
+
+        target_name = clean_name
+        target_filename = f"{target_name}.pls"
+        full_project_path = os.path.join(folder_path, target_filename)
+
+        counter = 1
+        while (
+            os.path.exists(full_project_path)
+            or target_name.lower() in existing_names
+            or target_filename.lower() in existing_files
+        ):
+            target_name = f"{base_name}({counter})"
+            target_filename = f"{target_name}.pls"
+            full_project_path = os.path.join(folder_path, target_filename)
+            counter += 1
+
+        project_io.create_project(full_project_path, target_name)
         project_io.add_recent_project(full_project_path)
-        ws = workspace_io.add_project_to_workspace(folder_path, project_filename, project_name)
+        ws = workspace_io.add_project_to_workspace(folder_path, target_filename, target_name)
 
-        return {"status": "created", "project_path": full_project_path, "workspace": ws}
+        return {
+            "status": "created",
+            "project_path": full_project_path,
+            "project_name": target_name,
+            "workspace": ws,
+        }
     except Exception as e:
         return {"error": str(e)}
 
@@ -1193,44 +1318,6 @@ def import_smartpls_ws(req: SmartPlsWorkspaceImportRequest):
         return {"error": str(e)}
 
 
-@app.post("/system/pick_file_or_folder")
-def pick_file_or_folder():
-    """
-    Opens a native picker that allows choosing BOTH files (.zip) and directories
-    in a single dialog window on macOS.
-    """
-    try:
-        import platform
-        import subprocess
-
-        if platform.system() == "Darwin":
-            script = """
-            use framework "AppKit"
-            set openPanel to current application's NSOpenPanel's openPanel()
-            openPanel's setCanChooseFiles:true
-            openPanel's setCanChooseDirectories:true
-            openPanel's setAllowsMultipleSelection:false
-            openPanel's setResolvesAliases:true
-            openPanel's setTitle:"Import SmartPLS Study (ZIP or Folder)"
-            openPanel's setMessage:"Choose an exported SmartPLS ZIP file or study folder"
-            set theApp to current application's NSApplication's sharedApplication()
-            theApp's activateIgnoringOtherApps:true
-            set res to openPanel's runModal()
-            if res = 1 then
-                set chosenURL to (openPanel's |URLs|()'s objectAtIndex:0)
-                return (chosenURL's |path|()) as text
-            else
-                return "__CANCELLED__"
-            end if
-            """
-            res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
-            path = res.stdout.strip()
-            if path == "__CANCELLED__" or not path:
-                return {"path": None, "cancelled": True}
-            return {"path": path, "cancelled": False}
-        return {"path": None, "fallback": True}
-    except Exception as e:
-        return {"error": str(e), "fallback": True}
 
 
 
@@ -1463,6 +1550,23 @@ def duplicate_workspace_folder(req: DuplicateWorkspaceRequest):
     try:
         res = workspace_io.duplicate_workspace(req.source_folder_path, req.new_name)
         return res
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/workspace/export-zip")
+def workspace_export_zip(req: ExportWorkspaceRequest):
+    try:
+        zip_path = workspace_io.export_workspace_zip(req.workspace_path, req.out_path)
+        return {"status": "exported", "zip_path": zip_path}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/workspace/import-zip")
+def workspace_import_zip(req: ImportWorkspaceZipRequest):
+    try:
+        return workspace_io.import_workspace_zip(req.zip_path, target_parent_folder=req.target_parent_folder)
     except Exception as e:
         return {"error": str(e)}
 

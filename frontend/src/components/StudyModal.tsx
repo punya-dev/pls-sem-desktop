@@ -9,13 +9,33 @@ interface StudyModalProps {
   workspaceId?: string;
 }
 
+const getNextUniqueStudyName = (candidateName: string, workspaceId?: string, existingStudies: Array<{ name: string; workspaceId?: string }> = []): string => {
+  const clean = candidateName.trim();
+  if (!clean) return '';
+  const wsStudies = existingStudies.filter(s => !workspaceId || s.workspaceId === workspaceId);
+  const existingNames = new Set(wsStudies.map(s => s.name.trim().toLowerCase()));
+
+  if (!existingNames.has(clean.toLowerCase())) {
+    return clean;
+  }
+
+  const match = clean.match(/^(.*?)(?:\s*\(([0-9]+)\))?$/);
+  const base = match ? match[1].trim() : clean;
+
+  let counter = 1;
+  while (existingNames.has(`${base}(${counter})`.toLowerCase())) {
+    counter++;
+  }
+  return `${base}(${counter})`;
+};
+
 const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
   const [name, setName] = useState('');
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(workspaceId);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { workspaces, activeWorkspaceId, addStudy, setActiveStudy } = useStore();
+  const { workspaces, activeWorkspaceId, addStudy, setActiveStudy, studies } = useStore();
   const currentWorkspaceId = selectedWorkspaceId || workspaceId || activeWorkspaceId;
   const currentWorkspace = workspaces.find(w => w.id === currentWorkspaceId);
 
@@ -30,7 +50,10 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
   if (!isOpen) return null;
 
   const cleanName = name.trim();
-  const fileName = cleanName ? `${cleanName.replace(/[/\\?%*:|"<>]/g, '_')}.pls` : '';
+  const effectiveName = getNextUniqueStudyName(cleanName, currentWorkspace?.id, studies);
+  const isNameCollision = Boolean(cleanName && effectiveName && effectiveName.toLowerCase() !== cleanName.toLowerCase());
+
+  const fileName = effectiveName ? `${effectiveName.replace(/[/\\?%*:|"<>]/g, '_')}.pls` : '';
   const wsPath = currentWorkspace?.path || '';
   const separator = wsPath.includes('\\') ? '\\' : '/';
   const studyFilePath = fileName && wsPath ? `${wsPath.replace(/[/\\]+$/, '')}${separator}${fileName}` : '';
@@ -42,19 +65,20 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
     setError(null);
     setIsSubmitting(true);
     try {
-      const res = await api.addProject(currentWorkspace.path, cleanName);
+      const res = await api.addProject(currentWorkspace.path, effectiveName);
       if (res?.error) {
         setError(res.error);
         setIsSubmitting(false);
         return;
       }
 
+      const finalName = res.project_name || effectiveName;
       const projectPath = res.project_path || studyFilePath;
       const newId = projectPath || 'study_' + Date.now();
       addStudy({
         id: newId,
         workspaceId: currentWorkspace.id,
-        name: cleanName,
+        name: finalName,
         type: 'PLS-SEM',
         description: '',
         lastModified: 'Just now',
@@ -69,47 +93,72 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
     }
   };
 
-  const handleImportStudy = async () => {
+  const handleImportStudy = async (targetType: 'file' | 'folder' = 'file') => {
     if (!currentWorkspace) return;
     setError(null);
     try {
       let selectedPath: string | null = null;
 
       try {
-        const pickRes = await api.pickFileOrFolder();
-        if (pickRes?.cancelled) {
-          // User clicked Cancel in dialog; exit cleanly without popping any second dialog
-          return;
-        }
-        if (pickRes?.path) {
-          selectedPath = pickRes.path;
-        } else if (pickRes?.fallback) {
-          // Only fallback if not supported natively on this OS
-          const { open } = await import('@tauri-apps/plugin-dialog');
+        const { open } = await import('@tauri-apps/plugin-dialog');
+        if (targetType === 'folder') {
           const selected = await open({
             multiple: false,
             directory: true,
-            title: 'Import SmartPLS Study Folder',
+            title: 'Import Study Folder',
+          });
+          if (selected && typeof selected === 'string') {
+            selectedPath = selected;
+          }
+        } else {
+          const selected = await open({
+            multiple: false,
+            directory: false,
+            title: 'Import Study File (.zip, .pls)',
+            filters: [
+              {
+                name: 'Study Archive or Project',
+                extensions: ['zip', 'pls', 'splsm'],
+              },
+            ],
           });
           if (selected && typeof selected === 'string') {
             selectedPath = selected;
           }
         }
       } catch (pickErr) {
-        console.warn('Native pick_file_or_folder error:', pickErr);
+        console.warn('Tauri open dialog error, falling back to prompt:', pickErr);
+        const fallback = window.prompt(
+          targetType === 'folder'
+            ? 'Enter study folder directory path:'
+            : 'Enter study file path (.zip, .pls):'
+        );
+        if (fallback) {
+          selectedPath = fallback;
+        }
       }
 
       if (!selectedPath) return;
 
       setIsSubmitting(true);
-      const detection = await api.detectSmartPls(selectedPath);
-      if (!detection?.valid) {
-        setError(detection?.error || 'Selected file/folder is not a valid SmartPLS study.');
+      const detection = await api.detectFolder(selectedPath);
+      if (detection.kind === 'error' || (!detection.valid && detection.kind !== 'cspls_project' && detection.kind !== 'smartpls_project')) {
+        setError(detection.error || 'No compatible files found');
         setIsSubmitting(false);
         return;
       }
 
-      const res = await api.importSmartPls(selectedPath, currentWorkspace.path, currentWorkspace.name);
+      let res: any = null;
+      if (detection.kind === 'cspls_project') {
+        if (selectedPath.toLowerCase().endsWith('.zip')) {
+          res = await api.importProjectZip(selectedPath, currentWorkspace.path, 'rename');
+        } else {
+          res = await api.importProjectFile(selectedPath, currentWorkspace.path, 'rename');
+        }
+      } else {
+        res = await api.importSmartPls(selectedPath, currentWorkspace.path, currentWorkspace.name);
+      }
+
       if (res?.error) {
         setError(res.error);
         setIsSubmitting(false);
@@ -122,6 +171,7 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
           state.addStudy({
             ...s,
             workspaceId: currentWorkspace.id,
+            type: s.type || 'PLS-SEM',
           });
           try {
             const dataRes = await api.loadProjectData(s.path);
@@ -145,14 +195,14 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
             id: m.id,
             studyId: m.studyId,
             name: m.name,
-            type: m.type || 'pls',
+            type: m.type || 'PLS-SEM',
             lastModified: 'Just now',
           });
         }
       }
       onClose();
     } catch (err: any) {
-      setError(err?.message || 'Failed to import SmartPLS study');
+      setError(err?.message || 'Failed to import study');
     } finally {
       setIsSubmitting(false);
     }
@@ -204,35 +254,69 @@ const StudyModal = ({ isOpen, onClose, workspaceId }: StudyModalProps) => {
               </div>
             )}
 
+            {isNameCollision && (
+              <div style={{ fontSize: '11px', color: 'var(--color-accent, #3b82f6)', display: 'flex', alignItems: 'center', gap: '5px', marginTop: '2px' }}>
+                <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>info</span>
+                <span>Name exists in this workspace; will be created as <strong>{effectiveName}</strong>.</span>
+              </div>
+            )}
+
             {error && (
               <div style={{ color: 'var(--color-danger, #ef4444)', fontSize: '12px' }}>{error}</div>
             )}
 
-            <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: '1px solid var(--color-border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)', fontWeight: 500 }}>
+            <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: '1px solid var(--color-border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+              <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)', fontWeight: 500, whiteSpace: 'nowrap' }}>
                 Or import study
               </span>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={handleImportStudy}
-                disabled={isSubmitting}
-                style={{
-                  padding: '6px 12px',
-                  fontSize: '12px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  borderRadius: 'var(--radius-sm)',
-                  border: '1px solid var(--color-border-subtle)',
-                  background: 'var(--color-bg-base)',
-                  color: 'var(--color-text-primary)',
-                  cursor: 'pointer',
-                }}
-              >
-                <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>file_download</span>
-                <span>Import Study</span>
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => handleImportStudy('file')}
+                  disabled={isSubmitting}
+                  title="Import a study archive (.zip) or project file (.pls)"
+                  style={{
+                    padding: '6px 10px',
+                    fontSize: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--color-border-subtle)',
+                    background: 'var(--color-bg-base)',
+                    color: 'var(--color-text-primary)',
+                    cursor: 'pointer',
+                    transition: 'border-color 0.12s, background 0.12s',
+                  }}
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>draft</span>
+                  <span>From File (.zip, .pls)</span>
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => handleImportStudy('folder')}
+                  disabled={isSubmitting}
+                  title="Import an unzipped study directory"
+                  style={{
+                    padding: '6px 10px',
+                    fontSize: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--color-border-subtle)',
+                    background: 'var(--color-bg-base)',
+                    color: 'var(--color-text-primary)',
+                    cursor: 'pointer',
+                    transition: 'border-color 0.12s, background 0.12s',
+                  }}
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>folder_open</span>
+                  <span>From Folder</span>
+                </button>
+              </div>
             </div>
           </div>
           <div className="modal__footer">

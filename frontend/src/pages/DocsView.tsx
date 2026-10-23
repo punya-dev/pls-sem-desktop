@@ -22,7 +22,7 @@ const DOC_ITEMS: DocItem[] = [
   {
     id: 'first-model',
     category: 'Getting Started',
-    title: 'Building Your First Path Model in CSPLS',
+    title: 'Building Your First Path Model in StatSEM',
     description: 'A step-by-step guide to dragging latent constructs, assigning reflective/formative indicators, and drawing structural paths.',
     tags: ['Canvas', 'Tutorial'],
     readTime: '8 min read',

@@ -121,14 +121,14 @@ class TestSmartPLSImporter(unittest.TestCase):
         self.assertEqual(res_proj["kind"], "smartpls_project")
         self.assertEqual(res_proj["models_count"], 8)
 
-        # 2. CSPLS Workspace
+        # 2. StatSEM Workspace
         temp_cspls_ws = tempfile.mkdtemp(prefix="cspls_ws_test_")
         try:
             with open(os.path.join(temp_cspls_ws, "workspace.json"), "w") as f:
-                json.dump({"name": "Test CSPLS WS", "projects": []}, f)
+                json.dump({"name": "Test StatSEM WS", "projects": []}, f)
             res_cspls = detect_folder_type(temp_cspls_ws)
             self.assertEqual(res_cspls["kind"], "cspls_workspace")
-            self.assertEqual(res_cspls["name"], "Test CSPLS WS")
+            self.assertEqual(res_cspls["name"], "Test StatSEM WS")
         finally:
             shutil.rmtree(temp_cspls_ws, ignore_errors=True)
 

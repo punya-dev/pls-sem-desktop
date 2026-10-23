@@ -971,8 +971,27 @@ def export_project_zip(project_path: str, out_zip_path: str, include_results: bo
     - datasets/<name>.csv
     """
     import zipfile
+    project_path = os.path.expanduser(project_path)
+    out_zip_path = os.path.expanduser(out_zip_path)
     if not os.path.exists(project_path):
         raise FileNotFoundError(f"Project not found: {project_path}")
+
+    parent_dir = os.path.dirname(out_zip_path)
+    if parent_dir:
+        os.makedirs(parent_dir, exist_ok=True)
+
+    # If project_path is a directory, compress the folder
+    if os.path.isdir(project_path):
+        with zipfile.ZipFile(out_zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for root, dirs, files in os.walk(project_path):
+                dirs[:] = [d for d in dirs if not d.startswith(".") and d != "__pycache__"]
+                for f in files:
+                    if f.startswith(".") or f.endswith(".pyc"):
+                        continue
+                    file_path = os.path.join(root, f)
+                    arcname = os.path.relpath(file_path, project_path)
+                    zf.write(file_path, arcname)
+        return out_zip_path
 
     migrate_project(project_path)
     conn = sqlite3.connect(project_path)
@@ -983,7 +1002,7 @@ def export_project_zip(project_path: str, out_zip_path: str, include_results: bo
         "app_version": "1.0.0",
         "schema_version": SCHEMA_VERSION,
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "project_name": meta.get("project_name", os.path.basename(project_path)),
+        "project_name": meta.get("name") or meta.get("project_name", os.path.basename(project_path)),
         "datasets_count": len(datasets),
     }
 
@@ -1048,6 +1067,36 @@ def import_project_zip(zip_path: str, workspace_dir: str, on_conflict: str = "re
         with open(target_path, "wb") as f_out:
             f_out.write(zf.read(pls_entry))
 
+    migrate_project(target_path)
+    settings_io.add_recent("recent_projects", target_path)
+    return target_path
+
+
+def import_project_file(pls_path: str, workspace_dir: str, on_conflict: str = "rename") -> str:
+    """
+    Safely copies an existing .pls project file into workspace_dir,
+    handling naming conflicts by renaming, and migrates the project schema.
+    """
+    import shutil
+    pls_path = os.path.expanduser(pls_path)
+    if not os.path.exists(pls_path):
+        raise FileNotFoundError(f"Project file not found: {pls_path}")
+    if not pls_path.endswith(".pls"):
+        raise ValueError("File is not a .pls project file")
+
+    os.makedirs(workspace_dir, exist_ok=True)
+    base_name = os.path.basename(pls_path)
+    target_path = os.path.join(workspace_dir, base_name)
+    if os.path.exists(target_path):
+        if on_conflict == "cancel":
+            raise FileExistsError(f"Project '{base_name}' already exists in workspace")
+        elif on_conflict == "rename":
+            root, ext = os.path.splitext(base_name)
+            i = 1
+            while os.path.exists(target_path):
+                target_path = os.path.join(workspace_dir, f"{root}_{i}{ext}")
+                i += 1
+    shutil.copy2(pls_path, target_path)
     migrate_project(target_path)
     settings_io.add_recent("recent_projects", target_path)
     return target_path

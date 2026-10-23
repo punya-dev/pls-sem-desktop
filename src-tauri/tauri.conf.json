@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "pls-sem",
+  "productName": "StatSEM",
   "version": "0.1.0",
   "identifier": "com.punyapratap.pls-sem-desktop",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "pls-sem",
+        "title": "StatSEM",
         "width": 1000,
         "height": 700,
         "resizable": true,

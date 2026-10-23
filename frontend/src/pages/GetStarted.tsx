@@ -2,29 +2,31 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
 import WorkspaceModal from '../components/WorkspaceModal';
+import AppSidebar from '../components/AppSidebar';
 import InputDialog from '../components/InputDialog';
 import { api } from '../utils/api';
 import { promptOpenWorkspaceFolder } from '../utils/workspace-import';
 
 const GetStarted = () => {
   const navigate = useNavigate();
-  const { workspaces, activeWorkspaceId, addWorkspace, removeWorkspace, setActiveWorkspace, archivedWorkspaces, archiveWorkspace, renameWorkspace, deleteWorkspace, requestDelete, openTab, isSidebarCollapsed, toggleSidebar } = useStore();
+  const { workspaces, activeWorkspaceId, addWorkspace, setActiveWorkspace, openTab } = useStore();
   const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = useState(false);
-  const [editingWsId, setEditingWsId] = useState<string | null>(null);
-  const [editWsName, setEditWsName] = useState('');
-
-  const commitWsRename = (id: string) => {
-    if (editWsName.trim()) {
-      renameWorkspace(id, editWsName.trim());
-    }
-    setEditingWsId(null);
-  };
+  const [isImportMenuOpen, setIsImportMenuOpen] = useState(false);
   const [inputDialogConfig, setInputDialogConfig] = useState<{isOpen: boolean; title: string; placeholder: string; submitLabel: string; initialValue?: string; onSubmit: (val: string) => void}>({
     isOpen: false, title: '', placeholder: '', submitLabel: '', onSubmit: () => {}
   });
-  const [workspaceQuery, setWorkspaceQuery] = useState('');
-  const [isWorkspaceSearchOpen, setIsWorkspaceSearchOpen] = useState(false);
-  const filteredWorkspaces = workspaces.filter(workspace => workspace.name.toLowerCase().includes(workspaceQuery.toLowerCase()));
+  const importDropdownRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!isImportMenuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (importDropdownRef.current && !importDropdownRef.current.contains(e.target as Node)) {
+        setIsImportMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isImportMenuOpen]);
 
   const rename = (title: string, initialValue: string, onSubmit: (name: string) => void) => {
     setInputDialogConfig({
@@ -104,173 +106,7 @@ const GetStarted = () => {
   return (
     <>
       <div className="app-body">
-        
-        <aside className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`} id="sidebar">
-          
-          <div className="sidebar__top">
-            <div className="sidebar-ws-container">
-              
-              <div className="sidebar-header" style={{'paddingBottom': '10px', 'borderBottom': 'none'}}>
-                {isWorkspaceSearchOpen ? (
-                  <div className="inline-search-wrap">
-                    <input 
-                      autoFocus 
-                      className="sidebar-inline-search" 
-                      value={workspaceQuery} 
-                      onChange={event => setWorkspaceQuery(event.target.value)} 
-                      onBlur={() => { if (!workspaceQuery) setIsWorkspaceSearchOpen(false); }} 
-                      placeholder="Filter…" 
-                    />
-                    {workspaceQuery && (
-                      <button className="inline-search-clear" type="button" aria-label="Clear workspace search" onMouseDown={event => event.preventDefault()} onClick={() => setWorkspaceQuery('')}>×</button>
-                    )}
-                  </div>
-                ) : (
-                  <span className="sidebar-header__label">Workspaces</span>
-                )}
-                <div className="sidebar-header__actions">
-                  <button className={`icon-btn icon-btn--sm ${isWorkspaceSearchOpen ? 'active' : ''}`} title="Search workspaces" type="button" onClick={() => {
-                    if (isSidebarCollapsed) {
-                      toggleSidebar();
-                      setTimeout(() => setIsWorkspaceSearchOpen(true), 150);
-                    } else {
-                      setIsWorkspaceSearchOpen(open => !open);
-                      if (isWorkspaceSearchOpen) setWorkspaceQuery('');
-                    }
-                  }}>
-                    <span className="material-symbols-outlined">search</span>
-                  </button>
-                  <button className="sidebar-create-folder-btn" title="Create Workspace" type="button" onClick={() => setIsWorkspaceModalOpen(true)}>
-                    <svg fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
-                      <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path>
-                      <line x1="12" x2="12" y1="10" y2="16"></line>
-                      <line x1="9" x2="15" y1="13" y2="13"></line>
-                    </svg>
-                  </button>
-                  <button className="icon-btn icon-btn--sm" id="sidebar-collapse-btn" title={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} type="button" onClick={toggleSidebar}>
-                    <span className="material-symbols-outlined">left_panel_close</span>
-                  </button>
-                </div>
-              </div>
-
-              <div id="sidebar-ws-list" style={{'display': 'flex', 'flexDirection': 'column', 'gap': '2px'}}>
-                {filteredWorkspaces.map(ws => (
-                  <div 
-                    key={ws.id} 
-                    className="sidebar-item" 
-                    onClick={async () => {
-                      if (editingWsId !== ws.id) {
-                        if (ws.path) {
-                          await api.openWorkspace(ws.path);
-                        }
-                        setActiveWorkspace(ws.id);
-                        openTab({ type: 'workspace', title: ws.name, workspaceId: ws.id });
-                      }
-                    }}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      useStore.getState().openContextMenu(e.clientX, e.clientY, [
-                        {
-                          id: 'rename', 
-                          label: 'Rename Workspace', 
-                          icon: 'edit', 
-                          action: () => {
-                            setEditingWsId(ws.id);
-                            setEditWsName(ws.name);
-                          }
-                        },
-                        {
-                          id: 'duplicate', label: 'Duplicate Workspace', icon: 'content_copy', action: () => useStore.getState().duplicateWorkspace(ws.id)
-                        },
-                        {
-                          id: 'archive', label: 'Archive Workspace', icon: 'inventory_2', action: () => archiveWorkspace(ws.id)
-                        },
-                        {
-                          id: 'delete', 
-                          label: 'Delete Workspace', 
-                          icon: 'delete', 
-                          danger: true, 
-                          action: () => {
-                            requestDelete({
-                              title: 'Delete Workspace',
-                              itemName: ws.name,
-                              message: 'Are you sure? This workspace and all its contents will be permanently deleted and cannot be recovered.',
-                              onConfirm: async () => {
-                                if (ws.path) {
-                                  const res = await api.deleteWorkspace(ws.path);
-                                  if (res?.error) {
-                                    alert('Failed to delete workspace files: ' + res.error);
-                                  }
-                                }
-                                deleteWorkspace(ws.id);
-                              },
-                            });
-                          } 
-                        }
-                      ]);
-                    }}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    <span className="sidebar-item__left" style={{ width: '100%', overflow: 'hidden' }}>
-                      <span className="material-symbols-outlined">folder</span>
-                      {editingWsId === ws.id ? (
-                        <input
-                          autoFocus
-                          type="text"
-                          className="inline-seamless-rename-input"
-                          value={editWsName}
-                          size={Math.max(editWsName.length, 1)}
-                          onChange={(e) => setEditWsName(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') commitWsRename(ws.id);
-                            else if (e.key === 'Escape') setEditingWsId(null);
-                          }}
-                          onBlur={() => commitWsRename(ws.id)}
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                      ) : (
-                        <span>{ws.name}</span>
-                      )}
-                    </span>
-                  </div>
-                ))}
-                {isWorkspaceSearchOpen && workspaceQuery && filteredWorkspaces.length === 0 && (
-                  <span className="inline-search-empty">No workspaces found</span>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="sidebar__bottom">
-            <button className="sidebar-item" type="button" data-action="archive" onClick={() => openTab({ type: 'archive', title: 'Archive' })}>
-              <span className="sidebar-item__left">
-                <span className="material-symbols-outlined">inventory_2</span>
-                <span>Archive</span>
-              </span>
-            </button>
-
-            <button className="sidebar-item" type="button" data-action="docs" onClick={() => openTab({ type: 'docs', title: 'Documentation' })}>
-              <span className="sidebar-item__left">
-                <span className="material-symbols-outlined">menu_book</span>
-                <span>Documentation</span>
-              </span>
-            </button>
-
-            <button className="sidebar-item" type="button" data-action="samples" onClick={() => openTab({ type: 'samples', title: 'Sample Studies' })}>
-              <span className="sidebar-item__left">
-                <span className="material-symbols-outlined">science</span>
-                <span>Sample Studies</span>
-              </span>
-            </button>
-
-            <button className="sidebar-item" type="button" data-action="feedback" onClick={() => openTab({ type: 'feedback', title: 'Feedback & Reports' })}>
-              <span className="sidebar-item__left">
-                <span className="material-symbols-outlined">feedback</span>
-                <span className="truncate">Feedback &amp; Reports</span>
-              </span>
-            </button>
-          </div>
-        </aside>
+        <AppSidebar />
 
         <main className="main-content">
           <div className="main-content__inner">
@@ -278,14 +114,109 @@ const GetStarted = () => {
             <div className="page-header animate-fade-in">
               <div className="page-header__text">
                 <h1 className="page-header__title">Get Started</h1>
-                <p className="page-header__subtitle">Welcome to CSPLS. Set up your workspace or explore guided sample models to begin.</p>
+                <p className="page-header__subtitle">Welcome to StatSEM. Set up your workspace or explore guided sample models to begin.</p>
               </div>
-              <div className="page-header__actions" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                <button className="btn btn-secondary" type="button" onClick={() => promptOpenWorkspaceFolder()}>
-                  <span className="material-symbols-outlined">folder_open</span>
-                  <span>Import / Open</span>
-                  <kbd className="kbd">⌘O</kbd>
-                </button>
+              <div className="page-header__actions">
+                <div style={{ position: 'relative' }} ref={importDropdownRef}>
+                  <button
+                    className="btn btn-secondary"
+                    type="button"
+                    onClick={() => setIsImportMenuOpen((prev) => !prev)}
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    <span className="material-symbols-outlined">folder_open</span>
+                    <span>Import / Open</span>
+                    <span className="material-symbols-outlined" style={{ fontSize: '18px', marginLeft: '-2px' }}>
+                      {isImportMenuOpen ? 'arrow_drop_up' : 'arrow_drop_down'}
+                    </span>
+                    <kbd className="kbd">⌘O</kbd>
+                  </button>
+
+                  {isImportMenuOpen && (
+                    <div
+                      className="no-drag animate-fade-in"
+                      style={{
+                        position: 'absolute',
+                        top: 'calc(100% + 6px)',
+                        left: 0,
+                        minWidth: '230px',
+                        background: 'var(--color-bg-surface)',
+                        border: '1px solid var(--color-border-subtle)',
+                        borderRadius: 'var(--radius-md)',
+                        boxShadow: 'var(--shadow-lg)',
+                        padding: '6px',
+                        zIndex: 1000,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '4px',
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsImportMenuOpen(false);
+                          promptOpenWorkspaceFolder('folder');
+                        }}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '10px',
+                          padding: '8px 10px',
+                          borderRadius: 'var(--radius-sm)',
+                          border: 'none',
+                          background: 'transparent',
+                          color: 'var(--color-text-primary)',
+                          fontSize: '13px',
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                          width: '100%',
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--color-bg-base)')}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                      >
+                        <span className="material-symbols-outlined" style={{ fontSize: '18px', color: 'var(--color-accent)' }}>
+                          folder_open
+                        </span>
+                        <div>
+                          <div style={{ fontWeight: 500, fontSize: '12px' }}>Open Workspace Folder</div>
+                          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>StatSEM or SmartPLS folder</div>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsImportMenuOpen(false);
+                          promptOpenWorkspaceFolder('zip');
+                        }}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '10px',
+                          padding: '8px 10px',
+                          borderRadius: 'var(--radius-sm)',
+                          border: 'none',
+                          background: 'transparent',
+                          color: 'var(--color-text-primary)',
+                          fontSize: '13px',
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                          width: '100%',
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--color-bg-base)')}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                      >
+                        <span className="material-symbols-outlined" style={{ fontSize: '18px', color: 'var(--color-accent)' }}>
+                          archive
+                        </span>
+                        <div>
+                          <div style={{ fontWeight: 500, fontSize: '12px' }}>Import Archive (.zip)</div>
+                          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>Workspace or Study archive</div>
+                        </div>
+                      </button>
+                    </div>
+                  )}
+                </div>
                 <button className="btn btn-primary" type="button" onClick={() => setIsWorkspaceModalOpen(true)}>
                   <span className="material-symbols-outlined">add</span>
                   <span>Create Workspace</span>
@@ -296,7 +227,7 @@ const GetStarted = () => {
 
             <div className="content-grid">
 
-              <div style={{'display': 'flex', 'flexDirection': 'column', 'gap': '24px'}}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', minWidth: 0, width: '100%' }}>
 
                 <div className="release-card animate-fade-in animate-fade-in-delay-1">
                   <div className="release-card__header">

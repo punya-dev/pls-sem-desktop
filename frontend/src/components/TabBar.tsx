@@ -1101,11 +1101,23 @@ export const TabBar: React.FC = () => {
                   className="tab-menu-dropdown__item"
                   onClick={async () => {
                     setIsDropdownOpen(false);
-                    await promptOpenWorkspaceFolder();
+                    await promptOpenWorkspaceFolder('folder');
                   }}
                 >
                   <span className="material-symbols-outlined">folder_open</span>
-                  <span className="tab-menu-dropdown__item-title">Import / Open...</span>
+                  <span className="tab-menu-dropdown__item-title">Open Workspace Folder...</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="tab-menu-dropdown__item"
+                  onClick={async () => {
+                    setIsDropdownOpen(false);
+                    await promptOpenWorkspaceFolder('zip');
+                  }}
+                >
+                  <span className="material-symbols-outlined">archive</span>
+                  <span className="tab-menu-dropdown__item-title">Import Archive (.zip)...</span>
                 </button>
 
                 <button

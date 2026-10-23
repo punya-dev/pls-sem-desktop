@@ -1,5 +1,5 @@
 /**
- * CSPLS Model Canvas Engine
+ * StatSEM Model Canvas Engine
  * Pure Vanilla JS + SVG implementation for professional vector diagramming.
  */
 

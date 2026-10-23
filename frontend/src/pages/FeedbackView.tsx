@@ -134,7 +134,7 @@ export const FeedbackView: React.FC = () => {
 
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span style={{ fontSize: '12px', color: submitted ? 'var(--color-accent)' : 'var(--color-text-muted)' }}>
-                {submitted ? 'Thank you! Report submitted.' : 'Your report helps improve CSPLS.'}
+                {submitted ? 'Thank you! Report submitted.' : 'Your report helps improve StatSEM.'}
               </span>
               <button
                 type="submit"
