@@ -151,6 +151,7 @@ interface AppState {
   activeTabId: string;
   openTab: (tab: Omit<AppTab, 'id'> & { id?: string }) => void;
   closeTab: (id: string) => void;
+  closeTabs: (ids: string[]) => void;
   setActiveTab: (id: string) => void;
   updateTabTitle: (id: string, title: string) => void;
   reorderTabs: (fromIndex: number, toIndex: number) => void;
@@ -448,6 +449,55 @@ export const useStore = create<AppState>()(
           } else if (nextTab.type === 'dataset') {
             nextStudyId = nextTab.studyId ?? null;
             nextWsId = nextTab.workspaceId ?? null;
+          }
+        }
+
+        return {
+          tabs: newTabs,
+          activeTabId: nextActiveId,
+          activeWorkspaceId: nextWsId,
+          activeStudyId: nextStudyId,
+          activeModelId: nextModelId,
+        };
+      }),
+      closeTabs: (ids) => set((state) => {
+        if (!ids || ids.length === 0) return state;
+        const idsSet = new Set(ids);
+        const newTabs = state.tabs.filter((t) => !idsSet.has(t.id));
+
+        if (newTabs.length === 0) {
+          const homeTab: AppTab = { id: 'get-started', type: 'get-started', title: 'Home' };
+          return {
+            tabs: [homeTab],
+            activeTabId: 'get-started',
+            activeWorkspaceId: null,
+            activeStudyId: null,
+            activeModelId: null,
+          };
+        }
+
+        let nextActiveId = state.activeTabId;
+        let nextWsId = state.activeWorkspaceId;
+        let nextStudyId = state.activeStudyId;
+        let nextModelId = state.activeModelId;
+
+        if (state.activeTabId && idsSet.has(state.activeTabId)) {
+          const oldIndex = state.tabs.findIndex((t) => t.id === state.activeTabId);
+          const nextTab = newTabs[Math.max(0, Math.min(oldIndex, newTabs.length - 1))];
+          nextActiveId = nextTab.id;
+          if (nextTab.type === 'workspace' && nextTab.workspaceId) {
+            nextWsId = nextTab.workspaceId;
+          } else if (nextTab.type === 'model') {
+            nextModelId = nextTab.modelId ?? null;
+            nextStudyId = nextTab.studyId ?? null;
+            nextWsId = nextTab.workspaceId ?? null;
+          } else if (nextTab.type === 'dataset') {
+            nextStudyId = nextTab.studyId ?? null;
+            nextWsId = nextTab.workspaceId ?? null;
+          } else {
+            nextWsId = null;
+            nextStudyId = null;
+            nextModelId = null;
           }
         }
 

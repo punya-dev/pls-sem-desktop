@@ -1102,6 +1102,12 @@ body[data-window-fullscreen="true"] .titlebar__traffic-light-space {
   background: var(--color-bg-subtle, #f4f4f5);
 }
 
+.tab-group-menu__item:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 .tab-group-menu__item--danger {
   color: var(--color-danger, #ef4444);
 }
