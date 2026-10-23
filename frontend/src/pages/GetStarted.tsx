@@ -227,7 +227,7 @@ const GetStarted = () => {
 
             <div className="content-grid">
 
-              <div style={{'display': 'flex', 'flexDirection': 'column', 'gap': '24px'}}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', minWidth: 0, width: '100%' }}>
 
                 <div className="release-card animate-fade-in animate-fade-in-delay-1">
                   <div className="release-card__header">

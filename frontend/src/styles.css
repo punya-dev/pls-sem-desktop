@@ -1995,10 +1995,12 @@ body.is-tab-sliding * {
 .main-content {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   background-color: var(--color-bg-base);
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
   container-type: inline-size;
 }
 
@@ -2007,15 +2009,23 @@ body.is-tab-sliding * {
   width: 100%;
   display: flex;
   flex-direction: column;
-  min-height: 100%;
+  min-height: min-content;
   gap: 24px;
   box-sizing: border-box;
+  flex: 1 0 auto;
 }
 
 @media (max-width: 900px) {
   .main-content__inner {
     padding: 20px 20px 24px 20px;
     gap: 18px;
+  }
+}
+
+@container (max-width: 650px) {
+  .main-content__inner {
+    padding: 16px 16px 20px 16px;
+    gap: 16px;
   }
 }
 
@@ -2030,15 +2040,17 @@ body.is-tab-sliding * {
   border-bottom: 1px solid var(--color-border-subtle);
   gap: 16px;
   flex-wrap: wrap;
-  min-height: 44px;
+  flex-shrink: 0;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .page-header__text {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-width: 240px;
-  flex: 1;
+  min-width: 0;
+  flex: 1 1 240px;
 }
 
 .page-header__title {
@@ -2054,6 +2066,7 @@ body.is-tab-sliding * {
   font-size: var(--text-md);
   color: var(--color-text-hint);
   line-height: 1.4;
+  word-break: break-word;
 }
 
 .page-header__actions {
@@ -2176,6 +2189,9 @@ body.is-tab-sliding * {
   gap: 24px;
   align-items: flex-start;
   min-width: 0;
+  width: 100%;
+  flex-shrink: 0;
+  box-sizing: border-box;
 }
 
 .content-grid > * {
@@ -3050,12 +3066,20 @@ body.is-tab-sliding * {
 
 
     /* ─── Workspace-specific overrides ─── */
-    .ws-main { flex: 1; overflow-y: auto; background: var(--color-bg-base); display: flex; flex-direction: column; min-width: 0; }
-    .ws-inner { padding: 28px 32px 32px 32px; width: 100%; display: flex; flex-direction: column; min-height: 100%; box-sizing: border-box; }
+    .ws-main { flex: 1; overflow-y: auto; overflow-x: hidden; background: var(--color-bg-base); display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+    .ws-inner { padding: 28px 32px 32px 32px; width: 100%; display: flex; flex-direction: column; min-height: min-content; flex: 1 0 auto; box-sizing: border-box; }
 
     @media (max-width: 900px) {
       .ws-inner {
         padding: 20px 20px 24px 20px;
+        gap: 18px;
+      }
+    }
+
+    @container (max-width: 650px) {
+      .ws-inner {
+        padding: 16px 16px 20px 16px;
+        gap: 16px;
       }
     }
 
