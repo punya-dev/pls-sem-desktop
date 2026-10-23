@@ -212,6 +212,8 @@ interface AppState {
   addStudyDataset: (studyId: string, dataset: ParsedDataset) => void;
   setStudyDatasets: (studyId: string, datasets: ParsedDataset[]) => void;
   removeStudyDataset: (studyId: string, datasetId?: string) => void;
+  lastUsedDatasetByStudy: Record<string, string>;
+  setStudyLastDatasetId: (studyId: string, datasetId: string) => void;
   touchStudy: (id: string) => void;
   
   // Variables (Sidebar)
@@ -1068,9 +1070,18 @@ export const useStore = create<AppState>()(
           datasetsByStudy: { ...state.datasetsByStudy, [studyId]: updatedList },
         };
       }),
-      setModelDatasetId: (modelId, datasetId) => set((state) => ({
-        models: state.models.map((m) => m.id === modelId ? { ...m, datasetId } : m),
+      lastUsedDatasetByStudy: {},
+      setStudyLastDatasetId: (studyId, datasetId) => set((state) => ({
+        lastUsedDatasetByStudy: { ...state.lastUsedDatasetByStudy, [studyId]: datasetId }
       })),
+      setModelDatasetId: (modelId, datasetId) => set((state) => {
+        const model = state.models.find((m) => m.id === modelId);
+        const studyId = model?.studyId;
+        return {
+          models: state.models.map((m) => m.id === modelId ? { ...m, datasetId } : m),
+          lastUsedDatasetByStudy: studyId ? { ...state.lastUsedDatasetByStudy, [studyId]: datasetId } : state.lastUsedDatasetByStudy,
+        };
+      }),
       touchStudy: (id) => set((state) => ({ studies: state.studies.map(study => study.id === id ? { ...study, lastModified: 'Just now' } : study) })),
       
       // Variables
@@ -1125,6 +1136,7 @@ export const useStore = create<AppState>()(
         studies: state.studies,
         models: state.models,
         datasetsByStudy: state.datasetsByStudy,
+        lastUsedDatasetByStudy: state.lastUsedDatasetByStudy,
         activeWorkspaceId: state.activeWorkspaceId,
         theme: state.theme,
         settings: state.settings,

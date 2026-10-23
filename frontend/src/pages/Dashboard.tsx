@@ -29,6 +29,8 @@ const Dashboard = () => {
     deleteWorkspace, deleteStudy, deleteModel, deleteDataset, requestDelete,
     renameStudy, duplicateStudy, renameModel, duplicateModel, openTab,
     snapshotsByStudy, setStudySnapshots, removeStudySnapshot,
+    lastUsedDatasetByStudy,
+    setStudyLastDatasetId,
     isSidebarCollapsed, toggleSidebar
   } = useStore();
   
@@ -379,11 +381,22 @@ const Dashboard = () => {
   const handleCreateModel = () => {
     if (modelName.trim() && modelModalStudyId) {
       const id = 'model' + Date.now();
+      const studyDatasets = getStudyDatasets(datasetsByStudy, modelModalStudyId);
+      const lastUsedDsId = lastUsedDatasetByStudy[modelModalStudyId]
+        || models.find(m => m.studyId === modelModalStudyId && m.datasetId)?.datasetId;
+      const boundDataset = (lastUsedDsId && studyDatasets.find(d => d.id === lastUsedDsId))
+        || (studyDatasets.length === 1 ? studyDatasets[0] : null);
+
+      if (boundDataset?.id) {
+        setStudyLastDatasetId(modelModalStudyId, boundDataset.id);
+      }
+
       addModel({
         id,
         studyId: modelModalStudyId,
         name: modelName.trim(),
         type: modelType,
+        datasetId: boundDataset?.id,
         lastModified: 'Just now'
       });
       setModelModalOpen(false);
