@@ -146,7 +146,7 @@ def create_project(path: str, project_name: str):
     conn.close()
 
 
-def save_data(path: str, rows: list, columns: list, dtypes: list, dataset_name: str = None, dataset_id: str = "1"):
+def save_data(path: str, rows: list, columns: list, dtypes: list, dataset_name: str = None, dataset_id: str = None):
     migrate_project(path)
     conn = sqlite3.connect(path)
     cur = conn.cursor()
@@ -154,30 +154,47 @@ def save_data(path: str, rows: list, columns: list, dtypes: list, dataset_name: 
     df = pd.DataFrame(rows, columns=columns)
     name = dataset_name or "Imported data"
 
-    # Also keep legacy raw_data for complete backward compatibility
-    cur.execute("DROP TABLE IF EXISTS raw_data")
-    def sql_type(dtype: str) -> str:
-        if "int" in dtype or "float" in dtype:
-            return "REAL"
-        return "TEXT"
-
-    def escape_col(c: Any) -> str:
-        return '"' + str(c).replace('"', '""') + '"'
-
-    col_defs = ", ".join(f"{escape_col(c)} {sql_type(t)}" for c, t in zip(columns, dtypes))
-    cur.execute(f"CREATE TABLE raw_data ({col_defs})")
-    placeholders = ", ".join("?" for _ in columns)
-    col_names = ", ".join(escape_col(c) for c in columns)
-    cur.executemany(f"INSERT INTO raw_data ({col_names}) VALUES ({placeholders})", rows)
+    existing = ds_list(conn)
+    if dataset_id is None:
+        # Check if a dataset with this exact name already exists
+        match = next((d for d in existing if d["name"] == name), None)
+        if match:
+            dataset_id = match["id"]
+        else:
+            base_id = str(len(existing) + 1)
+            candidate = base_id
+            while any(d["id"] == candidate for d in existing):
+                candidate = f"{candidate}_1"
+            dataset_id = candidate
 
     # Save to multi-dataset table
     ds_save(conn, dataset_id=dataset_id, name=name, df=df)
 
+    # Maintain raw_data table for legacy tools / backward compatibility
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='raw_data'")
+    has_raw = cur.fetchone() is not None
+    if not has_raw or dataset_id in ("1", "ds_1"):
+        cur.execute("DROP TABLE IF EXISTS raw_data")
+        def sql_type(dtype: str) -> str:
+            if "int" in dtype or "float" in dtype:
+                return "REAL"
+            return "TEXT"
+
+        def escape_col(c: Any) -> str:
+            return '"' + str(c).replace('"', '""') + '"'
+
+        col_defs = ", ".join(f"{escape_col(c)} {sql_type(t)}" for c, t in zip(columns, dtypes))
+        cur.execute(f"CREATE TABLE raw_data ({col_defs})")
+        placeholders = ", ".join("?" for _ in columns)
+        col_names = ", ".join(escape_col(c) for c in columns)
+        cur.executemany(f"INSERT INTO raw_data ({col_names}) VALUES ({placeholders})", rows)
+        if dataset_name:
+            cur.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('dataset_name', ?)", (dataset_name,))
+
     cur.execute("UPDATE metadata SET value = ? WHERE key = 'modified_at'", (datetime.now(timezone.utc).isoformat(),))
-    if dataset_name:
-        cur.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('dataset_name', ?)", (dataset_name,))
     conn.commit()
     conn.close()
+    return dataset_id
 
 
 def load_data(path: str, dataset_id: Optional[str] = None):
@@ -971,8 +988,27 @@ def export_project_zip(project_path: str, out_zip_path: str, include_results: bo
     - datasets/<name>.csv
     """
     import zipfile
+    project_path = os.path.expanduser(project_path)
+    out_zip_path = os.path.expanduser(out_zip_path)
     if not os.path.exists(project_path):
         raise FileNotFoundError(f"Project not found: {project_path}")
+
+    parent_dir = os.path.dirname(out_zip_path)
+    if parent_dir:
+        os.makedirs(parent_dir, exist_ok=True)
+
+    # If project_path is a directory, compress the folder
+    if os.path.isdir(project_path):
+        with zipfile.ZipFile(out_zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for root, dirs, files in os.walk(project_path):
+                dirs[:] = [d for d in dirs if not d.startswith(".") and d != "__pycache__"]
+                for f in files:
+                    if f.startswith(".") or f.endswith(".pyc"):
+                        continue
+                    file_path = os.path.join(root, f)
+                    arcname = os.path.relpath(file_path, project_path)
+                    zf.write(file_path, arcname)
+        return out_zip_path
 
     migrate_project(project_path)
     conn = sqlite3.connect(project_path)
@@ -983,7 +1019,7 @@ def export_project_zip(project_path: str, out_zip_path: str, include_results: bo
         "app_version": "1.0.0",
         "schema_version": SCHEMA_VERSION,
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "project_name": meta.get("project_name", os.path.basename(project_path)),
+        "project_name": meta.get("name") or meta.get("project_name", os.path.basename(project_path)),
         "datasets_count": len(datasets),
     }
 
@@ -1048,6 +1084,36 @@ def import_project_zip(zip_path: str, workspace_dir: str, on_conflict: str = "re
         with open(target_path, "wb") as f_out:
             f_out.write(zf.read(pls_entry))
 
+    migrate_project(target_path)
+    settings_io.add_recent("recent_projects", target_path)
+    return target_path
+
+
+def import_project_file(pls_path: str, workspace_dir: str, on_conflict: str = "rename") -> str:
+    """
+    Safely copies an existing .pls project file into workspace_dir,
+    handling naming conflicts by renaming, and migrates the project schema.
+    """
+    import shutil
+    pls_path = os.path.expanduser(pls_path)
+    if not os.path.exists(pls_path):
+        raise FileNotFoundError(f"Project file not found: {pls_path}")
+    if not pls_path.endswith(".pls"):
+        raise ValueError("File is not a .pls project file")
+
+    os.makedirs(workspace_dir, exist_ok=True)
+    base_name = os.path.basename(pls_path)
+    target_path = os.path.join(workspace_dir, base_name)
+    if os.path.exists(target_path):
+        if on_conflict == "cancel":
+            raise FileExistsError(f"Project '{base_name}' already exists in workspace")
+        elif on_conflict == "rename":
+            root, ext = os.path.splitext(base_name)
+            i = 1
+            while os.path.exists(target_path):
+                target_path = os.path.join(workspace_dir, f"{root}_{i}{ext}")
+                i += 1
+    shutil.copy2(pls_path, target_path)
     migrate_project(target_path)
     settings_io.add_recent("recent_projects", target_path)
     return target_path

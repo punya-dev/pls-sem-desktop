@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useStore, type Study } from '../store';
+import { useStore, getStudyDatasets, type Study } from '../store';
 import WorkspaceModal from '../components/WorkspaceModal';
 import StudyModal from '../components/StudyModal';
 import StudyWorkspaceDropdown from '../components/StudyWorkspaceDropdown';
@@ -8,6 +8,16 @@ import InputDialog from '../components/InputDialog';
 import { parseDatasetFile } from '../utils/dataset-parser';
 import type { ParsedDataset } from '../utils/dataset-parser';
 import { api } from '../utils/api';
+import AppSidebar from '../components/AppSidebar';
+
+export const formatModelType = (type?: string): string => {
+  if (!type) return 'PLS-SEM';
+  const clean = type.trim().toLowerCase().replace(/[-_\s]+/g, '');
+  if (clean === 'pls' || clean === 'plssem') return 'PLS-SEM';
+  if (clean === 'cbsem' || clean === 'cb') return 'CB-SEM';
+  if (clean === 'regression') return 'Regression';
+  return type.toUpperCase();
+};
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -15,10 +25,12 @@ const Dashboard = () => {
   const { 
     workspaces, archivedWorkspaces, activeWorkspaceId, setActiveWorkspace,
     studies, setActiveStudy, models, setActiveModel, addModel,
-    datasetsByStudy, setStudyDataset, touchStudy, archiveWorkspace, restoreWorkspace, renameWorkspace,
+    datasetsByStudy, setStudyDataset, addStudyDataset, touchStudy, archiveWorkspace, restoreWorkspace, renameWorkspace,
     deleteWorkspace, deleteStudy, deleteModel, deleteDataset, requestDelete,
     renameStudy, duplicateStudy, renameModel, duplicateModel, openTab,
     snapshotsByStudy, setStudySnapshots, removeStudySnapshot,
+    lastUsedDatasetByStudy,
+    setStudyLastDatasetId,
     isSidebarCollapsed, toggleSidebar
   } = useStore();
   
@@ -119,25 +131,15 @@ const Dashboard = () => {
     return sortOrder === 'asc' ? comparison : -comparison;
   });
 
-  // Inline rename state for sidebar workspace, study, and dataset
-  const [editingSidebarWsId, setEditingSidebarWsId] = useState<string | null>(null);
-  const [editSidebarWsName, setEditSidebarWsName] = useState('');
-
+  // Inline rename state for study, dataset, and model
   const [editingStudyId, setEditingStudyId] = useState<string | null>(null);
   const [editStudyName, setEditStudyName] = useState('');
 
-  const [editingDatasetStudyId, setEditingDatasetStudyId] = useState<string | null>(null);
+  const [editingDatasetKey, setEditingDatasetKey] = useState<string | null>(null);
   const [editDatasetName, setEditDatasetName] = useState('');
 
   const [editingModelId, setEditingModelId] = useState<string | null>(null);
   const [editModelName, setEditModelName] = useState('');
-
-  const commitSidebarWsRename = (id: string) => {
-    if (editSidebarWsName.trim()) {
-      renameWorkspace(id, editSidebarWsName.trim());
-    }
-    setEditingSidebarWsId(null);
-  };
 
   const commitStudyRename = (id: string) => {
     if (editStudyName.trim()) {
@@ -152,7 +154,7 @@ const Dashboard = () => {
       setStudyDataset(studyId, updated);
       touchStudy(studyId);
     }
-    setEditingDatasetStudyId(null);
+    setEditingDatasetKey(null);
   };
 
   const commitModelRename = (id: string) => {
@@ -211,13 +213,15 @@ const Dashboard = () => {
 
   const handleImportComplete = async (dataset: ParsedDataset) => {
     if (!importingStudyId) return;
-    setStudyDataset(importingStudyId, dataset);
+    const dsId = dataset.id || `ds_${Date.now()}`;
+    const newDs = { ...dataset, id: dsId };
+    addStudyDataset(importingStudyId, newDs);
     touchStudy(importingStudyId);
-    const study = studies.find(s => s.id === importingStudyId);
+    const study = studies.find((s) => s.id === importingStudyId);
     if (study?.path) {
       try {
-        const headers = dataset.variables.map(v => v.name);
-        await api.saveProjectDataJson(study.path, dataset.filename, headers, dataset.rows);
+        const headers = dataset.variables.map((v) => v.name);
+        await api.saveProjectDataJson(study.path, dataset.filename, headers, dataset.rows, undefined, undefined, dsId);
       } catch (err) {
         console.warn('Failed to save dataset to project in Dashboard:', err);
       }
@@ -225,7 +229,127 @@ const Dashboard = () => {
     setImportingStudyId(null);
   };
 
+  const handleExportProject = async (study: Study) => {
+    if (!study.path) {
+      alert('This project does not have a saved file on disk.');
+      return;
+    }
+    try {
+      let selected: string | null = null;
+      const safeName = (study.name || 'Project').replace(/[/\\?%*:|"<>]/g, '_');
+      try {
+        const { save } = await import('@tauri-apps/plugin-dialog');
+        selected = await save({
+          title: 'Export Project Archive',
+          defaultPath: `${safeName}.zip`,
+          filters: [{ name: 'ZIP Archive', extensions: ['zip'] }],
+        });
+      } catch {
+        selected = window.prompt('Enter destination file path for .zip archive:', `${safeName}.zip`);
+      }
 
+      if (!selected) return;
+
+      const outZipPath = selected.endsWith('.zip') ? selected : `${selected}.zip`;
+      const res = await api.exportProjectZip(study.path, outZipPath);
+      if (res?.error) {
+        alert(`Export failed: ${res.error}`);
+      }
+    } catch (err: any) {
+      console.error('Failed to export project:', err);
+      alert(`Failed to export project: ${err?.message || err}`);
+    }
+  };
+
+  const handleExportWorkspace = async (ws: { id: string; name: string; path?: string }) => {
+    if (!ws.path) {
+      alert('This workspace does not have a saved directory path on disk.');
+      return;
+    }
+    try {
+      let selected: string | null = null;
+      const safeName = (ws.name || 'Workspace').replace(/[/\\?%*:|"<>]/g, '_');
+      try {
+        const { save } = await import('@tauri-apps/plugin-dialog');
+        selected = await save({
+          title: 'Export Workspace Archive',
+          defaultPath: `${safeName}.zip`,
+          filters: [{ name: 'ZIP Archive', extensions: ['zip'] }],
+        });
+      } catch {
+        selected = window.prompt('Enter destination file path for .zip archive:', `${safeName}.zip`);
+      }
+
+      if (!selected) return;
+
+      const outZipPath = selected.endsWith('.zip') ? selected : `${selected}.zip`;
+      const res = await api.exportWorkspaceZip(ws.path, outZipPath);
+      if (res?.error) {
+        alert(`Export failed: ${res.error}`);
+      }
+    } catch (err: any) {
+      console.error('Failed to export workspace:', err);
+      alert(`Failed to export workspace: ${err?.message || err}`);
+    }
+  };
+
+  const openWorkspaceContextMenu = (e: React.MouseEvent, ws: { id: string; name: string; path?: string }) => {
+    e.preventDefault();
+    e.stopPropagation();
+    useStore.getState().openContextMenu(e.clientX, e.clientY, [
+      {
+        id: 'rename',
+        label: 'Rename Workspace',
+        icon: 'edit',
+        action: () => {
+          setEditWorkspaceTitle(ws.name);
+          setIsEditingTitle(true);
+        },
+      },
+      {
+        id: 'duplicate',
+        label: 'Duplicate Workspace',
+        icon: 'content_copy',
+        action: () => useStore.getState().duplicateWorkspace(ws.id),
+      },
+      {
+        id: 'export-workspace',
+        label: 'Export Workspace…',
+        icon: 'archive',
+        action: () => handleExportWorkspace(ws),
+      },
+      {
+        id: 'archive',
+        label: 'Archive Workspace',
+        icon: 'inventory_2',
+        action: () => archiveWorkspace(ws.id),
+      },
+      {
+        id: 'delete',
+        label: 'Delete Workspace',
+        icon: 'delete',
+        danger: true,
+        action: () => {
+          requestDelete({
+            title: 'Delete Workspace',
+            itemName: ws.name,
+            message:
+              'Are you sure? This workspace and all its contents will be permanently deleted and cannot be recovered.',
+            onConfirm: async () => {
+              if (ws.path) {
+                try {
+                  await api.deleteWorkspace(ws.path);
+                } catch (e) {
+                  console.warn('Failed to delete workspace on disk:', e);
+                }
+              }
+              deleteWorkspace(ws.id);
+            },
+          });
+        },
+      },
+    ]);
+  };
 
   const handleCreateStudy = () => {
     setIsStudyModalOpen(true);
@@ -257,11 +381,22 @@ const Dashboard = () => {
   const handleCreateModel = () => {
     if (modelName.trim() && modelModalStudyId) {
       const id = 'model' + Date.now();
+      const studyDatasets = getStudyDatasets(datasetsByStudy, modelModalStudyId);
+      const lastUsedDsId = lastUsedDatasetByStudy[modelModalStudyId]
+        || models.find(m => m.studyId === modelModalStudyId && m.datasetId)?.datasetId;
+      const boundDataset = (lastUsedDsId && studyDatasets.find(d => d.id === lastUsedDsId))
+        || (studyDatasets.length === 1 ? studyDatasets[0] : null);
+
+      if (boundDataset?.id) {
+        setStudyLastDatasetId(modelModalStudyId, boundDataset.id);
+      }
+
       addModel({
         id,
         studyId: modelModalStudyId,
         name: modelName.trim(),
         type: modelType,
+        datasetId: boundDataset?.id,
         lastModified: 'Just now'
       });
       setModelModalOpen(false);
@@ -280,149 +415,7 @@ const Dashboard = () => {
   return (
     <>
       <div className="app-body">
-        
-        <aside className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`} id="sidebar">
-          <div className="sidebar__top">
-            <div className="sidebar-ws-container">
-              <div className="sidebar-header" style={{paddingBottom: '10px', borderBottom: 'none'}}>
-                {isWorkspaceSearchOpen ? <div className="inline-search-wrap"><input autoFocus className="sidebar-inline-search" value={workspaceQuery} onChange={event => setWorkspaceQuery(event.target.value)} onBlur={() => { if (!workspaceQuery) setIsWorkspaceSearchOpen(false); }} placeholder="Filter…" />{workspaceQuery && <button className="inline-search-clear" type="button" aria-label="Clear workspace search" onMouseDown={event => event.preventDefault()} onClick={() => setWorkspaceQuery('')}>×</button>}</div> : <span className="sidebar-header__label">Workspaces</span>}
-                <div className="sidebar-header__actions">
-                  <button className={`icon-btn icon-btn--sm ${isWorkspaceSearchOpen ? 'active' : ''}`} title="Search workspaces" type="button" onClick={() => {
-                    if (isSidebarCollapsed) {
-                      toggleSidebar();
-                      setTimeout(() => setIsWorkspaceSearchOpen(true), 150);
-                    } else {
-                      setIsWorkspaceSearchOpen(open => !open);
-                      if (isWorkspaceSearchOpen) setWorkspaceQuery('');
-                    }
-                  }}>
-                    <span className="material-symbols-outlined">search</span>
-                  </button>
-                  <button className="sidebar-create-folder-btn" title="Create Workspace" type="button" onClick={() => setIsWorkspaceModalOpen(true)}>
-                    <svg fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
-                      <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path>
-                      <line x1="12" x2="12" y1="10" y2="16"></line>
-                      <line x1="9" x2="15" y1="13" y2="13"></line>
-                    </svg>
-                  </button>
-                  <button className="icon-btn icon-btn--sm" id="sidebar-collapse-btn" title={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} type="button" onClick={toggleSidebar}>
-                    <span className="material-symbols-outlined">left_panel_close</span>
-                  </button>
-                </div>
-              </div>
-
-              <div id="sidebar-ws-list" style={{display: 'flex', flexDirection: 'column', gap: '2px'}}>
-                {filteredWorkspaces.map(ws => (
-                  <div 
-                    key={ws.id} 
-                    className={`sidebar-item ${ws.id === activeWorkspaceId ? 'active' : ''}`}
-                    onClick={() => {
-                      if (editingSidebarWsId !== ws.id) {
-                        setActiveWorkspace(ws.id);
-                        openTab({ type: 'workspace', title: ws.name, workspaceId: ws.id });
-                      }
-                    }}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      useStore.getState().openContextMenu(e.clientX, e.clientY, [
-                        {
-                          id: 'rename', 
-                          label: 'Rename Workspace', 
-                          icon: 'edit', 
-                          action: () => {
-                            setEditingSidebarWsId(ws.id);
-                            setEditSidebarWsName(ws.name);
-                          }
-                        },
-                        {
-                          id: 'duplicate', label: 'Duplicate Workspace', icon: 'content_copy', action: () => useStore.getState().duplicateWorkspace(ws.id)
-                        },
-                        {
-                          id: 'archive', label: 'Archive Workspace', icon: 'inventory_2', action: () => archiveWorkspace(ws.id)
-                        },
-                        {
-                          id: 'delete', 
-                          label: 'Delete Workspace', 
-                          icon: 'delete', 
-                          danger: true, 
-                          action: () => {
-                            requestDelete({
-                              title: 'Delete Workspace',
-                              itemName: ws.name,
-                              message: 'Are you sure? This workspace and all its contents will be permanently deleted and cannot be recovered.',
-                              onConfirm: async () => {
-                                if (ws.path) {
-                                  try {
-                                    await api.deleteWorkspace(ws.path);
-                                  } catch (e) {
-                                    console.warn('Failed to delete workspace on disk:', e);
-                                  }
-                                }
-                                deleteWorkspace(ws.id);
-                              },
-                            });
-                          } 
-                        }
-                      ]);
-                    }}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    <span className="sidebar-item__left" style={{ width: '100%', overflow: 'hidden' }}>
-                      <span className="material-symbols-outlined">folder</span>
-                      {editingSidebarWsId === ws.id ? (
-                        <input
-                          autoFocus
-                          type="text"
-                          className="inline-seamless-rename-input"
-                          value={editSidebarWsName}
-                          size={Math.max(editSidebarWsName.length, 1)}
-                          onChange={(e) => setEditSidebarWsName(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') commitSidebarWsRename(ws.id);
-                            else if (e.key === 'Escape') setEditingSidebarWsId(null);
-                          }}
-                          onBlur={() => commitSidebarWsRename(ws.id)}
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                      ) : (
-                        <span>{ws.name}</span>
-                      )}
-                    </span>
-                  </div>
-                ))}
-                {isWorkspaceSearchOpen && workspaceQuery && filteredWorkspaces.length === 0 && <span className="inline-search-empty">No workspaces found</span>}
-              </div>
-            </div>
-          </div>
-
-          <div className="sidebar__bottom">
-            <button className="sidebar-item" type="button" data-action="archive" onClick={() => openTab({ id: 'tab-archive', type: 'archive', title: 'Archive' })}>
-              <span className="sidebar-item__left">
-                <span className="material-symbols-outlined">inventory_2</span>
-                <span>Archive</span>
-              </span>
-              <span className="sidebar-item__badge">{archivedWorkspaces.length}</span>
-            </button>
-            <button className="sidebar-item" type="button" data-action="docs" onClick={() => openTab({ type: 'docs', title: 'Documentation' })}>
-              <span className="sidebar-item__left">
-                <span className="material-symbols-outlined">menu_book</span>
-                <span>Documentation</span>
-              </span>
-            </button>
-            <button className="sidebar-item" type="button" data-action="samples" onClick={() => openTab({ type: 'samples', title: 'Sample Studies' })}>
-              <span className="sidebar-item__left">
-                <span className="material-symbols-outlined">science</span>
-                <span>Sample Studies</span>
-              </span>
-            </button>
-            <button className="sidebar-item" type="button" data-action="feedback" onClick={() => openTab({ type: 'feedback', title: 'Feedback & Reports' })}>
-              <span className="sidebar-item__left">
-                <span className="material-symbols-outlined">feedback</span>
-                <span className="truncate">Feedback & Reports</span>
-              </span>
-            </button>
-          </div>
-        </aside>
+        <AppSidebar activeNav="workspace" />
 
         <main className="ws-main">
           <div className="ws-inner">
@@ -457,7 +450,12 @@ const Dashboard = () => {
                         setIsEditingTitle(true);
                       }
                     }}
-                    title="Double-click to rename workspace"
+                    onContextMenu={(e) => {
+                      if (activeWorkspace) {
+                        openWorkspaceContextMenu(e, activeWorkspace);
+                      }
+                    }}
+                    title="Double-click to rename workspace, right-click for options"
                   >
                     {activeWorkspace?.name || 'Workspace'}
                   </h1>
@@ -594,9 +592,9 @@ const Dashboard = () => {
                 
                 {sortedStudies.map(study => {
                   const studyModels = models.filter(m => m.studyId === study.id);
-                  const studyDataset = datasetsByStudy[study.id];
+                  const studyDatasets = getStudyDatasets(datasetsByStudy, study.id);
                   const studySnapshots = (study.path ? snapshotsByStudy[study.path] : null) || snapshotsByStudy[study.id] || [];
-                  const totalItems = studyModels.length + (studyDataset ? 1 : 0) + studySnapshots.length;
+                  const totalItems = studyModels.length + studyDatasets.length + studySnapshots.length;
                   const isEmpty = totalItems === 0;
                   const isExpanded = expandedStudies.has(study.id);
                   
@@ -612,7 +610,7 @@ const Dashboard = () => {
                                 {
                                   id: 'create-model', label: 'Create Model', icon: 'add', action: () => { setModelModalStudyId(study.id); setModelName(''); setModelType('PLS-SEM'); setModelModalOpen(true); }
                                 },
-                                ...(!studyDataset ? [{ id: 'add-dataset', label: 'Add Dataset', icon: 'upload_file', action: () => { setImportingStudyId(study.id); fileInputRef.current?.click(); } }] : []),
+                                { id: 'add-dataset', label: 'Add Dataset', icon: 'upload_file', action: () => { setImportingStudyId(study.id); fileInputRef.current?.click(); } },
                                 { 
                                   id: 'rename', 
                                   label: 'Rename Study', 
@@ -634,6 +632,12 @@ const Dashboard = () => {
                                   label: 'Copy to Workspace…',
                                   icon: 'file_copy',
                                   action: () => setWorkspaceDropdownConfig({ isOpen: true, mode: 'copy', study, position: { x: e.clientX, y: e.clientY } }),
+                                },
+                                {
+                                  id: 'export-project',
+                                  label: 'Export Project…',
+                                  icon: 'archive',
+                                  action: () => handleExportProject(study),
                                 },
                                 {
                                   id: 'delete', 
@@ -683,10 +687,15 @@ const Dashboard = () => {
                             {isEmpty ? 'Empty' : `${totalItems} item${totalItems === 1 ? '' : 's'}`}
                           </span>
                           {isEmpty && (
-                            <div className="study-row__actions">
-                              <button className="btn-inline" type="button" onClick={(e) => { e.stopPropagation(); setImportingStudyId(study.id); fileInputRef.current?.click(); }}><span className="material-symbols-outlined">upload_file</span><span>Import Dataset</span></button>
-                              <span style={{color: 'rgba(0,0,0,0.15)'}}>•</span>
-                              <button className="btn-inline" type="button" onClick={(e) => openModelModal(study.id, e)}><span className="material-symbols-outlined">add</span><span>Create Model</span></button>
+                            <div className="study-row__actions" onClick={(e) => e.stopPropagation()}>
+                              <button className="study-action-btn" type="button" onClick={(e) => { e.stopPropagation(); setImportingStudyId(study.id); fileInputRef.current?.click(); }}>
+                                <span className="material-symbols-outlined">upload_file</span>
+                                <span>Import Dataset</span>
+                              </button>
+                              <button className="study-action-btn" type="button" onClick={(e) => openModelModal(study.id, e)}>
+                                <span className="material-symbols-outlined">add</span>
+                                <span>Create Model</span>
+                              </button>
                             </div>
                           )}
                         </div>
@@ -702,120 +711,129 @@ const Dashboard = () => {
                       
                       <div className={`study-children ${!isExpanded ? 'hidden' : ''}`} id={`study-children-${study.id}`}>
                         {isEmpty ? (
-                          <div style={{padding: '12px 16px', marginLeft: '26px', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', fontStyle: 'italic'}}>
-                            No files yet. Drop files here to get started.
+                          <div style={{padding: '10px 16px', marginLeft: '26px'}}>
+                            <div style={{color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', fontStyle: 'italic'}}>
+                              No files yet.
+                            </div>
                           </div>
                         ) : (
                           <>
-                            {studyDataset && (
-<div
-  className="file-row file-row--muted"
-  onClick={() => {
-    setActiveStudy(study.id);
-    openTab({
-      type: 'dataset',
-      title: studyDataset.filename,
-      studyId: study.id,
-      workspaceId: activeWorkspaceId,
-    });
-  }}
-  onContextMenu={e => {
-    e.preventDefault();
-    e.stopPropagation();
+                            {studyDatasets.map((studyDataset) => {
+                              const dsKey = `${study.id}:${studyDataset.id || studyDataset.filename}`;
+                              return (
+                                <div
+                                  key={studyDataset.id || studyDataset.filename}
+                                  className="file-row file-row--muted"
+                                  onClick={() => {
+                                    setActiveStudy(study.id);
+                                    openTab({
+                                      type: 'dataset',
+                                      title: studyDataset.filename,
+                                      studyId: study.id,
+                                      datasetId: studyDataset.id,
+                                      workspaceId: activeWorkspaceId,
+                                    });
+                                  }}
+                                  onContextMenu={e => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
 
-    useStore.getState().openContextMenu(
-      e.clientX,
-      e.clientY,
-      [
-        {
-          id: 'open-tab',
-          label: 'Open in Tab',
-          icon: 'tab',
-          action: () => {
-            setActiveStudy(study.id);
-            openTab({
-              type: 'dataset',
-              title: studyDataset.filename,
-              studyId: study.id,
-              workspaceId: activeWorkspaceId,
-            });
-          }
-        },
-        {
-          id: 'quick-edit',
-          label: 'Edit Settings...',
-          icon: 'tune',
-          action: () => {
-            setActiveStudy(study.id);
-            openTab({
-              type: 'dataset',
-              title: studyDataset.filename,
-              studyId: study.id,
-              workspaceId: activeWorkspaceId,
-            });
-          }
-        },
-        {
-          id: 'rename',
-          label: 'Rename Dataset',
-          icon: 'edit',
-          action: () => {
-            setEditingDatasetStudyId(study.id);
-            setEditDatasetName(studyDataset.filename);
-          }
-        },
-        {
-          id: 'delete',
-          label: 'Delete Dataset',
-          icon: 'delete',
-          danger: true,
-          action: () => {
-            requestDelete({
-              title: 'Delete Dataset',
-              itemName: studyDataset.filename,
-              message:
-                'Are you sure? This dataset will be permanently deleted and cannot be recovered.',
-              onConfirm: () => {
-                deleteDataset(study.id);
-                touchStudy(study.id);
+                                    useStore.getState().openContextMenu(
+                                      e.clientX,
+                                      e.clientY,
+                                      [
+                                        {
+                                          id: 'open-tab',
+                                          label: 'Open in Tab',
+                                          icon: 'tab',
+                                          action: () => {
+                                            setActiveStudy(study.id);
+                                            openTab({
+                                              type: 'dataset',
+                                              title: studyDataset.filename,
+                                              studyId: study.id,
+                                              datasetId: studyDataset.id,
+                                              workspaceId: activeWorkspaceId,
+                                            });
+                                          }
+                                        },
+                                        {
+                                          id: 'quick-edit',
+                                          label: 'Edit Settings...',
+                                          icon: 'tune',
+                                          action: () => {
+                                            setActiveStudy(study.id);
+                                            openTab({
+                                              type: 'dataset',
+                                              title: studyDataset.filename,
+                                              studyId: study.id,
+                                              datasetId: studyDataset.id,
+                                              workspaceId: activeWorkspaceId,
+                                            });
+                                          }
+                                        },
+                                        {
+                                          id: 'rename',
+                                          label: 'Rename Dataset',
+                                          icon: 'edit',
+                                          action: () => {
+                                            setEditingDatasetKey(dsKey);
+                                            setEditDatasetName(studyDataset.filename);
+                                          }
+                                        },
+                                        {
+                                          id: 'delete',
+                                          label: 'Delete Dataset',
+                                          icon: 'delete',
+                                          danger: true,
+                                          action: () => {
+                                            requestDelete({
+                                              title: 'Delete Dataset',
+                                              itemName: studyDataset.filename,
+                                              message:
+                                                'Are you sure? This dataset will be permanently deleted and cannot be recovered.',
+                                              onConfirm: () => {
+                                                deleteDataset(study.id, studyDataset.id);
+                                                touchStudy(study.id);
 
-                if (study.path) {
-                  api.deleteProjectData(study.path).catch(console.warn);
-                }
-              }
-            });
-          }
-        }
-      ]
-    );
-  }}
->
-                                <div className="file-row__left">
-                                  <span className="material-symbols-outlined">dataset</span>
-                                  {editingDatasetStudyId === study.id ? (
-                                    <input
-                                      autoFocus
-                                      type="text"
-                                      className="inline-seamless-rename-input"
-                                      value={editDatasetName}
-                                      size={Math.max(editDatasetName.length, 1)}
-                                      onChange={(e) => setEditDatasetName(e.target.value)}
-                                      onKeyDown={(e) => {
-                                        if (e.key === 'Enter') commitDatasetRename(study.id, studyDataset);
-                                        else if (e.key === 'Escape') setEditingDatasetStudyId(null);
-                                      }}
-                                      onBlur={() => commitDatasetRename(study.id, studyDataset)}
-                                      onClick={(e) => e.stopPropagation()}
-                                    />
-                                  ) : (
-                                    <span>{studyDataset.filename}</span>
-                                  )}
-                                  <span className="file-badge file-badge--default">{studyDataset.rows.length} rows</span>
-                                  <span className="file-badge file-badge--default">Dataset</span>
+                                                if (study.path) {
+                                                  api.deleteProjectData(study.path, studyDataset.id).catch(console.warn);
+                                                }
+                                              }
+                                            });
+                                          }
+                                        }
+                                      ]
+                                    );
+                                  }}
+                                >
+                                  <div className="file-row__left">
+                                    <span className="material-symbols-outlined">dataset</span>
+                                    {editingDatasetKey === dsKey ? (
+                                      <input
+                                        autoFocus
+                                        type="text"
+                                        className="inline-seamless-rename-input"
+                                        value={editDatasetName}
+                                        size={Math.max(editDatasetName.length, 1)}
+                                        onChange={(e) => setEditDatasetName(e.target.value)}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') commitDatasetRename(study.id, studyDataset);
+                                          else if (e.key === 'Escape') setEditingDatasetKey(null);
+                                        }}
+                                        onBlur={() => commitDatasetRename(study.id, studyDataset)}
+                                        onClick={(e) => e.stopPropagation()}
+                                      />
+                                    ) : (
+                                      <span>{studyDataset.filename}</span>
+                                    )}
+                                    <span className="file-badge file-badge--default">{studyDataset.rows.length} rows</span>
+                                    <span className="file-badge file-badge--default">Dataset</span>
+                                  </div>
+                                  <div className="file-row__meta"><span className="file-row__time">{study.lastModified}</span><span style={{width: '16px'}}></span></div>
                                 </div>
-                                <div className="file-row__meta"><span className="file-row__time">{study.lastModified}</span><span style={{width: '16px'}}></span></div>
-                              </div>
-                            )}
+                              );
+                            })}
                             {studyModels.map(model => (
                               <div key={model.id} className="file-row" onClick={() => {
                                 setActiveStudy(study.id);
@@ -848,7 +866,7 @@ const Dashboard = () => {
                                   ) : (
                                     <span>{model.name}</span>
                                   )}
-                                  <span className={`file-badge ${model.type === 'PLS-SEM' ? 'file-badge--accent' : (model.type === 'Dataset' ? 'file-badge--default' : '')}`}>{model.type}</span>
+                                  <span className="file-badge file-badge--model-tag">{formatModelType(model.type)}</span>
                                 </div>
                                 <div className="file-row__meta">
                                   <span className="file-row__time">{model.lastModified}</span>
@@ -922,9 +940,15 @@ const Dashboard = () => {
                                 </div>
                               </div>
                             ))}
-                            <div style={{display: 'flex', gap: '16px', margin: '8px 0 8px 26px'}}>
-                              <div className="create-model-link" onClick={(e) => openModelModal(study.id, e)} style={{margin: 0, padding: 0}}><span className="material-symbols-outlined">add</span><span>Create Model</span></div>
-                              {!studyDataset && <div className="create-model-link" style={{margin: 0, padding: 0}} onClick={(e) => { e.stopPropagation(); setImportingStudyId(study.id); fileInputRef.current?.click(); }}><span className="material-symbols-outlined">upload_file</span><span>Import Dataset</span></div>}
+                            <div style={{display: 'flex', gap: '8px', margin: '8px 0 8px 26px', alignItems: 'center'}}>
+                              <button className="study-action-btn" type="button" onClick={(e) => { e.stopPropagation(); setImportingStudyId(study.id); fileInputRef.current?.click(); }}>
+                                <span className="material-symbols-outlined">upload_file</span>
+                                <span>Import Dataset</span>
+                              </button>
+                              <button className="study-action-btn" type="button" onClick={(e) => openModelModal(study.id, e)}>
+                                <span className="material-symbols-outlined">add</span>
+                                <span>Create Model</span>
+                              </button>
                             </div>
                           </>
                         )}

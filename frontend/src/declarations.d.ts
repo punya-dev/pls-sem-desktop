@@ -12,6 +12,9 @@ declare module '*/utils/model-canvas' {
   export const clearModelCanvas: () => void;
   export const resetModelStyles: () => void;
   export const toggleMeasurementMode: () => void;
+  export const copySelected: () => void;
+  export const pasteClipboard: () => void;
+  export const setCanvasDatasetColumns: (columns: string[]) => void;
 }
 declare module '*/utils/results.js' {
   const content: any;

@@ -1,16 +1,32 @@
 import React, { useState, useEffect } from 'react';
-import { useStore, type AppSettings } from '../store';
+import { useStore, LICENSE_INFO, type AppSettings } from '../store';
 import { ACCENT_PRESETS, getContrastTextColor, applyAccentColor } from '../utils/theme';
 
 type SettingsTab = 'about' | 'appearance' | 'calculation' | 'canvas';
 
 export const SettingsModal: React.FC = () => {
-  const { isSettingsOpen, setIsSettingsOpen, settings, updateSettings } = useStore();
-  const [activeTab, setActiveTab] = useState<SettingsTab>('about');
+  const { 
+    isSettingsOpen, 
+    setIsSettingsOpen, 
+    settings, 
+    updateSettings, 
+    settingsActiveTab, 
+    setSettingsActiveTab, 
+    isLicenseActive, 
+    setIsLicenseActive 
+  } = useStore();
+  const [activeTab, setActiveTab] = useState<SettingsTab>(settingsActiveTab || 'about');
   const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'latest'>('idle');
+  const [copiedLicenseKey, setCopiedLicenseKey] = useState(false);
 
   const currentAccent = settings.accentColor || '#6B4EE6';
   const [hexInput, setHexInput] = useState(currentAccent);
+
+  useEffect(() => {
+    if (settingsActiveTab) {
+      setActiveTab(settingsActiveTab);
+    }
+  }, [settingsActiveTab, isSettingsOpen]);
 
   useEffect(() => {
     setHexInput(settings.accentColor || '#6B4EE6');
@@ -39,12 +55,23 @@ export const SettingsModal: React.FC = () => {
 
   const handleClose = () => setIsSettingsOpen(false);
 
+  const handleTabChange = (tabId: SettingsTab) => {
+    setActiveTab(tabId);
+    setSettingsActiveTab(tabId);
+  };
+
   const handleCheckUpdates = () => {
     setUpdateStatus('checking');
     setTimeout(() => {
       setUpdateStatus('latest');
       setTimeout(() => setUpdateStatus('idle'), 4000);
     }, 1200);
+  };
+
+  const handleCopyLicenseKey = () => {
+    navigator.clipboard.writeText(LICENSE_INFO.key);
+    setCopiedLicenseKey(true);
+    setTimeout(() => setCopiedLicenseKey(false), 2000);
   };
 
   const tabs: { id: SettingsTab; label: string; icon: string }[] = [
@@ -66,7 +93,7 @@ export const SettingsModal: React.FC = () => {
               key={tab.id}
               type="button"
               className={`settings-sidebar__item ${activeTab === tab.id ? 'settings-sidebar__item--active' : ''}`}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => handleTabChange(tab.id)}
             >
               <span className="material-symbols-outlined settings-sidebar__icon">{tab.icon}</span>
               {tab.label}
@@ -83,10 +110,10 @@ export const SettingsModal: React.FC = () => {
               <div className="settings-section">
                 <div className="settings-section__header">Application</div>
                 <div className="settings-row settings-row--app">
-                  <div className="settings-app-icon">CS</div>
+                  <div className="settings-app-icon">ST</div>
                   <div className="settings-app-info">
                     <div className="settings-app-name">
-                      CSPLS Desktop
+                      StatSEM Desktop
                       <span className="settings-app-version">v{settings.version}</span>
                     </div>
                     <div className="settings-app-desc">Partial Least Squares Structural Equation Modeling</div>
@@ -108,18 +135,118 @@ export const SettingsModal: React.FC = () => {
                 )}
               </div>
 
+              {/* ─── LICENSE DETAILS ─── */}
+              <div className="settings-section" id="settings-license-section">
+                <div className="settings-section__header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span>License Details</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span 
+                      style={{ 
+                        width: '7px', 
+                        height: '7px', 
+                        borderRadius: '50%', 
+                        backgroundColor: isLicenseActive ? '#10B981' : '#EF4444',
+                        boxShadow: isLicenseActive ? '0 0 6px rgba(16, 185, 129, 0.6)' : '0 0 6px rgba(239, 68, 68, 0.6)',
+                        display: 'inline-block' 
+                      }} 
+                    />
+                    <span style={{ fontSize: '11px', fontWeight: 600, color: isLicenseActive ? '#059669' : '#DC2626' }}>
+                      {isLicenseActive ? 'Active' : 'Inactive'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="settings-row">
+                  <div className="settings-row__label">License Type</div>
+                  <span className="settings-badge" style={{ fontWeight: 600 }}>
+                    {LICENSE_INFO.type}
+                  </span>
+                </div>
+
+                <div className="settings-row">
+                  <div className="settings-row__label">Licensee</div>
+                  <div style={{ fontSize: '12.5px', fontWeight: 500, color: 'var(--color-text-primary)' }}>
+                    {LICENSE_INFO.licensee}
+                  </div>
+                </div>
+
+                <div className="settings-row">
+                  <div className="settings-row__label">Expiry Date</div>
+                  <div style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-text-primary)' }}>
+                    {isLicenseActive ? `${LICENSE_INFO.daysRemaining} days remaining (${LICENSE_INFO.expiryDate})` : 'Inactive'}
+                  </div>
+                </div>
+
+                <div className="settings-row">
+                  <div className="settings-row__label">License Key</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <code style={{ 
+                      fontSize: '11.5px', 
+                      fontFamily: 'var(--font-mono)', 
+                      backgroundColor: 'var(--color-bg-subtle, rgba(0,0,0,0.04))',
+                      padding: '3px 8px',
+                      borderRadius: '4px',
+                      border: '1px solid var(--color-border-subtle)',
+                      color: 'var(--color-text-secondary)',
+                      letterSpacing: '0.02em'
+                    }}>
+                      {LICENSE_INFO.key}
+                    </code>
+                    <button
+                      type="button"
+                      className="settings-icon-btn"
+                      onClick={handleCopyLicenseKey}
+                      title={copiedLicenseKey ? 'Copied!' : 'Copy key'}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '4px',
+                        borderRadius: '4px',
+                        color: copiedLicenseKey ? 'var(--color-accent)' : 'var(--color-text-muted)',
+                        transition: 'color var(--transition-fast)'
+                      }}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>
+                        {copiedLicenseKey ? 'check' : 'content_copy'}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="settings-row" style={{ borderBottom: 'none' }}>
+                  <div>
+                    <div className="settings-row__label">Manage Seat</div>
+                    <div className="settings-row__desc">
+                      {isLicenseActive 
+                        ? 'Deactivating releases this seat to use on another machine.' 
+                        : 'Activate to restore full academic multi-seat features.'}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className={`settings-license-toggle-btn ${isLicenseActive ? 'settings-license-toggle-btn--deactivate' : 'settings-license-toggle-btn--activate'}`}
+                    onClick={() => setIsLicenseActive(!isLicenseActive)}
+                  >
+                    <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>
+                      {isLicenseActive ? 'power_settings_new' : 'check_circle'}
+                    </span>
+                    {isLicenseActive ? 'Deactivate License' : 'Activate License'}
+                  </button>
+                </div>
+              </div>
+
               <div className="settings-section">
                 <div className="settings-section__header">Links</div>
                 <div className="settings-row">
                   <div className="settings-row__label">Official Website</div>
                   <a href={settings.websiteUrl} target="_blank" rel="noreferrer" className="settings-link">
-                    cspls.org
+                    statsem.org
                     <span className="material-symbols-outlined" style={{ fontSize: '12px' }}>open_in_new</span>
                   </a>
-                </div>
-                <div className="settings-row">
-                  <div className="settings-row__label">License</div>
-                  <span className="settings-badge">Academic &amp; Commercial</span>
                 </div>
               </div>
             </>

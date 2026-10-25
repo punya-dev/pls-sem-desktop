@@ -28,6 +28,38 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ activeNav }) => {
   const [editingWsId, setEditingWsId] = useState<string | null>(null);
   const [editWsName, setEditWsName] = useState('');
 
+  const handleExportWorkspace = async (ws: { id: string; name: string; path?: string }) => {
+    if (!ws.path) {
+      alert('This workspace does not have a saved directory path on disk.');
+      return;
+    }
+    try {
+      let selected: string | null = null;
+      const safeName = (ws.name || 'Workspace').replace(/[/\\?%*:|"<>]/g, '_');
+      try {
+        const { save } = await import('@tauri-apps/plugin-dialog');
+        selected = await save({
+          title: 'Export Workspace Archive',
+          defaultPath: `${safeName}.zip`,
+          filters: [{ name: 'ZIP Archive', extensions: ['zip'] }],
+        });
+      } catch {
+        selected = window.prompt('Enter destination file path for .zip archive:', `${safeName}.zip`);
+      }
+
+      if (!selected) return;
+
+      const outZipPath = selected.endsWith('.zip') ? selected : `${selected}.zip`;
+      const res = await api.exportWorkspaceZip(ws.path, outZipPath);
+      if (res?.error) {
+        alert(`Export failed: ${res.error}`);
+      }
+    } catch (err: any) {
+      console.error('Failed to export workspace:', err);
+      alert(`Failed to export workspace: ${err?.message || err}`);
+    }
+  };
+
   const filteredWorkspaces = workspaces.filter((ws) =>
     ws.name.toLowerCase().includes(workspaceQuery.toLowerCase())
   );
@@ -159,6 +191,12 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ activeNav }) => {
                           useStore.getState().duplicateWorkspace(ws.id),
                       },
                       {
+                        id: 'export-workspace',
+                        label: 'Export Workspace…',
+                        icon: 'archive',
+                        action: () => handleExportWorkspace(ws),
+                      },
+                      {
                         id: 'archive',
                         label: 'Archive Workspace',
                         icon: 'inventory_2',
@@ -233,9 +271,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ activeNav }) => {
               <span className="material-symbols-outlined">inventory_2</span>
               <span>Archive</span>
             </span>
-            {archivedWorkspaces.length > 0 && (
-              <span className="sidebar-item__badge">{archivedWorkspaces.length}</span>
-            )}
+            <span className="sidebar-item__badge">{archivedWorkspaces.length}</span>
           </button>
 
           <button
@@ -254,11 +290,11 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ activeNav }) => {
             className={`sidebar-item ${activeNav === 'samples' ? 'active' : ''}`}
             type="button"
             data-action="samples"
-            onClick={() => openTab({ id: 'tab-samples', type: 'samples', title: 'Sample Projects' })}
+            onClick={() => openTab({ id: 'tab-samples', type: 'samples', title: 'Sample Studies' })}
           >
             <span className="sidebar-item__left">
               <span className="material-symbols-outlined">science</span>
-              <span>Sample Projects</span>
+              <span>Sample Studies</span>
             </span>
           </button>
 

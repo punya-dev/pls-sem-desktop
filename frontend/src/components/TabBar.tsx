@@ -4,7 +4,7 @@ import WorkspaceModal from './WorkspaceModal';
 import { promptOpenWorkspaceFolder } from '../utils/workspace-import';
 
 export const TabBar: React.FC = () => {
-  const { tabs, activeTabId, setActiveTab, closeTab, openTab, workspaces, reorderTabs, setActiveWorkspace, renameWorkspace } = useStore();
+  const { tabs, activeTabId, setActiveTab, closeTab, closeTabs, openTab, workspaces, reorderTabs, setActiveWorkspace, renameWorkspace } = useStore();
   const scrollRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -139,21 +139,32 @@ export const TabBar: React.FC = () => {
     ws.name.toLowerCase().includes(searchQuery.toLowerCase().trim())
   );
 
-  // ─── Workspace Group Collapsing ───────────────────────────────────────────
-  const [groupContextMenu, setGroupContextMenu] = useState<{
-    wsId: string;
-    wsName: string;
-    tabIds: string[];
+  // ─── Tab Context Menu State ───────────────────────────────────────────────
+  interface TabContextMenuState {
+    tabId?: string;
+    tabTitle?: string;
+    wsId?: string;
+    wsName?: string;
+    groupTabIds?: string[];
+    isGroupPill?: boolean;
     x: number;
     y: number;
-  } | null>(null);
+  }
+  const [contextMenu, setContextMenu] = useState<TabContextMenuState | null>(null);
 
   useEffect(() => {
-    if (!groupContextMenu) return;
-    const handleClose = () => setGroupContextMenu(null);
+    if (!contextMenu) return;
+    const handleClose = () => setContextMenu(null);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu(null);
+    };
     window.addEventListener('mousedown', handleClose);
-    return () => window.removeEventListener('mousedown', handleClose);
-  }, [groupContextMenu]);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('mousedown', handleClose);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [contextMenu]);
 
   const toggleGroupCollapse = (wsId: string) => {
     setCollapsedGroups((prev) => ({
@@ -229,8 +240,8 @@ export const TabBar: React.FC = () => {
   };
 
   const closeGroup = (tabIds: string[]) => {
-    tabIds.forEach((id) => closeTab(id));
-    setGroupContextMenu(null);
+    closeTabs(tabIds);
+    setContextMenu(null);
   };
 
   const getTabIcon = (tab: AppTab) => {
@@ -302,6 +313,27 @@ export const TabBar: React.FC = () => {
         color,
         tabs: wsTabs,
       });
+    }
+  }
+
+  // Ordered tabs representing the visible left-to-right order on the tab bar
+  const orderedTabs: AppTab[] = [];
+  for (const item of stripItems) {
+    if (item.kind === 'standalone') {
+      orderedTabs.push(item.tab);
+    } else {
+      const wsTab = item.tabs.find((t) => t.type === 'workspace');
+      if (wsTab) {
+        orderedTabs.push(wsTab);
+      }
+      item.tabs.filter((t) => t.type !== 'workspace').forEach((t) => {
+        orderedTabs.push(t);
+      });
+    }
+  }
+  for (const tab of tabs) {
+    if (!orderedTabs.some((t) => t.id === tab.id)) {
+      orderedTabs.push(tab);
     }
   }
 
@@ -656,6 +688,20 @@ export const TabBar: React.FC = () => {
             closeTab(tab.id);
           }
         }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setContextMenu({
+            x: e.clientX,
+            y: e.clientY,
+            tabId: tab.id,
+            tabTitle: tab.type === 'get-started' ? 'Home' : tab.title,
+            wsId: wsId ?? undefined,
+            wsName: wsName,
+            groupTabIds: stripItem.kind === 'group' ? stripItem.tabs.map((t) => t.id) : undefined,
+            isGroupPill: false,
+          });
+        }}
         title={tab.type === 'get-started' ? 'Home' : tab.title}
       >
         {iconName && <span className="material-symbols-outlined tab-icon">{iconName}</span>}
@@ -763,6 +809,21 @@ export const TabBar: React.FC = () => {
             e.preventDefault();
             closeTab(tab.id);
           }
+        }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const ws = workspaces.find((w) => w.id === wsId);
+          setContextMenu({
+            x: e.clientX,
+            y: e.clientY,
+            tabId: tab.id,
+            tabTitle: tab.title,
+            wsId,
+            wsName: ws?.name || 'Workspace',
+            groupTabIds: stripItem.kind === 'group' ? stripItem.tabs.map((t) => t.id) : undefined,
+            isGroupPill: false,
+          });
         }}
         title={tab.title}
       >
@@ -875,6 +936,21 @@ export const TabBar: React.FC = () => {
                 draggable={false}
                 onDragStart={(e) => e.preventDefault()}
                 onMouseDown={isCollapsed && editingWorkspaceId !== item.workspaceId ? (e) => handleStripItemMouseDown(e, item) : undefined}
+                onContextMenu={isCollapsed ? (e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const wsTab = item.tabs.find((t) => t.type === 'workspace');
+                  setContextMenu({
+                    wsId: item.workspaceId,
+                    wsName: item.workspaceName,
+                    groupTabIds: item.tabs.map((t) => t.id),
+                    tabId: wsTab ? wsTab.id : item.tabs[0]?.id,
+                    tabTitle: item.workspaceName,
+                    isGroupPill: true,
+                    x: e.clientX,
+                    y: e.clientY,
+                  });
+                } : undefined}
               >
                 {/* Collapse/expand arrow */}
                 <button
@@ -916,10 +992,14 @@ export const TabBar: React.FC = () => {
                   onContextMenu={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    setGroupContextMenu({
+                    const wsTab = item.tabs.find((t) => t.type === 'workspace');
+                    setContextMenu({
                       wsId: item.workspaceId,
                       wsName: item.workspaceName,
-                      tabIds: item.tabs.map((t) => t.id),
+                      groupTabIds: item.tabs.map((t) => t.id),
+                      tabId: wsTab ? wsTab.id : item.tabs[0]?.id,
+                      tabTitle: item.workspaceName,
+                      isGroupPill: true,
                       x: e.clientX,
                       y: e.clientY,
                     });
@@ -1101,11 +1181,23 @@ export const TabBar: React.FC = () => {
                   className="tab-menu-dropdown__item"
                   onClick={async () => {
                     setIsDropdownOpen(false);
-                    await promptOpenWorkspaceFolder();
+                    await promptOpenWorkspaceFolder('folder');
                   }}
                 >
                   <span className="material-symbols-outlined">folder_open</span>
-                  <span className="tab-menu-dropdown__item-title">Import / Open...</span>
+                  <span className="tab-menu-dropdown__item-title">Open Workspace Folder...</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="tab-menu-dropdown__item"
+                  onClick={async () => {
+                    setIsDropdownOpen(false);
+                    await promptOpenWorkspaceFolder('zip');
+                  }}
+                >
+                  <span className="material-symbols-outlined">archive</span>
+                  <span className="tab-menu-dropdown__item-title">Import Archive (.zip)...</span>
                 </button>
 
                 <button
@@ -1125,46 +1217,139 @@ export const TabBar: React.FC = () => {
         </div>
       </div>
 
-      {/* Tab Group Context Menu */}
-      {groupContextMenu && (
-        <div
-          className="tab-group-menu no-drag"
-          style={{
-            position: 'fixed',
-            left: `${Math.min(groupContextMenu.x, window.innerWidth - 200)}px`,
-            top: `${groupContextMenu.y + 4}px`,
-            zIndex: 9999,
-          }}
-          onClick={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <div className="tab-group-menu__header">
-            <span>{groupContextMenu.wsName}</span>
-          </div>
-          <button
-            type="button"
-            className="tab-group-menu__item"
-            onClick={() => {
-              toggleGroupCollapse(groupContextMenu.wsId);
-              setGroupContextMenu(null);
+      {/* Tab Context Menu */}
+      {contextMenu && (() => {
+        const targetTabId = contextMenu.tabId;
+        const isGroupPill = !!contextMenu.isGroupPill;
+        const groupTabIds = contextMenu.groupTabIds || (contextMenu.wsId ? tabs.filter((t) => t.workspaceId === contextMenu.wsId).map((t) => t.id) : []);
+        const groupTabIdSet = new Set(groupTabIds);
+
+        // Determine tabs to close for "Close Tabs to the Right"
+        let tabsToRight: string[] = [];
+        if (isGroupPill) {
+          let lastIdx = -1;
+          for (let i = orderedTabs.length - 1; i >= 0; i--) {
+            if (groupTabIdSet.has(orderedTabs[i].id)) {
+              lastIdx = i;
+              break;
+            }
+          }
+          if (lastIdx !== -1) {
+            tabsToRight = orderedTabs.slice(lastIdx + 1).map((t) => t.id);
+          }
+        } else if (targetTabId) {
+          const targetIndex = orderedTabs.findIndex((t) => t.id === targetTabId);
+          if (targetIndex !== -1) {
+            tabsToRight = orderedTabs.slice(targetIndex + 1).map((t) => t.id);
+          }
+        }
+
+        // Determine tabs to close for "Close Other Tabs"
+        let otherTabs: string[] = [];
+        if (isGroupPill) {
+          otherTabs = orderedTabs.filter((t) => !groupTabIdSet.has(t.id)).map((t) => t.id);
+        } else if (targetTabId) {
+          otherTabs = orderedTabs.filter((t) => t.id !== targetTabId).map((t) => t.id);
+        }
+
+        const isGroupItem = !!contextMenu.wsId && (isGroupPill || groupTabIds.length > 1);
+        const isCollapsed = contextMenu.wsId ? !!collapsedGroups[contextMenu.wsId] : false;
+
+        return (
+          <div
+            className="tab-group-menu no-drag"
+            style={{
+              position: 'fixed',
+              left: `${Math.min(contextMenu.x, window.innerWidth - 210)}px`,
+              top: `${Math.min(contextMenu.y + 4, window.innerHeight - 240)}px`,
+              zIndex: 9999,
             }}
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
           >
-            <span className="material-symbols-outlined">
-              {collapsedGroups[groupContextMenu.wsId] ? 'unfold_more' : 'unfold_less'}
-            </span>
-            <span>{collapsedGroups[groupContextMenu.wsId] ? 'Expand Group' : 'Collapse Group'}</span>
-          </button>
-          <div className="tab-group-menu__divider" />
-          <button
-            type="button"
-            className="tab-group-menu__item tab-group-menu__item--danger"
-            onClick={() => closeGroup(groupContextMenu.tabIds)}
-          >
-            <span className="material-symbols-outlined">close</span>
-            <span>Close Group ({groupContextMenu.tabIds.length} tabs)</span>
-          </button>
-        </div>
-      )}
+            {contextMenu.tabTitle && (
+              <div className="tab-group-menu__header">
+                <span>{contextMenu.tabTitle}</span>
+              </div>
+            )}
+
+            {/* Close Tab */}
+            {targetTabId && (
+              <button
+                type="button"
+                className="tab-group-menu__item"
+                onClick={() => {
+                  closeTab(targetTabId);
+                  setContextMenu(null);
+                }}
+              >
+                <span className="material-symbols-outlined">close</span>
+                <span style={{ flex: 1 }}>Close Tab</span>
+                <span style={{ fontSize: '10px', color: 'var(--color-text-muted)', opacity: 0.7 }}>⌘W</span>
+              </button>
+            )}
+
+            {/* Close Other Tabs */}
+            <button
+              type="button"
+              className="tab-group-menu__item"
+              disabled={otherTabs.length === 0}
+              onClick={() => {
+                closeTabs(otherTabs);
+                setContextMenu(null);
+              }}
+            >
+              <span className="material-symbols-outlined">clear_all</span>
+              <span>Close Other Tabs</span>
+            </button>
+
+            {/* Close Tabs to the Right */}
+            <button
+              type="button"
+              className="tab-group-menu__item"
+              disabled={tabsToRight.length === 0}
+              onClick={() => {
+                closeTabs(tabsToRight);
+                setContextMenu(null);
+              }}
+            >
+              <span className="material-symbols-outlined">arrow_forward</span>
+              <span>Close Tabs to the Right</span>
+            </button>
+
+            {/* Group Options (if tab is in a group or is a group pill) */}
+            {contextMenu.wsId && isGroupItem && (
+              <>
+                <div className="tab-group-menu__divider" />
+                <button
+                  type="button"
+                  className="tab-group-menu__item"
+                  onClick={() => {
+                    toggleGroupCollapse(contextMenu.wsId!);
+                    setContextMenu(null);
+                  }}
+                >
+                  <span className="material-symbols-outlined">
+                    {isCollapsed ? 'unfold_more' : 'unfold_less'}
+                  </span>
+                  <span>{isCollapsed ? 'Expand Group' : 'Collapse Group'}</span>
+                </button>
+                <button
+                  type="button"
+                  className="tab-group-menu__item tab-group-menu__item--danger"
+                  onClick={() => {
+                    closeTabs(groupTabIds);
+                    setContextMenu(null);
+                  }}
+                >
+                  <span className="material-symbols-outlined">folder_off</span>
+                  <span>Close Group ({groupTabIds.length} tabs)</span>
+                </button>
+              </>
+            )}
+          </div>
+        );
+      })()}
 
       <WorkspaceModal
         isOpen={isWorkspaceModalOpen}

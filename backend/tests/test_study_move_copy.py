@@ -65,3 +65,40 @@ def test_move_and_duplicate_study_across_workspaces():
             
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_add_project_with_duplicate_name_auto_numbers():
+    from main import add_project
+    temp_dir = tempfile.mkdtemp()
+    try:
+        ws_path = os.path.join(temp_dir, "TestWorkspace")
+        workspace_io.create_workspace(ws_path, "Test Workspace")
+
+        # Create first project
+        res1 = add_project(ws_path, "Customer Loyalty")
+        assert res1["status"] == "created"
+        assert res1["project_name"] == "Customer Loyalty"
+        assert os.path.basename(res1["project_path"]) == "Customer Loyalty.pls"
+        assert os.path.exists(res1["project_path"])
+
+        # Create second project with same name -> Customer Loyalty(1)
+        res2 = add_project(ws_path, "Customer Loyalty")
+        assert res2["status"] == "created"
+        assert res2["project_name"] == "Customer Loyalty(1)"
+        assert os.path.basename(res2["project_path"]) == "Customer Loyalty(1).pls"
+        assert os.path.exists(res2["project_path"])
+
+        # Create third project with same name -> Customer Loyalty(2)
+        res3 = add_project(ws_path, "Customer Loyalty")
+        assert res3["status"] == "created"
+        assert res3["project_name"] == "Customer Loyalty(2)"
+        assert os.path.basename(res3["project_path"]) == "Customer Loyalty(2).pls"
+        assert os.path.exists(res3["project_path"])
+
+        # Verify all three exist and original was not replaced or overwritten
+        ws_data = workspace_io.load_workspace(ws_path)
+        assert len(ws_data["projects"]) == 3
+        project_names = [p["name"] for p in ws_data["projects"]]
+        assert project_names == ["Customer Loyalty", "Customer Loyalty(1)", "Customer Loyalty(2)"]
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)

@@ -98,6 +98,7 @@ app.add_middleware(
 
 class SaveDataJsonRequest(BaseModel):
     path: str
+    dataset_id: Optional[str] = None
     dataset_name: Optional[str] = None
     columns: List[str]
     rows: List[List[Any]]
@@ -154,10 +155,26 @@ class ExportZipRequest(BaseModel):
     include_results: bool = True
 
 
+class ExportWorkspaceRequest(BaseModel):
+    workspace_path: str
+    out_path: str
+
+
 class ImportZipRequest(BaseModel):
     zip_path: str
     workspace_dir: str
     on_conflict: str = "rename"
+
+
+class ImportFileRequest(BaseModel):
+    file_path: str
+    workspace_dir: str
+    on_conflict: str = "rename"
+
+
+class ImportWorkspaceZipRequest(BaseModel):
+    zip_path: str
+    target_parent_folder: Optional[str] = None
 
 
 class DeriveDatasetRequest(BaseModel):
@@ -957,7 +974,80 @@ def project_export_zip(req: ExportZipRequest):
 def project_import_zip(req: ImportZipRequest):
     try:
         proj_path = project_io.import_project_zip(req.zip_path, req.workspace_dir, on_conflict=req.on_conflict)
-        return {"status": "imported", "project_path": proj_path}
+        proj_name = os.path.splitext(os.path.basename(proj_path))[0]
+        try:
+            workspace_io.add_project_to_workspace(req.workspace_dir, os.path.basename(proj_path), proj_name)
+        except Exception:
+            pass
+
+        models = []
+        try:
+            tree = project_io.get_project_tree(proj_path)
+            for m in tree.get("models", []):
+                models.append({
+                    "id": m["id"],
+                    "studyId": proj_path,
+                    "name": m["name"],
+                    "type": "PLS-SEM",
+                    "lastModified": "Just now",
+                })
+        except Exception:
+            pass
+
+        return {
+            "status": "imported",
+            "project_path": proj_path,
+            "studies": [{
+                "id": proj_path,
+                "name": proj_name,
+                "type": "PLS-SEM",
+                "path": proj_path,
+                "createdAt": "Just now",
+                "lastModified": "Just now",
+            }],
+            "models": models,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/project/import-file")
+def project_import_file(req: ImportFileRequest):
+    try:
+        proj_path = project_io.import_project_file(req.file_path, req.workspace_dir, on_conflict=req.on_conflict)
+        proj_name = os.path.splitext(os.path.basename(proj_path))[0]
+        try:
+            workspace_io.add_project_to_workspace(req.workspace_dir, os.path.basename(proj_path), proj_name)
+        except Exception:
+            pass
+
+        models = []
+        try:
+            tree = project_io.get_project_tree(proj_path)
+            for m in tree.get("models", []):
+                models.append({
+                    "id": m["id"],
+                    "studyId": proj_path,
+                    "name": m["name"],
+                    "type": "PLS-SEM",
+                    "lastModified": "Just now",
+                })
+        except Exception:
+            pass
+
+        return {
+            "status": "imported",
+            "project_path": proj_path,
+            "studies": [{
+                "id": proj_path,
+                "name": proj_name,
+                "type": "PLS-SEM",
+                "path": proj_path,
+                "createdAt": "Just now",
+                "lastModified": "Just now",
+            }],
+            "models": models,
+        }
     except Exception as e:
         return {"error": str(e)}
 
@@ -1044,24 +1134,32 @@ def save_project_data_json(req: SaveDataJsonRequest):
         dtypes = req.dtypes
         if not dtypes:
             dtypes = list(df.dtypes.astype(str))
-        project_io.save_data(req.path, df_clean.values.tolist(), list(df.columns), dtypes, dataset_name=req.dataset_name)
-        return {"status": "saved", "row_count": len(df), "dataset_name": req.dataset_name}
+        res_ds_id = project_io.save_data(req.path, df_clean.values.tolist(), list(df.columns), dtypes, dataset_name=req.dataset_name, dataset_id=req.dataset_id)
+        return {"status": "saved", "row_count": len(df), "dataset_name": req.dataset_name, "dataset_id": res_ds_id}
     except Exception as e:
         return {"error": str(e)}
 
 
+class DeleteDataRequest(BaseModel):
+    path: str
+    dataset_id: Optional[str] = None
+
+
 @app.post("/project/delete-data")
-def delete_project_data(path: str):
+def delete_project_data(req: DeleteDataRequest):
     try:
-        project_io.delete_data(path)
+        if req.dataset_id:
+            project_io.delete_project_dataset(req.path, req.dataset_id)
+        else:
+            project_io.delete_data(req.path)
         return {"status": "deleted"}
     except Exception as e:
         return {"error": str(e)}
 
 
 @app.get("/project/load-data")
-def load_project_data(path: str):
-    data = project_io.load_data(path)
+def load_project_data(path: str, dataset_id: Optional[str] = None):
+    data = project_io.load_data(path, dataset_id=dataset_id)
     if data is None:
         return {"error": "No data found in this project"}
     return data
@@ -1105,14 +1203,50 @@ def recent_workspaces():
 @app.post("/workspace/add-project")
 def add_project(folder_path: str, project_name: str):
     try:
-        project_filename = f"{project_name}.pls"
-        full_project_path = os.path.join(folder_path, project_filename)
+        import re
+        folder_path = os.path.expanduser(folder_path)
+        clean_name = project_name.strip()
+        m = re.match(r"^(.*?)(?:\s*\(([0-9]+)\))?$", clean_name)
+        base_name = m.group(1).strip() if m else clean_name
+        if not base_name:
+            base_name = "Untitled Study"
 
-        project_io.create_project(full_project_path, project_name)
+        ws = workspace_io.load_workspace(folder_path)
+        existing_names = set()
+        existing_files = set()
+        if ws and "projects" in ws and isinstance(ws["projects"], list):
+            for p in ws["projects"]:
+                if isinstance(p, dict):
+                    if p.get("name"):
+                        existing_names.add(p["name"].strip().lower())
+                    if p.get("path"):
+                        existing_files.add(p["path"].strip().lower())
+
+        target_name = clean_name
+        target_filename = f"{target_name}.pls"
+        full_project_path = os.path.join(folder_path, target_filename)
+
+        counter = 1
+        while (
+            os.path.exists(full_project_path)
+            or target_name.lower() in existing_names
+            or target_filename.lower() in existing_files
+        ):
+            target_name = f"{base_name}({counter})"
+            target_filename = f"{target_name}.pls"
+            full_project_path = os.path.join(folder_path, target_filename)
+            counter += 1
+
+        project_io.create_project(full_project_path, target_name)
         project_io.add_recent_project(full_project_path)
-        ws = workspace_io.add_project_to_workspace(folder_path, project_filename, project_name)
+        ws = workspace_io.add_project_to_workspace(folder_path, target_filename, target_name)
 
-        return {"status": "created", "project_path": full_project_path, "workspace": ws}
+        return {
+            "status": "created",
+            "project_path": full_project_path,
+            "project_name": target_name,
+            "workspace": ws,
+        }
     except Exception as e:
         return {"error": str(e)}
 
@@ -1193,44 +1327,6 @@ def import_smartpls_ws(req: SmartPlsWorkspaceImportRequest):
         return {"error": str(e)}
 
 
-@app.post("/system/pick_file_or_folder")
-def pick_file_or_folder():
-    """
-    Opens a native picker that allows choosing BOTH files (.zip) and directories
-    in a single dialog window on macOS.
-    """
-    try:
-        import platform
-        import subprocess
-
-        if platform.system() == "Darwin":
-            script = """
-            use framework "AppKit"
-            set openPanel to current application's NSOpenPanel's openPanel()
-            openPanel's setCanChooseFiles:true
-            openPanel's setCanChooseDirectories:true
-            openPanel's setAllowsMultipleSelection:false
-            openPanel's setResolvesAliases:true
-            openPanel's setTitle:"Import SmartPLS Study (ZIP or Folder)"
-            openPanel's setMessage:"Choose an exported SmartPLS ZIP file or study folder"
-            set theApp to current application's NSApplication's sharedApplication()
-            theApp's activateIgnoringOtherApps:true
-            set res to openPanel's runModal()
-            if res = 1 then
-                set chosenURL to (openPanel's |URLs|()'s objectAtIndex:0)
-                return (chosenURL's |path|()) as text
-            else
-                return "__CANCELLED__"
-            end if
-            """
-            res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
-            path = res.stdout.strip()
-            if path == "__CANCELLED__" or not path:
-                return {"path": None, "cancelled": True}
-            return {"path": path, "cancelled": False}
-        return {"path": None, "fallback": True}
-    except Exception as e:
-        return {"error": str(e), "fallback": True}
 
 
 
@@ -1249,7 +1345,8 @@ def delete_workspace(folder_path: str):
 def validate_model(req: ValidateModelRequest):
     dataset_cols = req.dataset_columns or req.columns
     if dataset_cols is None and req.project_path:
-        project_data = project_io.load_data(req.project_path)
+        ds_id = req.spec.dataset_id if req.spec else None
+        project_data = project_io.load_data(req.project_path, dataset_id=ds_id)
         if project_data and "columns" in project_data:
             dataset_cols = project_data["columns"]
 
@@ -1371,7 +1468,8 @@ def save_project_model(req: SaveModelRequest):
     if not os.path.exists(req.project_path):
         return {"error": "Project file does not exist"}
 
-    project_data = project_io.load_data(req.project_path)
+    ds_id = req.spec.dataset_id if req.spec else None
+    project_data = project_io.load_data(req.project_path, dataset_id=ds_id)
     dataset_cols = project_data["columns"] if (project_data and "columns" in project_data) else None
 
     validation = validate_model_spec(req.spec, dataset_columns=dataset_cols)
@@ -1467,20 +1565,38 @@ def duplicate_workspace_folder(req: DuplicateWorkspaceRequest):
         return {"error": str(e)}
 
 
+@app.post("/workspace/export-zip")
+def workspace_export_zip(req: ExportWorkspaceRequest):
+    try:
+        zip_path = workspace_io.export_workspace_zip(req.workspace_path, req.out_path)
+        return {"status": "exported", "zip_path": zip_path}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/workspace/import-zip")
+def workspace_import_zip(req: ImportWorkspaceZipRequest):
+    try:
+        return workspace_io.import_workspace_zip(req.zip_path, target_parent_folder=req.target_parent_folder)
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.post("/project/run-pls")
 def run_project_pls(req: RunPlsRequest):
     if not os.path.exists(req.project_path):
         return {"error": "Project file does not exist"}
 
     # 1. Load project data
-    data_dict = project_io.load_data(req.project_path)
+    target_ds_id = req.dataset_id or (req.spec.dataset_id if req.spec else None)
+    data_dict = project_io.load_data(req.project_path, dataset_id=target_ds_id)
     if (not data_dict or not data_dict.get("rows")) and req.columns and req.rows:
         try:
             df_temp = pd.DataFrame(req.rows, columns=req.columns)
             df_clean = df_temp.astype(object).where(pd.notnull(df_temp), None)
             dtypes = list(df_clean.dtypes.astype(str))
-            project_io.save_data(req.project_path, df_clean.values.tolist(), list(df_clean.columns), dtypes, dataset_name=req.dataset_name)
-            data_dict = {"columns": list(df_clean.columns), "rows": df_clean.values.tolist(), "dataset_name": req.dataset_name}
+            saved_ds_id = project_io.save_data(req.project_path, df_clean.values.tolist(), list(df_clean.columns), dtypes, dataset_name=req.dataset_name, dataset_id=target_ds_id)
+            data_dict = {"columns": list(df_clean.columns), "rows": df_clean.values.tolist(), "dataset_name": req.dataset_name, "dataset_id": saved_ds_id}
         except Exception as e:
             print(f"Failed to auto-save dataset in run_project_pls: {e}")
 
@@ -1600,14 +1716,15 @@ async def start_bootstrap_job(req: BootstrapStartRequest):
         return {"error": "Project file does not exist"}
 
     # 1. Load or persist project data
-    data_dict = project_io.load_data(req.project_path)
+    target_ds_id = req.dataset_id or (req.spec.dataset_id if req.spec else None)
+    data_dict = project_io.load_data(req.project_path, dataset_id=target_ds_id)
     if (not data_dict or not data_dict.get("rows")) and req.columns and req.rows:
         try:
             df_temp = pd.DataFrame(req.rows, columns=req.columns)
             df_clean = df_temp.astype(object).where(pd.notnull(df_temp), None)
             dtypes = list(df_clean.dtypes.astype(str))
-            project_io.save_data(req.project_path, df_clean.values.tolist(), list(df_clean.columns), dtypes, dataset_name=req.dataset_name)
-            data_dict = {"columns": list(df_clean.columns), "rows": df_clean.values.tolist(), "dataset_name": req.dataset_name}
+            saved_ds_id = project_io.save_data(req.project_path, df_clean.values.tolist(), list(df_clean.columns), dtypes, dataset_name=req.dataset_name, dataset_id=target_ds_id)
+            data_dict = {"columns": list(df_clean.columns), "rows": df_clean.values.tolist(), "dataset_name": req.dataset_name, "dataset_id": saved_ds_id}
         except Exception as e:
             print(f"Failed to auto-save dataset in start_bootstrap_job: {e}")
 
