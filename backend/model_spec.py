@@ -1,6 +1,6 @@
 from enum import Enum
 from typing import List, Optional, Dict, Any, Literal
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 
 
 class ConstructType(str, Enum):
@@ -49,6 +49,45 @@ class ModeratingEffect(BaseModel):
     source: str
     target: str
     method: Optional[Literal["two_stage", "product_indicator", "orthogonalizing"]] = "two_stage"
+    standardize: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            d = dict(data)
+            if "moderator_lv" in d and "moderator" not in d:
+                d["moderator"] = d["moderator_lv"]
+            if "predictor_lv" in d and "source" not in d:
+                d["source"] = d["predictor_lv"]
+            elif "predictor" in d and "source" not in d:
+                d["source"] = d["predictor"]
+            if "outcome_lv" in d and "target" not in d:
+                d["target"] = d["outcome_lv"]
+            elif "outcome" in d and "target" not in d:
+                d["target"] = d["outcome"]
+            return d
+        return data
+
+    @property
+    def moderator_lv(self) -> str:
+        return self.moderator
+
+    @property
+    def predictor_lv(self) -> str:
+        return self.source
+
+    @property
+    def outcome_lv(self) -> str:
+        return self.target
+
+    @property
+    def predictor(self) -> str:
+        return self.source
+
+    @property
+    def outcome(self) -> str:
+        return self.target
 
 
 class QuadraticEffect(BaseModel):

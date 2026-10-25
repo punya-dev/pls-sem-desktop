@@ -1,0 +1,25 @@
+{
+  "paths": {
+    "SC x CUSA -> CUSL": -0.071,
+    "SC -> CUSL": 0.070,
+    "CUSA -> CUSL": 0.467,
+    "LIKE -> CUSL": 0.319,
+    "COMP -> CUSL": -0.020,
+    "ATTR -> COMP": 0.086,
+    "ATTR -> LIKE": 0.167,
+    "COMP -> CUSA": 0.146,
+    "CSOR -> COMP": 0.059,
+    "CSOR -> LIKE": 0.178,
+    "LIKE -> CUSA": 0.436,
+    "PERF -> COMP": 0.295,
+    "PERF -> LIKE": 0.117,
+    "QUAL -> COMP": 0.430,
+    "QUAL -> LIKE": 0.380
+  },
+  "r_squared": {
+    "CUSL": 0.562
+  },
+  "f_squared": {
+    "SC x CUSA -> CUSL": 0.012
+  }
+}

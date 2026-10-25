@@ -1,0 +1,28 @@
+{
+  "paths": {
+    "LIKE -> CUSA": null,
+    "LIKE -> CUSL": null,
+    "CUSA -> CUSL": null,
+    "COMP -> CUSL": null,
+    "SWITCH_1 -> CUSA": null,
+    "SWITCH_1 -> CUSL": null,
+    "SWITCH_2 -> CUSL": null,
+    "SWITCH_3 -> CUSL": null,
+    "LIKE x SWITCH_1 -> CUSA": null,
+    "LIKE x SWITCH_1 -> CUSL": null,
+    "LIKE x SWITCH_2 -> CUSL": null,
+    "LIKE x SWITCH_3 -> CUSL": null,
+    "CUSA x SWITCH_1 -> CUSL": null,
+    "CUSA x SWITCH_2 -> CUSL": null,
+    "CUSA x SWITCH_3 -> CUSL": null,
+    "COMP x SWITCH_1 -> CUSL": null,
+    "COMP x SWITCH_2 -> CUSL": null,
+    "COMP x SWITCH_3 -> CUSL": null
+  },
+  "r_squared": {
+    "CUSA": null,
+    "CUSL": null
+  },
+  "f_squared": {},
+  "conditional_indirect_effects": {}
+}

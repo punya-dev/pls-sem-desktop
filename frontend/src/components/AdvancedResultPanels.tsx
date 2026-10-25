@@ -17,6 +17,8 @@ export const AdvancedResultPanels: React.FC<AdvancedResultPanelsProps> = ({
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<string>('overview');
   const [selectedKpi, setSelectedKpi] = useState<string>('');
+  const [selectedModIndex, setSelectedModIndex] = useState<number>(0);
+  const [modSubTab, setModSubTab] = useState<'interactions' | 'simple_slopes' | 'conditional_indirect'>('interactions');
 
   // Extract analysis specific result or check if stored in main results
   const analysisData = analysisResults[activeTab] || results?.[activeTab] || results?.analysis?.[activeTab];
@@ -387,87 +389,507 @@ export const AdvancedResultPanels: React.FC<AdvancedResultPanelsProps> = ({
     );
   }
 
-  // 4. MODERATION & SIMPLE SLOPES
+  // 4. MODERATION & SIMPLE SLOPES (SmartPLS 4 Style)
   if (activeTab === 'moderation') {
-    if (!analysisData) {
+    const modData = results?.moderation || analysisData;
+    if (!modData || (!modData.effects?.length && !modData.source && !modData.interaction_effect)) {
       return (
         <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--color-text-muted)' }}>
           <h4 style={{ margin: '0 0 8px', fontSize: 16, fontWeight: 600, color: 'var(--color-text-primary)' }}>No Moderation Results Available</h4>
-          <p style={{ margin: 0, fontSize: 13 }}>Click <strong>Calculate → Moderation Analysis...</strong> to test interaction effects.</p>
+          <p style={{ margin: 0, fontSize: 13 }}>Add a moderating effect on the model canvas (press <strong>M</strong> or click the Moderation tool) and run PLS-SEM with Bootstrapping to evaluate interaction effects, Kenny (2016) f², simple slopes, and conditional indirect effects.</p>
         </div>
       );
     }
 
-    const {
-      source,
-      moderator,
-      target,
-      interaction_effect,
-      f2_effect,
-      simple_slopes,
-    } = analysisData;
+    const effectsList: any[] = modData.effects || (modData.source ? [{
+      moderator: modData.moderator,
+      predictor: modData.source,
+      outcome: modData.target,
+      interaction_name: `${modData.source} x ${modData.moderator}`,
+      method: modData.method || 'two_stage',
+      beta_source: modData.direct_effect_source ?? modData.beta_source,
+      beta_moderator: modData.direct_effect_moderator ?? modData.beta_moderator,
+      beta_interaction: modData.interaction_effect?.original ?? modData.interaction_effect?.beta ?? 0,
+      interaction_se: modData.interaction_effect?.se ?? null,
+      interaction_t: modData.interaction_effect?.t_stat ?? null,
+      interaction_p_value: modData.interaction_effect?.p_value ?? null,
+      interaction_ci_lower: modData.interaction_effect?.ci_lower ?? null,
+      interaction_ci_upper: modData.interaction_effect?.ci_upper ?? null,
+      f2: {
+        f_squared: modData.f2_effect ?? 0,
+        effect_size_rating: (modData.f2_effect ?? 0) >= 0.025 ? 'Large' : ((modData.f2_effect ?? 0) >= 0.010 ? 'Medium' : ((modData.f2_effect ?? 0) >= 0.005 ? 'Small' : 'None')),
+        r_squared_included: modData.r2_included ?? 0,
+        r_squared_excluded: modData.r2_excluded ?? 0,
+      },
+      simple_slopes: modData.simple_slopes,
+    }] : []);
+
+    const condIndirectList: any[] = modData.conditional_indirect_effects || [];
+
+    const activeMod = effectsList[selectedModIndex] || effectsList[0] || {};
+    const sl = activeMod.simple_slopes || {};
 
     return (
       <div className="results-content-pane">
-        <div style={{ marginBottom: 20 }}>
-          <h3 style={{ margin: '0 0 4px', fontSize: 18, fontWeight: 600, color: 'var(--color-text-primary)' }}>
-            Moderation Effect: {source} × {moderator} → {target}
-          </h3>
-          <p style={{ margin: 0, fontSize: 13, color: 'var(--color-text-muted)' }}>
-            Evaluation of interaction terms, Kenny (2016) f² effect size, and simple slopes visualization.
-          </p>
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+          <div>
+            <h3 style={{ margin: '0 0 4px', fontSize: 18, fontWeight: 600, color: 'var(--color-text-primary)' }}>
+              Moderation Analysis &amp; Conditional Effects (SmartPLS 4 style)
+            </h3>
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--color-text-muted)' }}>
+              Interaction terms, Kenny (2016) f² effect sizes, simple slope plots, and moderated mediation (PROCESS-style conditional indirect effects).
+            </p>
+          </div>
+          {effectsList.length > 1 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--color-text-secondary)' }}>Focus Moderation:</span>
+              <select
+                value={selectedModIndex}
+                onChange={(e) => setSelectedModIndex(Number(e.target.value))}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: 6,
+                  border: '1px solid var(--color-border-subtle)',
+                  backgroundColor: 'var(--color-bg-surface)',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: 'var(--color-text-primary)',
+                  cursor: 'pointer'
+                }}
+              >
+                {effectsList.map((eff, i) => (
+                  <option key={i} value={i}>
+                    {eff.interaction_name || `${eff.predictor} x ${eff.moderator}`} → {eff.outcome}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
-        {/* Interaction Summary Banner */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, marginBottom: 24 }}>
-          <div style={{ padding: 16, borderRadius: 10, backgroundColor: 'var(--color-bg-surface)', border: '1px solid var(--color-border-subtle)' }}>
-            <span style={{ fontSize: 12, color: 'var(--color-text-muted)', fontWeight: 600 }}>Interaction Path (X*W)</span>
-            <div style={{ fontSize: 24, fontWeight: 700, margin: '6px 0', color: 'var(--color-accent)' }}>
-              {fmt(interaction_effect?.original || interaction_effect?.beta || 0)}
-            </div>
-            <span>{getSigBadge(interaction_effect?.p_value ?? 0)}</span>
-          </div>
-
-          <div style={{ padding: 16, borderRadius: 10, backgroundColor: 'var(--color-bg-surface)', border: '1px solid var(--color-border-subtle)' }}>
-            <span style={{ fontSize: 12, color: 'var(--color-text-muted)', fontWeight: 600 }}>Kenny (2016) f² Effect Size</span>
-            <div style={{ fontSize: 24, fontWeight: 700, margin: '6px 0', color: '#16a34a' }}>
-              {fmt(f2_effect || 0.035)}
-            </div>
-            <span style={{ fontSize: 11, color: '#16a34a' }}>
-              {f2_effect >= 0.025 ? 'Moderate to Strong Interaction' : 'Small Interaction (≥ 0.005)'}
-            </span>
-          </div>
-
-          <div style={{ padding: 16, borderRadius: 10, backgroundColor: 'var(--color-bg-surface)', border: '1px solid var(--color-border-subtle)' }}>
-            <span style={{ fontSize: 12, color: 'var(--color-text-muted)', fontWeight: 600 }}>Method Used</span>
-            <div style={{ fontSize: 18, fontWeight: 700, margin: '8px 0', color: 'var(--color-text-primary)' }}>
-              {analysisData.method === 'two_stage' ? 'Two-Stage Approach' : 'Product-Indicator'}
-            </div>
-            <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Orthogonalized residuals</span>
-          </div>
+        {/* Sub-tabs */}
+        <div style={{ display: 'flex', gap: 8, borderBottom: '1px solid var(--color-border-subtle)', marginBottom: 20 }}>
+          <button
+            type="button"
+            onClick={() => setModSubTab('interactions')}
+            style={{
+              padding: '8px 16px',
+              fontSize: 13,
+              fontWeight: 600,
+              border: 'none',
+              borderBottom: modSubTab === 'interactions' ? '2px solid var(--color-accent)' : '2px solid transparent',
+              backgroundColor: 'transparent',
+              color: modSubTab === 'interactions' ? 'var(--color-accent)' : 'var(--color-text-muted)',
+              cursor: 'pointer'
+            }}
+          >
+            Interaction Terms &amp; Kenny f² ({effectsList.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setModSubTab('simple_slopes')}
+            style={{
+              padding: '8px 16px',
+              fontSize: 13,
+              fontWeight: 600,
+              border: 'none',
+              borderBottom: modSubTab === 'simple_slopes' ? '2px solid var(--color-accent)' : '2px solid transparent',
+              backgroundColor: 'transparent',
+              color: modSubTab === 'simple_slopes' ? 'var(--color-accent)' : 'var(--color-text-muted)',
+              cursor: 'pointer'
+            }}
+          >
+            Simple Slopes &amp; 2D Chart
+          </button>
+          <button
+            type="button"
+            onClick={() => setModSubTab('conditional_indirect')}
+            style={{
+              padding: '8px 16px',
+              fontSize: 13,
+              fontWeight: 600,
+              border: 'none',
+              borderBottom: modSubTab === 'conditional_indirect' ? '2px solid var(--color-accent)' : '2px solid transparent',
+              backgroundColor: 'transparent',
+              color: modSubTab === 'conditional_indirect' ? 'var(--color-accent)' : 'var(--color-text-muted)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6
+            }}
+          >
+            Moderated Mediation ({condIndirectList.length})
+            {condIndirectList.length > 0 && (
+              <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 10, backgroundColor: 'var(--color-accent-subtle)', color: 'var(--color-accent)' }}>
+                PROCESS
+              </span>
+            )}
+          </button>
         </div>
 
-        {/* Simple Slopes Plot Simulation */}
-        {simple_slopes && (
-          <div style={{ padding: 20, borderRadius: 10, border: '1px solid var(--color-border-subtle)', backgroundColor: 'var(--color-bg-surface)', marginBottom: 20 }}>
-            <h4 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 600 }}>Simple Slopes Analysis</h4>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, textAlign: 'center' }}>
-              <div style={{ padding: 12, backgroundColor: '#fff', borderRadius: 8, border: '1px solid #e2e8f0' }}>
-                <span style={{ fontSize: 12, color: '#dc2626', fontWeight: 600 }}>-1 SD (Low {moderator})</span>
-                <div style={{ fontSize: 18, fontWeight: 700, margin: '4px 0' }}>{fmt(simple_slopes.low?.slope || simple_slopes.low)}</div>
-                <span style={{ fontSize: 11, color: '#64748b' }}>Slope at low moderator</span>
+        {/* ─── TAB 1: INTERACTION TERMS & KENNY f² ─── */}
+        {modSubTab === 'interactions' && (
+          <div>
+            {/* KPI Cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 20 }}>
+              <div style={{ padding: 14, borderRadius: 8, backgroundColor: 'var(--color-bg-surface)', border: '1px solid var(--color-border-subtle)' }}>
+                <span style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Interactions Tested</span>
+                <div style={{ fontSize: 22, fontWeight: 700, margin: '4px 0', color: 'var(--color-accent)' }}>{effectsList.length}</div>
+                <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Simultaneous structural model</span>
               </div>
-              <div style={{ padding: 12, backgroundColor: '#fff', borderRadius: 8, border: '1px solid #e2e8f0' }}>
-                <span style={{ fontSize: 12, color: '#2563eb', fontWeight: 600 }}>Mean (Average {moderator})</span>
-                <div style={{ fontSize: 18, fontWeight: 700, margin: '4px 0' }}>{fmt(simple_slopes.mean?.slope || simple_slopes.mean)}</div>
-                <span style={{ fontSize: 11, color: '#64748b' }}>Slope at average moderator</span>
+              <div style={{ padding: 14, borderRadius: 8, backgroundColor: 'var(--color-bg-surface)', border: '1px solid var(--color-border-subtle)' }}>
+                <span style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Estimation Method</span>
+                <div style={{ fontSize: 16, fontWeight: 700, margin: '6px 0', color: 'var(--color-text-primary)' }}>
+                  {activeMod.method === 'two_stage' ? 'Two-Stage (Stage 2)' : (activeMod.method === 'orthogonalizing' ? 'Orthogonalizing' : 'Product Indicator')}
+                </div>
+                <span style={{ fontSize: 11, color: '#16a34a' }}>Standardized latent scores</span>
               </div>
-              <div style={{ padding: 12, backgroundColor: '#fff', borderRadius: 8, border: '1px solid #e2e8f0' }}>
-                <span style={{ fontSize: 12, color: '#16a34a', fontWeight: 600 }}>+1 SD (High {moderator})</span>
-                <div style={{ fontSize: 18, fontWeight: 700, margin: '4px 0' }}>{fmt(simple_slopes.high?.slope || simple_slopes.high)}</div>
-                <span style={{ fontSize: 11, color: '#64748b' }}>Slope at high moderator</span>
+              <div style={{ padding: 14, borderRadius: 8, backgroundColor: 'var(--color-bg-surface)', border: '1px solid var(--color-border-subtle)' }}>
+                <span style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Max Kenny (2016) f²</span>
+                <div style={{ fontSize: 22, fontWeight: 700, margin: '4px 0', color: '#16a34a' }}>
+                  {fmt(Math.max(...effectsList.map(e => e.f2?.f_squared || 0)))}
+                </div>
+                <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Kenny cutoffs: 0.005 / 0.010 / 0.025</span>
+              </div>
+              <div style={{ padding: 14, borderRadius: 8, backgroundColor: 'var(--color-bg-surface)', border: '1px solid var(--color-border-subtle)' }}>
+                <span style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Direct Moderator Paths</span>
+                <div style={{ fontSize: 16, fontWeight: 700, margin: '6px 0', color: 'var(--color-text-primary)' }}>Auto-included</div>
+                <span style={{ fontSize: 11, color: '#16a34a' }}>SmartPLS 4 compliant</span>
               </div>
             </div>
+
+            {/* Interaction Paths Table */}
+            <div style={{ border: '1px solid var(--color-border-subtle)', borderRadius: 8, overflow: 'hidden', marginBottom: 20 }}>
+              <div style={{ padding: '12px 16px', backgroundColor: 'var(--color-bg-surface)', borderBottom: '1px solid var(--color-border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <strong style={{ fontSize: 13, color: 'var(--color-text-primary)' }}>Interaction Effects &amp; Kenny (2016) f² Summary</strong>
+                <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Significance via two-tailed bootstrapping</span>
+              </div>
+              <table className="results-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr style={{ backgroundColor: 'var(--color-bg-surface)', borderBottom: '1px solid var(--color-border-subtle)', textAlign: 'left' }}>
+                    <th style={{ padding: '10px 14px' }}>Path</th>
+                    <th style={{ padding: '10px 14px' }}>Predictor</th>
+                    <th style={{ padding: '10px 14px' }}>Moderator</th>
+                    <th style={{ padding: '10px 14px' }}>Outcome</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'right' }}>Original (β)</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'right' }}>Bootstrap SE</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'right' }}>t-stat</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'right' }}>p-value</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'center' }}>95% CI</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'right' }}>f²</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'center' }}>f² Rating</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {effectsList.map((eff, i) => {
+                    const f2Val = eff.f2?.f_squared ?? 0;
+                    const rating = eff.f2?.effect_size_rating || (f2Val >= 0.025 ? 'Large' : (f2Val >= 0.010 ? 'Medium' : (f2Val >= 0.005 ? 'Small' : 'None')));
+                    const ratingColor = f2Val >= 0.025 ? '#16a34a' : (f2Val >= 0.010 ? '#2563eb' : (f2Val >= 0.005 ? '#d97706' : '#94a3b8'));
+                    const isSig = eff.interaction_p_value !== null ? eff.interaction_p_value < 0.05 : false;
+
+                    return (
+                      <tr key={i} style={{ borderBottom: '1px solid var(--color-border-subtle)', backgroundColor: i % 2 === 0 ? 'transparent' : 'var(--color-bg-surface)' }}>
+                        <td style={{ padding: '10px 14px', fontWeight: 600, color: 'var(--color-accent)' }}>
+                          {eff.interaction_name} → {eff.outcome}
+                        </td>
+                        <td style={{ padding: '10px 14px' }}>{eff.predictor}</td>
+                        <td style={{ padding: '10px 14px' }}>{eff.moderator}</td>
+                        <td style={{ padding: '10px 14px' }}>{eff.outcome}</td>
+                        <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700 }}>
+                          {fmt(eff.beta_interaction)}
+                        </td>
+                        <td style={{ padding: '10px 14px', textAlign: 'right', color: 'var(--color-text-muted)' }}>
+                          {fmt(eff.interaction_se)}
+                        </td>
+                        <td style={{ padding: '10px 14px', textAlign: 'right' }}>
+                          {fmt(eff.interaction_t, 2)}
+                        </td>
+                        <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 600, color: isSig ? '#16a34a' : 'var(--color-text-secondary)' }}>
+                          {eff.interaction_p_value !== null ? fmt(eff.interaction_p_value) : '—'}
+                        </td>
+                        <td style={{ padding: '10px 14px', textAlign: 'center', fontFamily: 'monospace', fontSize: 11 }}>
+                          [{fmt(eff.interaction_ci_lower)}, {fmt(eff.interaction_ci_upper)}]
+                        </td>
+                        <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700, color: ratingColor }}>
+                          {fmt(f2Val)}
+                        </td>
+                        <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                          <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, fontWeight: 600, backgroundColor: `${ratingColor}15`, color: ratingColor, border: `1px solid ${ratingColor}30` }}>
+                            {rating}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Kenny Callout Box */}
+            <div style={{ padding: 14, borderRadius: 8, backgroundColor: 'var(--color-bg-surface)', border: '1px solid var(--color-border-subtle)', display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+              <span className="material-symbols-outlined" style={{ color: 'var(--color-accent)', fontSize: 20 }}>info</span>
+              <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>
+                <strong style={{ color: 'var(--color-text-primary)' }}>Kenny (2016) Interaction Effect Size Benchmarks:</strong><br />
+                In structural equation models, interaction effects inherently possess lower statistical power. Kenny (2016) established specific thresholds for moderating interaction terms: <strong>f² ≥ 0.005</strong> is small, <strong>f² ≥ 0.010</strong> is medium, and <strong>f² ≥ 0.025</strong> is large. Direct effect thresholds (Cohen, 1988: 0.02, 0.15, 0.35) underestimate the practical importance of interaction effects.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ─── TAB 2: SIMPLE SLOPES & INTERACTIVE CHART ─── */}
+        {modSubTab === 'simple_slopes' && (
+          <div>
+            {/* Simple Slopes 3-Level Cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 20 }}>
+              <div style={{ padding: 14, borderRadius: 8, backgroundColor: 'var(--color-bg-surface)', border: '1px solid var(--color-border-subtle)' }}>
+                <span style={{ fontSize: 11, color: '#dc2626', fontWeight: 600, textTransform: 'uppercase' }}>Low Moderator (-1 SD)</span>
+                <div style={{ fontSize: 22, fontWeight: 700, margin: '4px 0', color: '#dc2626' }}>
+                  {fmt(sl.low?.slope ?? (typeof sl.low === 'number' ? sl.low : 0))}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                  p = {fmt(sl.low?.p_value ?? 0)} · CI: [{fmt(sl.low?.ci_lower)}, {fmt(sl.low?.ci_upper)}]
+                </div>
+              </div>
+              <div style={{ padding: 14, borderRadius: 8, backgroundColor: 'var(--color-bg-surface)', border: '1px solid var(--color-border-subtle)' }}>
+                <span style={{ fontSize: 11, color: '#2563eb', fontWeight: 600, textTransform: 'uppercase' }}>Average Moderator (Mean)</span>
+                <div style={{ fontSize: 22, fontWeight: 700, margin: '4px 0', color: '#2563eb' }}>
+                  {fmt(sl.mean?.slope ?? (typeof sl.mean === 'number' ? sl.mean : activeMod.beta_source ?? 0))}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                  p = {fmt(sl.mean?.p_value ?? 0)} · CI: [{fmt(sl.mean?.ci_lower)}, {fmt(sl.mean?.ci_upper)}]
+                </div>
+              </div>
+              <div style={{ padding: 14, borderRadius: 8, backgroundColor: 'var(--color-bg-surface)', border: '1px solid var(--color-border-subtle)' }}>
+                <span style={{ fontSize: 11, color: '#16a34a', fontWeight: 600, textTransform: 'uppercase' }}>High Moderator (+1 SD)</span>
+                <div style={{ fontSize: 22, fontWeight: 700, margin: '4px 0', color: '#16a34a' }}>
+                  {fmt(sl.high?.slope ?? (typeof sl.high === 'number' ? sl.high : 0))}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                  p = {fmt(sl.high?.p_value ?? 0)} · CI: [{fmt(sl.high?.ci_lower)}, {fmt(sl.high?.ci_upper)}]
+                </div>
+              </div>
+              <div style={{ padding: 14, borderRadius: 8, backgroundColor: 'var(--color-bg-surface)', border: '1px solid var(--color-border-subtle)' }}>
+                <span style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Slope Difference (High - Low)</span>
+                <div style={{ fontSize: 22, fontWeight: 700, margin: '4px 0', color: 'var(--color-accent)' }}>
+                  {fmt(sl.slope_diff_high_minus_low ?? (2 * (activeMod.beta_interaction || 0)))}
+                </div>
+                <span style={{ fontSize: 11, color: '#16a34a' }}>Exact property: 2 × β_interaction</span>
+              </div>
+            </div>
+
+            {/* Interactive 2D Chart */}
+            <div style={{ padding: 20, borderRadius: 8, backgroundColor: 'var(--color-bg-surface)', border: '1px solid var(--color-border-subtle)', marginBottom: 20 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                <h4 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--color-text-primary)' }}>
+                  Simple Slopes Plot: {activeMod.predictor} → {activeMod.outcome} across levels of {activeMod.moderator}
+                </h4>
+                {/* Legend */}
+                <div style={{ display: 'flex', gap: 16, fontSize: 12, alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ width: 14, height: 3, backgroundColor: '#dc2626', display: 'inline-block', borderTop: '1px dashed #dc2626' }} />
+                    <span style={{ color: '#dc2626', fontWeight: 600 }}>-1 SD Low ({activeMod.moderator})</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ width: 14, height: 3, backgroundColor: '#2563eb', display: 'inline-block' }} />
+                    <span style={{ color: '#2563eb', fontWeight: 600 }}>Mean ({activeMod.moderator})</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ width: 14, height: 3, backgroundColor: '#16a34a', display: 'inline-block' }} />
+                    <span style={{ color: '#16a34a', fontWeight: 600 }}>+1 SD High ({activeMod.moderator})</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Vector SVG Chart */}
+              {(() => {
+                const bX = activeMod.beta_source ?? 0;
+                const bM = activeMod.beta_moderator ?? 0;
+                const bXM = activeMod.beta_interaction ?? 0;
+
+                // Points from -2 to +2 SD
+                const xRange = [-2, -1, 0, 1, 2];
+                const calcY = (x: number, m: number) => bX * x + bM * m + bXM * x * m;
+
+                const ptsLow = xRange.map(x => ({ x, y: calcY(x, -1) }));
+                const ptsMean = xRange.map(x => ({ x, y: calcY(x, 0) }));
+                const ptsHigh = xRange.map(x => ({ x, y: calcY(x, 1) }));
+
+                const allY = [...ptsLow, ...ptsMean, ...ptsHigh].map(p => p.y);
+                const minY = Math.min(-1, ...allY) - 0.2;
+                const maxY = Math.max(1, ...allY) + 0.2;
+
+                const svgW = 600;
+                const svgH = 260;
+                const padL = 50;
+                const padR = 30;
+                const padT = 20;
+                const padB = 40;
+
+                const toSvgX = (x: number) => padL + ((x - (-2)) / 4) * (svgW - padL - padR);
+                const toSvgY = (y: number) => padT + (1 - (y - minY) / (maxY - minY)) * (svgH - padT - padB);
+
+                const dLow = ptsLow.map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${toSvgX(p.x)} ${toSvgY(p.y)}`).join(' ');
+                const dMean = ptsMean.map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${toSvgX(p.x)} ${toSvgY(p.y)}`).join(' ');
+                const dHigh = ptsHigh.map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${toSvgX(p.x)} ${toSvgY(p.y)}`).join(' ');
+
+                return (
+                  <svg viewBox={`0 0 ${svgW} ${svgH}`} style={{ width: '100%', height: 260, overflow: 'visible' }}>
+                    {/* Gridlines & X Axis */}
+                    {xRange.map(x => (
+                      <g key={x}>
+                        <line x1={toSvgX(x)} y1={padT} x2={toSvgX(x)} y2={svgH - padB} stroke="var(--color-border-subtle)" strokeDasharray="3 3" />
+                        <text x={toSvgX(x)} y={svgH - padB + 16} fontSize={11} fill="var(--color-text-muted)" textAnchor="middle">
+                          {x > 0 ? `+${x} SD` : (x === 0 ? 'Mean (0)' : `${x} SD`)}
+                        </text>
+                      </g>
+                    ))}
+                    {/* Zero line */}
+                    <line x1={padL} y1={toSvgY(0)} x2={svgW - padR} y2={toSvgY(0)} stroke="var(--color-border-subtle)" strokeWidth={1.5} />
+                    {/* Y Axis ticks */}
+                    {[minY, (minY + maxY) / 2, maxY].map((y, idx) => (
+                      <g key={idx}>
+                        <text x={padL - 8} y={toSvgY(y) + 4} fontSize={10} fill="var(--color-text-muted)" textAnchor="end">
+                          {fmt(y, 2)}
+                        </text>
+                      </g>
+                    ))}
+
+                    {/* Simple Slope Lines */}
+                    <path d={dLow} fill="none" stroke="#dc2626" strokeWidth={2.5} strokeDasharray="5 5" />
+                    <path d={dMean} fill="none" stroke="#2563eb" strokeWidth={2.5} />
+                    <path d={dHigh} fill="none" stroke="#16a34a" strokeWidth={2.5} />
+
+                    {/* Dots at key SD points */}
+                    {ptsLow.map((p, i) => <circle key={'l' + i} cx={toSvgX(p.x)} cy={toSvgY(p.y)} r={4} fill="#dc2626" />)}
+                    {ptsMean.map((p, i) => <circle key={'m' + i} cx={toSvgX(p.x)} cy={toSvgY(p.y)} r={4} fill="#2563eb" />)}
+                    {ptsHigh.map((p, i) => <circle key={'h' + i} cx={toSvgX(p.x)} cy={toSvgY(p.y)} r={4} fill="#16a34a" />)}
+
+                    {/* Axis Labels */}
+                    <text x={(svgW + padL) / 2} y={svgH - 6} fontSize={12} fontWeight={600} fill="var(--color-text-secondary)" textAnchor="middle">
+                      {activeMod.predictor} (Standardized)
+                    </text>
+                    <text transform={`rotate(-90) translate(${-(svgH - padB + padT) / 2}, 16)`} fontSize={12} fontWeight={600} fill="var(--color-text-secondary)" textAnchor="middle">
+                      {activeMod.outcome}
+                    </text>
+                  </svg>
+                );
+              })()}
+            </div>
+          </div>
+        )}
+
+        {/* ─── TAB 3: CONDITIONAL INDIRECT EFFECTS (MODERATED MEDIATION) ─── */}
+        {modSubTab === 'conditional_indirect' && (
+          <div>
+            {condIndirectList.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--color-text-muted)', border: '1px dashed var(--color-border-subtle)', borderRadius: 8 }}>
+                <span className="material-symbols-outlined" style={{ fontSize: 32, marginBottom: 8, display: 'block', color: 'var(--color-accent)' }}>mediation</span>
+                <h4 style={{ margin: '0 0 6px', fontSize: 15, fontWeight: 600, color: 'var(--color-text-primary)' }}>No Moderated Mediation Chains Detected</h4>
+                <p style={{ margin: 0, fontSize: 13 }}>
+                  Moderated mediation is automatically computed when a two-step mediation chain (A → B → C) has a moderating effect on the a-path (A → B), b-path (B → C), or both.
+                </p>
+              </div>
+            ) : (
+              <div>
+                {condIndirectList.map((chainItem, cIdx) => {
+                  const bInf = chainItem.bootstrap_inference || {};
+                  const isIndexSig = bInf.index_significant ?? false;
+
+                  return (
+                    <div key={cIdx} style={{ border: '1px solid var(--color-border-subtle)', borderRadius: 8, overflow: 'hidden', marginBottom: 24, backgroundColor: 'var(--color-bg-surface)' }}>
+                      {/* Chain Header */}
+                      <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--color-border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--color-text-primary)' }}>{chainItem.chain}</span>
+                            <span style={{ fontSize: 12, padding: '2px 8px', borderRadius: 4, fontWeight: 600, backgroundColor: 'var(--color-accent-subtle)', color: 'var(--color-accent)' }}>
+                              Moderator: {chainItem.moderator}
+                            </span>
+                            <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                              ({chainItem.a_path_moderated && chainItem.b_path_moderated ? 'Both a & b paths moderated' : (chainItem.a_path_moderated ? 'a-path moderated' : 'b-path moderated')})
+                            </span>
+                          </div>
+                        </div>
+                        {/* Index of Moderated Mediation Badge */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: 11, color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Index of Moderated Mediation</div>
+                            <div style={{ fontSize: 16, fontWeight: 700, color: isIndexSig ? '#16a34a' : 'var(--color-text-primary)' }}>
+                              {fmt(chainItem.index_of_moderated_mediation)}
+                            </div>
+                          </div>
+                          <span style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, fontWeight: 600, backgroundColor: isIndexSig ? '#16a34a15' : '#94a3b815', color: isIndexSig ? '#16a34a' : '#64748b', border: `1px solid ${isIndexSig ? '#16a34a30' : '#94a3b830'}` }}>
+                            {isIndexSig ? 'Significant (CI Excludes 0)' : 'Not Significant'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Bootstrap Stats Banner for Index */}
+                      {bInf.index_point !== undefined && (
+                        <div style={{ padding: '10px 18px', backgroundColor: 'var(--color-bg-base)', borderBottom: '1px solid var(--color-border-subtle)', display: 'flex', gap: 24, fontSize: 12 }}>
+                          <div><strong>Index Point:</strong> {fmt(bInf.index_point)}</div>
+                          <div><strong>Bootstrap SE:</strong> {fmt(bInf.index_se)}</div>
+                          <div><strong>t-statistic:</strong> {fmt(bInf.index_t, 2)}</div>
+                          <div><strong>p-value:</strong> {fmt(bInf.index_p_value)}</div>
+                          <div><strong>95% Bootstrap CI:</strong> [{fmt(bInf.index_ci_lower)}, {fmt(bInf.index_ci_upper)}]</div>
+                        </div>
+                      )}
+
+                      {/* Conditional Indirect Effects Table */}
+                      <table className="results-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                        <thead>
+                          <tr style={{ backgroundColor: 'var(--color-bg-base)', borderBottom: '1px solid var(--color-border-subtle)', textAlign: 'left' }}>
+                            <th style={{ padding: '10px 16px' }}>Level of {chainItem.moderator}</th>
+                            <th style={{ padding: '10px 16px', textAlign: 'right' }}>Conditional Indirect Effect</th>
+                            <th style={{ padding: '10px 16px', textAlign: 'right' }}>Bootstrap SE</th>
+                            <th style={{ padding: '10px 16px', textAlign: 'right' }}>t-stat</th>
+                            <th style={{ padding: '10px 16px', textAlign: 'right' }}>p-value</th>
+                            <th style={{ padding: '10px 16px', textAlign: 'center' }}>95% BCa CI</th>
+                            <th style={{ padding: '10px 16px', textAlign: 'right' }}>Direct Effect</th>
+                            <th style={{ padding: '10px 16px', textAlign: 'right' }}>Total Effect</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(chainItem.conditional_effects || []).map((row: any, rIdx: number) => {
+                            const isRowSig = row.is_significant ?? (row.p_value !== undefined && row.p_value < 0.05);
+
+                            return (
+                              <tr key={rIdx} style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
+                                <td style={{ padding: '10px 16px', fontWeight: 600 }}>
+                                  {row.w_label} ({row.w_value > 0 ? `+${row.w_value}` : row.w_value} SD)
+                                </td>
+                                <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 700, color: 'var(--color-accent)' }}>
+                                  {fmt(row.indirect_effect)}
+                                </td>
+                                <td style={{ padding: '10px 16px', textAlign: 'right', color: 'var(--color-text-muted)' }}>
+                                  {fmt(row.se)}
+                                </td>
+                                <td style={{ padding: '10px 16px', textAlign: 'right' }}>
+                                  {fmt(row.t_statistic, 2)}
+                                </td>
+                                <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, color: isRowSig ? '#16a34a' : 'var(--color-text-secondary)' }}>
+                                  {row.p_value !== undefined ? fmt(row.p_value) : '—'}
+                                </td>
+                                <td style={{ padding: '10px 16px', textAlign: 'center', fontFamily: 'monospace', fontSize: 11 }}>
+                                  [{fmt(row.ci_lower)}, {fmt(row.ci_upper)}]
+                                </td>
+                                <td style={{ padding: '10px 16px', textAlign: 'right', color: 'var(--color-text-secondary)' }}>
+                                  {fmt(row.direct_effect)}
+                                </td>
+                                <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600 }}>
+                                  {fmt(row.total_effect)}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
       </div>

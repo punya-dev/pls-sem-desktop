@@ -15,6 +15,10 @@ declare module '*/utils/model-canvas' {
   export const copySelected: () => void;
   export const pasteClipboard: () => void;
   export const setCanvasDatasetColumns: (columns: string[]) => void;
+  export const getModeratingEffects: () => any[];
+  export const updateModeratingEffect: (id: string, patch: any) => void;
+  export const deleteModeratingEffect: (id: string) => void;
+  export const getSelectedModeratingEffect: () => any;
 }
 declare module '*/utils/results.js' {
   const content: any;
