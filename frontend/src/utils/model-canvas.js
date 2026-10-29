@@ -349,10 +349,14 @@ export function initModelCanvas() {
 
   // HUD Controls
   document.getElementById('hud-zoom-in')?.addEventListener('click', () => {
-    zoomToCenterOfMass(transform.k * 1.2);
+    const currentPct = Math.round(transform.k * 100);
+    const nextPct = Math.min(300, Math.floor((currentPct + 10) / 10) * 10);
+    zoomToCenterOfMass(nextPct / 100);
   });
   document.getElementById('hud-zoom-out')?.addEventListener('click', () => {
-    zoomToCenterOfMass(transform.k / 1.2);
+    const currentPct = Math.round(transform.k * 100);
+    const nextPct = Math.max(10, Math.ceil((currentPct - 10) / 10) * 10);
+    zoomToCenterOfMass(nextPct / 100);
   });
   function fitToScreen() {
     if (nodes.length === 0) return;
@@ -504,6 +508,7 @@ export function initModelCanvas() {
   }
 
   document.getElementById('hud-reset')?.addEventListener('click', function(e) {
+    if (nodes.length === 0 && edges.length === 0) return;
     if (window._customResetStylesHandler) {
       window._customResetStylesHandler(e);
       return;
@@ -529,6 +534,7 @@ export function initModelCanvas() {
   }
 
   document.getElementById('hud-clear')?.addEventListener('click', function(e) {
+    if (nodes.length === 0 && edges.length === 0) return;
     // If handled by React or custom dialog, stop
     if (window._customClearCanvasHandler) {
       window._customClearCanvasHandler(e);
@@ -692,6 +698,13 @@ export function initModelCanvas() {
       const newVal = input.value.trim();
       if (newVal && newVal !== node.label) {
         node.label = newVal;
+        if (!node.isLatent && !node.isText) {
+          const charW = (node.fontSize ? Number(node.fontSize) * 0.72 : 7.2);
+          const neededW = Math.max(64, Math.ceil(newVal.length * charW + 20));
+          if (neededW > (node.width || 64)) {
+            node.width = neededW;
+          }
+        }
         pushHistory();
         window.dispatchEvent(new CustomEvent('canvas-changed'));
       }
@@ -1875,7 +1888,7 @@ export function initModelCanvas() {
         }
         g.appendChild(text);
 
-        // If indicators are hidden, render a clean minimal vector eye-off icon beside the text in accent color
+        // If indicators are hidden, render a clean minimal no-background vector eye icon in purple beside the text
         if (node.indicatorsHidden) {
           const childInds = nodes.filter(n => n.parentId === node.id && !n.isLatent);
           if (childInds.length > 0 && !node._isRenaming) {
@@ -1886,100 +1899,75 @@ export function initModelCanvas() {
             if (!textLen || textLen <= 0) {
               textLen = (node.label || '').length * 8.2;
             }
+            const textFontSize = Number(node.fontSize) || 14;
+            const visualMidY = labelY - (textFontSize * 0.36);
+            const iconScale = (textFontSize * 1.15) / 24;
             const iconX = (textLen / 2) + 6;
-            const iconY = labelY - 5; // Exactly aligned with the visual vertical center of the text
 
             const hideBtn = document.createElementNS('http://www.w3.org/2000/svg', 'g');
             hideBtn.setAttribute('class', 'canvas-hidden-indicators-icon-btn');
-            hideBtn.setAttribute('transform', `translate(${iconX}, ${iconY})`);
+            hideBtn.setAttribute('transform', `translate(${iconX + 8}, ${visualMidY})`);
             hideBtn.style.cursor = 'pointer';
+            hideBtn.style.pointerEvents = 'all';
 
-            // Invisible hit rect for easy clicking
+            // Invisible hit rect for easy, responsive clicking without visual clutter
             const hitRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-            hitRect.setAttribute('x', '-2');
-            hitRect.setAttribute('y', '-8');
-            hitRect.setAttribute('width', '22');
-            hitRect.setAttribute('height', '16');
+            hitRect.setAttribute('x', '-10');
+            hitRect.setAttribute('y', '-10');
+            hitRect.setAttribute('width', '20');
+            hitRect.setAttribute('height', '20');
             hitRect.setAttribute('fill', 'transparent');
             hitRect.setAttribute('pointer-events', 'all');
             hideBtn.appendChild(hitRect);
 
-            // Sleek accent pill badge
-            const bgPill = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-            bgPill.setAttribute('x', '0');
-            bgPill.setAttribute('y', '-7');
-            bgPill.setAttribute('width', '18');
-            bgPill.setAttribute('height', '14');
-            bgPill.setAttribute('rx', '7');
-            bgPill.setAttribute('fill', 'rgba(107, 78, 230, 0.12)');
-            bgPill.setAttribute('stroke', 'var(--color-accent, #6B4EE6)');
-            bgPill.setAttribute('stroke-width', '1.2');
-            bgPill.style.transition = 'all var(--transition-fast)';
-            hideBtn.appendChild(bgPill);
+            // Exact Material Symbols 'visibility' vector (from right-click menu, without dash), precisely centered
+            const pathGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            pathGroup.setAttribute('transform', `scale(${iconScale}) translate(-12, -12)`);
 
-            // Eye outline
             const eyePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-            eyePath.setAttribute('d', 'M 3 0 C 5 -3.2, 13 -3.2, 15 0 C 13 3.2, 5 3.2, 3 0 Z');
-            eyePath.setAttribute('fill', 'none');
-            eyePath.setAttribute('stroke', 'var(--color-accent, #6B4EE6)');
-            eyePath.setAttribute('stroke-width', '1.2');
-            eyePath.setAttribute('stroke-linecap', 'round');
-            eyePath.setAttribute('stroke-linejoin', 'round');
-            eyePath.style.transition = 'stroke var(--transition-fast)';
-            hideBtn.appendChild(eyePath);
+            eyePath.setAttribute('d', 'M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z');
+            eyePath.setAttribute('fill', 'var(--color-accent, #6B4EE6)');
+            eyePath.setAttribute('fill-rule', 'evenodd');
+            pathGroup.appendChild(eyePath);
 
-            // Pupil
-            const pupil = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-            pupil.setAttribute('cx', '9');
-            pupil.setAttribute('cy', '0');
-            pupil.setAttribute('r', '1.6');
-            pupil.setAttribute('fill', 'var(--color-accent, #6B4EE6)');
-            pupil.style.transition = 'fill var(--transition-fast)';
-            hideBtn.appendChild(pupil);
-
-            // Diagonal slash line
-            const slash = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-            slash.setAttribute('x1', '2.5');
-            slash.setAttribute('y1', '-5');
-            slash.setAttribute('x2', '15.5');
-            slash.setAttribute('y2', '5');
-            slash.setAttribute('stroke', 'var(--color-accent, #6B4EE6)');
-            slash.setAttribute('stroke-width', '1.3');
-            slash.setAttribute('stroke-linecap', 'round');
-            slash.style.transition = 'stroke var(--transition-fast)';
-            hideBtn.appendChild(slash);
+            hideBtn.appendChild(pathGroup);
 
             const titleEl = document.createElementNS('http://www.w3.org/2000/svg', 'title');
             titleEl.textContent = `${childInds.length} indicators hidden. Click to show.`;
             hideBtn.appendChild(titleEl);
 
             hideBtn.addEventListener('mouseenter', () => {
-              bgPill.setAttribute('fill', 'var(--color-accent, #6B4EE6)');
-              eyePath.setAttribute('stroke', '#ffffff');
-              pupil.setAttribute('fill', '#ffffff');
-              slash.setAttribute('stroke', '#ffffff');
+              hideBtn.style.opacity = '0.7';
             });
             hideBtn.addEventListener('mouseleave', () => {
-              bgPill.setAttribute('fill', 'rgba(107, 78, 230, 0.12)');
-              eyePath.setAttribute('stroke', 'var(--color-accent, #6B4EE6)');
-              pupil.setAttribute('fill', 'var(--color-accent, #6B4EE6)');
-              slash.setAttribute('stroke', 'var(--color-accent, #6B4EE6)');
+              hideBtn.style.opacity = '1';
             });
 
-            // Prevent drag from intercepting clicks
-            hideBtn.addEventListener('mousedown', (ev) => {
-              ev.stopPropagation();
-            });
-            hideBtn.addEventListener('mouseup', (ev) => {
-              ev.stopPropagation();
-            });
-            hideBtn.addEventListener('click', (ev) => {
-              ev.stopPropagation();
+            // Reliable unhide logic
+            const triggerUnhide = (ev) => {
+              if (ev) {
+                ev.stopPropagation();
+                ev.preventDefault();
+              }
               node.indicatorsHidden = false;
               render();
               pushHistory();
               window.dispatchEvent(new CustomEvent('canvas-changed'));
+            };
+
+            let isDownOnHide = false;
+            hideBtn.addEventListener('mousedown', (ev) => {
+              ev.stopPropagation();
+              if (ev.button === 0) isDownOnHide = true;
             });
+            hideBtn.addEventListener('mouseup', (ev) => {
+              ev.stopPropagation();
+              if (isDownOnHide) {
+                isDownOnHide = false;
+                triggerUnhide(ev);
+              }
+            });
+            hideBtn.addEventListener('click', triggerUnhide);
 
             g.appendChild(hideBtn);
           }
@@ -2124,14 +2112,17 @@ export function initModelCanvas() {
             return;
           }
         }
-        const indWidth = 64;
+        const indMinW = 64;
         const indHeight = 24;
-        let w = node.width || indWidth;
+        const charW = (node.fontSize ? Number(node.fontSize) * 0.72 : 7.2);
+        const autoW = Math.max(indMinW, Math.ceil((node.label || '').length * charW + 20));
+        let w = Math.max(node.width || indMinW, autoW);
+        node.width = w; // Automatically resize width if label length exceeds box
         let h = node.height || indHeight;
         
         const defaultFill = node.isMissingInDataset ? 'var(--canvas-missing-fill, #fef2f2)' : 'var(--canvas-manifest-fill)';
         const defaultStroke = node.isMissingInDataset ? '#ef4444' : 'var(--canvas-manifest-stroke)';
-        g.appendChild(createNodeShape(node, indWidth, indHeight, defaultFill, defaultStroke, isSelected));
+        g.appendChild(createNodeShape(node, w, h, defaultFill, defaultStroke, isSelected));
 
         if (isSelected) {
           const gap = 8;
@@ -2171,6 +2162,7 @@ export function initModelCanvas() {
         
         const indText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         indText.textContent = node.label;
+        indText.setAttribute('x', '0');
         indText.setAttribute('y', 4);
         indText.setAttribute('text-anchor', 'middle');
         indText.setAttribute('fill', node.isMissingInDataset ? '#ef4444' : (node.color || 'var(--canvas-manifest-text)'));
@@ -2495,6 +2487,75 @@ export function initModelCanvas() {
       if (nodeFormattingTools) nodeFormattingTools.style.display = 'flex';
       if (edgeFormattingTools) edgeFormattingTools.style.display = 'none';
     }
+
+    updateToolbarAndHudStates();
+  }
+
+  function updateToolbarAndHudStates() {
+    const hasElements = nodes.length > 0 || edges.length > 0;
+    const hasNodes = nodes.length > 0;
+    const latentCount = nodes.filter(n => n.isLatent && !n.isText).length;
+    const canUndo = historyIndex > 0;
+    const canRedo = historyIndex < history.length - 1;
+
+    const setBtnState = (el, enabled) => {
+      if (!el) return;
+      el.classList.toggle('disabled', !enabled);
+      el.style.opacity = enabled ? '1' : '0.35';
+      el.style.pointerEvents = enabled ? 'auto' : 'none';
+      el.style.cursor = enabled ? 'pointer' : 'not-allowed';
+      if (!enabled) {
+        el.setAttribute('aria-disabled', 'true');
+      } else {
+        el.removeAttribute('aria-disabled');
+      }
+    };
+
+    // 1. Bottom Tool HUD: Reset, Clear, Fit
+    setBtnState(document.getElementById('hud-reset'), hasElements);
+    setBtnState(document.getElementById('hud-clear'), hasElements);
+    setBtnState(document.getElementById('hud-fit'), hasNodes);
+
+    // 2. Top Toolbar: Undo & Redo
+    setBtnState(document.getElementById('btn-undo'), canUndo);
+    setBtnState(document.getElementById('btn-redo'), canRedo);
+
+    // 3. Top Toolbar: Erase Element (E)
+    const btnErase = document.getElementById('btn-erase') || document.querySelector('.tb-btn[title*="Erase"]');
+    setBtnState(btnErase, hasElements);
+    if (!hasElements && mode === 'erase') {
+      setMode('select');
+      updateToolbarUI(document.querySelector('.tb-btn[title*="Select"]'));
+    }
+
+    // 4. Top Toolbar: Auto-Align Model
+    const btnAutoAlign = document.querySelector('.tb-btn[title*="Auto-Align"]');
+    setBtnState(btnAutoAlign, hasNodes);
+
+    // 5. Top Toolbar: Path Connector (P)
+    const btnConnector = document.querySelector('.tb-btn[title*="Path Connector"]');
+    const canConnect = latentCount >= 2;
+    setBtnState(btnConnector, canConnect);
+    if (!canConnect && mode === 'connect') {
+      setMode('select');
+      updateToolbarUI(document.querySelector('.tb-btn[title*="Select"]'));
+    }
+
+    // 6. Top Toolbar: Moderation Effect (M), Quadratic Effect (Q), Gaussian Copula
+    const btnModeration = document.querySelector('.tb-btn[title*="Moderation"]');
+    setBtnState(btnModeration, latentCount >= 2 && edges.length > 0);
+
+    const btnQuadratic = document.querySelector('.tb-btn[title*="Quadratic"]');
+    setBtnState(btnQuadratic, latentCount >= 1);
+
+    const btnGaussian = document.querySelector('.tb-btn[title*="Gaussian"]');
+    setBtnState(btnGaussian, latentCount >= 1);
+
+    // 7. Top Toolbar formatting dropdowns: Alignment, Style, Color, Typography
+    setBtnState(document.getElementById('btn-align'), hasNodes);
+    setBtnState(document.getElementById('btn-style'), hasNodes);
+    setBtnState(document.getElementById('btn-colors'), hasNodes);
+    setBtnState(document.getElementById('btn-text'), hasNodes);
   }
 
   // --- Node Dragging & Connect Logic ---

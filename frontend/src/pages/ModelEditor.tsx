@@ -307,6 +307,38 @@ const ModelEditor = () => {
     };
   }, []);
 
+  // Auto-close confirmation popups when tapping/clicking outside (e.g. on canvas) or pressing Escape
+  useEffect(() => {
+    if (!hudConfirm) return;
+
+    const handlePointerDown = (e: PointerEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      if (
+        target.closest('.canvas-hud-confirm-popover') ||
+        target.closest('#hud-reset') ||
+        target.closest('#hud-clear')
+      ) {
+        return;
+      }
+      setHudConfirm(null);
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setHudConfirm(null);
+      }
+    };
+
+    window.addEventListener('pointerdown', handlePointerDown, true);
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown, true);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [hudConfirm]);
+
 
   useEffect(() => {
     if (!effectiveStudyId) {
@@ -2390,7 +2422,10 @@ const ModelEditor = () => {
             className="hud-btn"
             id="hud-reset"
             title="Reset Default Styles"
-            onClick={() => setHudConfirm(c => c === 'reset' ? null : 'reset')}
+            onClick={(e) => {
+              if ((e.currentTarget as HTMLElement).classList.contains('disabled')) return;
+              setHudConfirm(c => c === 'reset' ? null : 'reset');
+            }}
             style={{ color: 'var(--color-text-secondary)', padding: '0 6px', position: 'relative' }}
           >
             <RotateCcw size={15} />
@@ -2399,122 +2434,157 @@ const ModelEditor = () => {
             className="hud-btn"
             id="hud-clear"
             title="Clear Canvas and Results"
-            onClick={() => setHudConfirm(c => c === 'clear' ? null : 'clear')}
+            onClick={(e) => {
+              if ((e.currentTarget as HTMLElement).classList.contains('disabled')) return;
+              setHudConfirm(c => c === 'clear' ? null : 'clear');
+            }}
             style={{ color: '#ef4444', padding: '0 6px', position: 'relative' }}
           >
             <Trash2 size={16} color="#ef4444" />
           </div>
 
-          {/* Popover confirmation anchored directly above reset/clear */}
+          {/* Popover confirmation matching canvas-hud pill dimensions & aesthetic */}
           {hudConfirm === 'reset' && (
-            <div style={{
-              position: 'absolute',
-              bottom: 'calc(100% + 8px)',
-              right: '32px',
-              backgroundColor: 'var(--color-bg-base)',
-              border: '1px solid var(--color-border-subtle)',
-              boxShadow: '0 6px 16px rgba(0, 0, 0, 0.18)',
-              borderRadius: '8px',
-              padding: '8px 12px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px',
-              whiteSpace: 'nowrap',
-              zIndex: 100,
-              fontSize: '12px',
-            }}>
-              <span style={{ color: 'var(--color-text-primary)', fontWeight: 500 }}>Reset styles to default?</span>
-              <button
-                type="button"
-                onClick={() => {
-                  resetModelStyles();
-                  setHudConfirm(null);
-                  setSaveToast('Model styles reset to default');
-                  setTimeout(() => setSaveToast(null), 2500);
-                }}
-                style={{
-                  padding: '3px 9px',
-                  borderRadius: '4px',
-                  backgroundColor: 'var(--color-accent)',
-                  color: '#ffffff',
-                  border: 'none',
-                  fontSize: '11px',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
-              >
-                Reset
-              </button>
-              <button
-                type="button"
-                onClick={() => setHudConfirm(null)}
-                style={{
-                  padding: '3px 6px',
-                  borderRadius: '4px',
-                  backgroundColor: 'transparent',
-                  color: 'var(--color-text-secondary)',
-                  border: 'none',
-                  fontSize: '11px',
-                  cursor: 'pointer',
-                }}
-              >
-                Cancel
-              </button>
+            <div
+              className="canvas-hud-confirm-popover"
+              style={{
+                position: 'absolute',
+                bottom: 'calc(100% + 8px)',
+                left: 0,
+                right: 0,
+                height: '38px',
+                backgroundColor: 'var(--color-bg-elevated)',
+                backdropFilter: 'blur(12px)',
+                border: '1px solid var(--color-border-default)',
+                boxShadow: 'var(--shadow-float)',
+                borderRadius: 'var(--radius-xl)',
+                padding: '4px 10px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                boxSizing: 'border-box',
+                whiteSpace: 'nowrap',
+                zIndex: 100,
+              }}
+            >
+              <span style={{ color: 'var(--color-text-primary)', fontWeight: 500, fontSize: '12px' }}>
+                Reset styles to default?
+              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <button
+                  type="button"
+                  onClick={() => setHudConfirm(null)}
+                  style={{
+                    height: '24px',
+                    padding: '0 8px',
+                    borderRadius: 'var(--radius-md, 6px)',
+                    backgroundColor: 'transparent',
+                    color: 'var(--color-text-secondary)',
+                    border: 'none',
+                    fontSize: '11px',
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    transition: 'all var(--transition-fast)',
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetModelStyles();
+                    setHudConfirm(null);
+                    setSaveToast('Model styles reset to default');
+                    setTimeout(() => setSaveToast(null), 2500);
+                  }}
+                  style={{
+                    height: '24px',
+                    padding: '0 10px',
+                    borderRadius: 'var(--radius-md, 6px)',
+                    backgroundColor: 'var(--color-accent)',
+                    color: '#ffffff',
+                    border: 'none',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    boxShadow: '0 1px 3px rgba(107, 78, 230, 0.3)',
+                    transition: 'all var(--transition-fast)',
+                  }}
+                >
+                  Reset
+                </button>
+              </div>
             </div>
           )}
 
           {hudConfirm === 'clear' && (
-            <div style={{
-              position: 'absolute',
-              bottom: 'calc(100% + 8px)',
-              right: '4px',
-              backgroundColor: 'var(--color-bg-base)',
-              border: '1px solid var(--color-border-subtle)',
-              boxShadow: '0 6px 16px rgba(0, 0, 0, 0.18)',
-              borderRadius: '8px',
-              padding: '8px 12px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px',
-              whiteSpace: 'nowrap',
-              zIndex: 100,
-              fontSize: '12px',
-            }}>
-              <span style={{ color: '#ef4444', fontWeight: 500 }}>Clear entire canvas & results?</span>
-              <button
-                type="button"
-                onClick={() => {
-                  handleConfirmClearCanvas();
-                  setHudConfirm(null);
-                }}
-                style={{
-                  padding: '3px 9px',
-                  borderRadius: '4px',
-                  backgroundColor: '#ef4444',
-                  color: '#ffffff',
-                  border: 'none',
-                  fontSize: '11px',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
-              >
-                Clear
-              </button>
-              <button
-                type="button"
-                onClick={() => setHudConfirm(null)}
-                style={{
-                  padding: '3px 6px',
-                  borderRadius: '4px',
-                  backgroundColor: 'transparent',
-                  color: 'var(--color-text-secondary)',
-                  border: 'none',
-                  fontSize: '11px',
-                  cursor: 'pointer',
-                }}
-              >
-                Cancel
-              </button>
+            <div
+              className="canvas-hud-confirm-popover"
+              style={{
+                position: 'absolute',
+                bottom: 'calc(100% + 8px)',
+                left: 0,
+                right: 0,
+                height: '38px',
+                backgroundColor: 'var(--color-bg-elevated)',
+                backdropFilter: 'blur(12px)',
+                border: '1px solid var(--color-border-default)',
+                boxShadow: 'var(--shadow-float)',
+                borderRadius: 'var(--radius-xl)',
+                padding: '4px 10px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                boxSizing: 'border-box',
+                whiteSpace: 'nowrap',
+                zIndex: 100,
+              }}
+            >
+              <span style={{ color: '#ef4444', fontWeight: 500, fontSize: '12px' }}>
+                Clear canvas & results?
+              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <button
+                  type="button"
+                  onClick={() => setHudConfirm(null)}
+                  style={{
+                    height: '24px',
+                    padding: '0 8px',
+                    borderRadius: 'var(--radius-md, 6px)',
+                    backgroundColor: 'transparent',
+                    color: 'var(--color-text-secondary)',
+                    border: 'none',
+                    fontSize: '11px',
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    transition: 'all var(--transition-fast)',
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleConfirmClearCanvas();
+                    setHudConfirm(null);
+                  }}
+                  style={{
+                    height: '24px',
+                    padding: '0 10px',
+                    borderRadius: 'var(--radius-md, 6px)',
+                    backgroundColor: '#ef4444',
+                    color: '#ffffff',
+                    border: 'none',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    boxShadow: '0 1px 3px rgba(239, 68, 68, 0.3)',
+                    transition: 'all var(--transition-fast)',
+                  }}
+                >
+                  Clear
+                </button>
+              </div>
             </div>
           )}
         </div>

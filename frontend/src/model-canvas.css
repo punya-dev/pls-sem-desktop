@@ -573,6 +573,19 @@
 
 .hud-divider { width: 1px; height: 16px; background: var(--color-border-default); flex-shrink: 0; }
 
+.tb-btn.disabled,
+.tb-btn:disabled,
+.tb-dropdown-btn.disabled,
+.tb-dropdown-btn:disabled,
+.hud-btn.disabled,
+.hud-btn:disabled,
+.hud-icon-btn.disabled,
+.hud-icon-btn:disabled {
+  opacity: 0.35 !important;
+  pointer-events: none !important;
+  cursor: not-allowed !important;
+}
+
 /* Custom Toolbar Elements */
 .tb-color-picker {
   width: 24px;
@@ -1080,5 +1093,15 @@
 
 .hidden-indicators-badge:hover {
   transform: scale(1.08);
+}
+
+.canvas-hidden-indicators-icon-btn {
+  cursor: pointer;
+  pointer-events: all;
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
+}
+
+.canvas-hidden-indicators-icon-btn:hover {
+  opacity: 0.75;
 }
 
