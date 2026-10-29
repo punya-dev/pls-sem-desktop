@@ -302,6 +302,12 @@ export function initModelCanvas() {
       marqueeInitialSelected.forEach(id => selectedIds.add(id));
 
       nodes.forEach(n => {
+        // Exclude indicators whose parent latent variable has hidden indicators
+        if (n.parentId) {
+          const parent = nodes.find(p => p.id === n.parentId);
+          if (parent && parent.indicatorsHidden) return;
+        }
+
         const nw = n.width || (n.isLatent !== false ? (NODE_R * 2) : 64);
         const nh = n.height || (n.isLatent !== false ? (NODE_R * 2) : 24);
         const nx1 = n.x - nw / 2;
@@ -348,7 +354,7 @@ export function initModelCanvas() {
   document.getElementById('hud-zoom-out')?.addEventListener('click', () => {
     zoomToCenterOfMass(transform.k / 1.2);
   });
-  document.getElementById('hud-fit')?.addEventListener('click', () => {
+  function fitToScreen() {
     if (nodes.length === 0) return;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     nodes.forEach(n => {
@@ -375,7 +381,8 @@ export function initModelCanvas() {
       k: k
     };
     applyTransform();
-  });
+  }
+  document.getElementById('hud-fit')?.addEventListener('click', fitToScreen);
 
   const zoomLevelEl = document.getElementById('hud-zoom-level');
   if (zoomLevelEl) {
@@ -425,11 +432,51 @@ export function initModelCanvas() {
     });
   }
 
-  document.getElementById('hud-snap')?.addEventListener('click', function() {
+  function toggleSnapToGrid() {
     isSnapping = !isSnapping;
-    this.classList.toggle('active', isSnapping);
+    const snapBtn = document.getElementById('hud-snap');
+    if (snapBtn) snapBtn.classList.toggle('active', isSnapping);
     if (bgRect) bgRect.style.fill = isSnapping ? 'url(#dot-grid)' : 'none';
-  });
+  }
+  document.getElementById('hud-snap')?.addEventListener('click', toggleSnapToGrid);
+
+  function exportCanvasAsImage() {
+    try {
+      const svgClone = svg.cloneNode(true);
+      const hints = svgClone.querySelector('#canvas-empty-hint');
+      if (hints) hints.remove();
+      const guides = svgClone.querySelector('#guides-layer');
+      if (guides) guides.remove();
+
+      const rect = svg.getBoundingClientRect();
+      const scale = 2; // high-resolution export
+      const canvas = document.createElement('canvas');
+      canvas.width = rect.width * scale;
+      canvas.height = rect.height * scale;
+      const ctx = canvas.getContext('2d');
+      ctx.scale(scale, scale);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, rect.width, rect.height);
+
+      const xml = new XMLSerializer().serializeToString(svgClone);
+      const svgBlob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(svgBlob);
+      const img = new Image();
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0, rect.width, rect.height);
+        URL.revokeObjectURL(url);
+        const link = document.createElement('a');
+        link.download = `statsem_model_${Date.now()}.png`;
+        link.href = canvas.toDataURL('image/png');
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      };
+      img.src = url;
+    } catch (err) {
+      console.error('[Canvas] Failed to export diagram as image:', err);
+    }
+  }
   
   function resetModelStyles() {
     nodes.forEach(n => {
@@ -536,9 +583,221 @@ export function initModelCanvas() {
     deleteSelected();
   });
 
+  function isLatentConnectedInModel(node) {
+    if (!node || !node.isLatent || node.isText) return true;
+    return edges.some(edge => {
+      if (edge.sourceId === node.id) {
+        const other = nodes.find(n => n.id === edge.targetId);
+        return other && other.isLatent && !other.isText;
+      }
+      if (edge.targetId === node.id) {
+        const other = nodes.find(n => n.id === edge.sourceId);
+        return other && other.isLatent && !other.isText;
+      }
+      return false;
+    });
+  }
+
+  let lastLatentCreateTime = 0;
+
+  function startInlineNodeRename(node) {
+    if (!node) return;
+    const existing = document.getElementById('canvas-direct-inline-rename');
+    if (existing) existing.remove();
+
+    // 1. Measure the exact screen bounding rect of the CURRENT rendered text element BEFORE hiding it!
+    const nodeG = nodesLayer.querySelector(`g[data-id="${node.id}"]`);
+    const textEl = nodeG ? nodeG.querySelector('text') : null;
+
+    let screenCenterX = 0;
+    let screenCenterY = 0;
+
+    if (textEl) {
+      const rect = textEl.getBoundingClientRect();
+      screenCenterX = rect.left + rect.width / 2;
+      screenCenterY = rect.top + rect.height / 2;
+    } else {
+      const pt = svg.createSVGPoint();
+      pt.x = node.x;
+      if (node.isLatent) {
+        const h = node.height || NODE_R * 2;
+        // Text baseline is at (h/2 + 24); visual cap-center is ~5px higher
+        pt.y = node.textInside ? (node.y + 1) : (node.y + h / 2 + 19);
+      } else if (node.isText) {
+        pt.y = node.y;
+      } else {
+        pt.y = node.y;
+      }
+      const screenPt = pt.matrixTransform(zoomLayer.getScreenCTM());
+      screenCenterX = screenPt.x;
+      screenCenterY = screenPt.y;
+    }
+
+    // Now mark node as renaming and re-render so the underlying SVG text is hidden
+    node._isRenaming = true;
+    render();
+
+    const input = document.createElement('input');
+    input.id = 'canvas-direct-inline-rename';
+    input.className = 'inline-seamless-rename-input';
+    input.type = 'text';
+    input.value = node.label || '';
+    input.style.position = 'fixed';
+    input.style.left = `${screenCenterX}px`;
+    input.style.top = `${screenCenterY}px`;
+    input.style.transform = 'translate(-50%, -50%)';
+    input.style.zIndex = '10000';
+    input.style.background = 'transparent';
+    input.style.border = 'none';
+    input.style.outline = 'none';
+    input.style.boxShadow = 'none';
+    input.style.padding = '0';
+    input.style.margin = '0';
+    input.style.textAlign = 'center';
+    input.style.lineHeight = '1';
+    input.style.caretColor = 'var(--color-accent, #6B4EE6)';
+
+    const baseFontSize = node.fontSize || (node.isLatent ? 14 : (node.isText ? 14 : 10));
+    const scaledFontSize = Math.max(9, baseFontSize * transform.k);
+    input.style.fontSize = `${scaledFontSize}px`;
+    input.style.fontFamily = node.fontFamily || (node.isLatent ? 'var(--font-sans)' : (node.isText ? 'var(--font-sans)' : 'var(--font-mono)'));
+    input.style.fontWeight = node.bold ? '700' : (node.isLatent ? '600' : '500');
+    if (node.italic) input.style.fontStyle = 'italic';
+    if (node.underline) input.style.textDecoration = 'underline';
+
+    if (node.isLatent) {
+      input.style.color = node.color || (node.textInside ? 'var(--canvas-latent-text)' : 'var(--color-text-primary)');
+    } else if (node.isText) {
+      input.style.color = node.color || 'var(--color-text-primary)';
+    } else {
+      input.style.color = node.isMissingInDataset ? '#ef4444' : (node.color || 'var(--canvas-manifest-text)');
+    }
+
+    const updateWidth = () => {
+      const len = Math.max(2, (input.value || '').length);
+      input.style.width = `${Math.max(40, len * (scaledFontSize * 0.75) + 20)}px`;
+    };
+    updateWidth();
+    input.addEventListener('input', updateWidth);
+
+    document.body.appendChild(input);
+    input.focus();
+    input.select();
+
+    let finished = false;
+    const finishEdit = () => {
+      if (finished) return;
+      finished = true;
+      delete node._isRenaming;
+      const newVal = input.value.trim();
+      if (newVal && newVal !== node.label) {
+        node.label = newVal;
+        pushHistory();
+        window.dispatchEvent(new CustomEvent('canvas-changed'));
+      }
+      if (input.parentNode) input.remove();
+      render();
+    };
+
+    input.addEventListener('blur', finishEdit);
+    input.addEventListener('keydown', (ke) => {
+      if (ke.key === 'Enter') {
+        finishEdit();
+      } else if (ke.key === 'Escape') {
+        finished = true;
+        delete node._isRenaming;
+        if (input.parentNode) input.remove();
+        render();
+      }
+    });
+  }
+
+  function createAndEditNewLatentNode(x, y) {
+    const now = Date.now();
+    if (now - lastLatentCreateTime < 400) return;
+    lastLatentCreateTime = now;
+
+    setMode('select');
+    const selectBtn = document.querySelector('.tb-btn[title*="Select"]');
+    if (selectBtn) updateToolbarUI(selectBtn);
+
+    let targetX = x;
+    let targetY = y;
+    if (typeof targetX !== 'number' || isNaN(targetX) || typeof targetY !== 'number' || isNaN(targetY)) {
+      const center = getSvgCenter();
+      targetX = center.x;
+      targetY = center.y;
+    }
+
+    const latentCount = nodes.filter(n => n.isLatent && !n.isText).length;
+    const newName = `LV_${latentCount + 1}`;
+    const newNode = {
+      id: generateId(),
+      label: newName,
+      x: targetX,
+      y: targetY,
+      isLatent: true,
+      type: 'reflective'
+    };
+
+    nodes.push(newNode);
+    if (emptyHint) emptyHint.style.display = 'none';
+    selectedIds.clear();
+    selectedIds.add(newNode.id);
+    render();
+    pushHistory();
+    window.dispatchEvent(new CustomEvent('canvas-changed'));
+
+    setTimeout(() => {
+      startInlineNodeRename(newNode);
+    }, 60);
+
+    return newNode;
+  }
+  window.createAndEditNewLatentNode = createAndEditNewLatentNode;
+
+  function duplicateNode(node) {
+    if (!node) return;
+    const copy = JSON.parse(JSON.stringify(node));
+    copy.id = generateId();
+    copy.x = (node.x || 0) + 40;
+    copy.y = (node.y || 0) + 40;
+    // Only append _copy for latent variables, NEVER for dataset indicators!
+    if (copy.isLatent && !copy.isText && copy.label) {
+      copy.label = `${copy.label}_copy`;
+    }
+    if (copy.edgeWaypoints) copy.edgeWaypoints = [];
+    nodes.push(copy);
+    selectedIds.clear();
+    selectedIds.add(copy.id);
+    render();
+    pushHistory();
+    window.dispatchEvent(new CustomEvent('canvas-changed'));
+  }
+
+  function selectCanvasNodesByVarNames(varNames) {
+    if (!varNames || !Array.isArray(varNames) || varNames.length === 0) {
+      selectedIds.clear();
+      render();
+      return;
+    }
+    const set = new Set(varNames.map(v => String(v).trim().toLowerCase()));
+    selectedIds.clear();
+    nodes.forEach(n => {
+      const label = String(n.label || '').trim().toLowerCase();
+      if (set.has(label)) {
+        selectedIds.add(n.id);
+      }
+    });
+    render();
+  }
+  window.selectCanvasNodesByVarNames = selectCanvasNodesByVarNames;
+
   // --- Toolbar Modes ---
   const toolBtns = document.querySelectorAll('.canvas-toolbar .tb-btn');
   toolBtns.forEach(btn => {
+    if (btn.dataset.canvasListenerBound === 'true') return;
+    btn.dataset.canvasListenerBound = 'true';
     btn.addEventListener('click', function() {
       const title = this.getAttribute('title') || '';
       if (title.includes('Select')) {
@@ -550,16 +809,8 @@ export function initModelCanvas() {
       } else if (title.includes('Erase')) {
         setMode('erase');
         updateToolbarUI(this);
-      } else if (title.includes('Latent variable')) {
-        // Prompt for name and plop in center
-        setMode('select');
-        updateToolbarUI(document.querySelector('.tb-btn[title*="Select"]'));
-        
-        const name = prompt('Enter Latent Variable Name:');
-        if (name && name.trim()) {
-          const pt = getSvgCenter();
-          addNode(name.trim(), pt.x, pt.y);
-        }
+      } else if (title.includes('Latent variable') || this.id === 'btn-add-latent') {
+        createAndEditNewLatentNode();
       } else if (title.includes('Text Note') || this.getAttribute('data-action') === 'add-text-note') {
         const text = prompt('Enter text note:');
         if (text && text.trim()) {
@@ -823,9 +1074,9 @@ export function initModelCanvas() {
     }
   });
 
-  function alignIndicators(direction) {
-    if (selectedIds.size !== 1) return;
-    const parentId = Array.from(selectedIds)[0];
+  function alignIndicators(direction, targetParentId = null) {
+    const parentId = targetParentId || (selectedIds.size === 1 ? Array.from(selectedIds)[0] : null);
+    if (!parentId) return;
     const parent = nodes.find(n => n.id === parentId);
     if (!parent || !parent.isLatent) return;
     
@@ -849,6 +1100,7 @@ export function initModelCanvas() {
     const start = -totalLength / 2;
     
     indicators.forEach((ind, idx) => {
+      delete ind.edgeWaypoints;
       if (direction === 'right') {
         ind.x = parent.x + offset;
         ind.y = parent.y + start + (idx * spacing);
@@ -865,6 +1117,7 @@ export function initModelCanvas() {
     });
     
     render();
+    pushHistory();
   }
 
   function updateToolbarUI(activeBtn) {
@@ -1114,9 +1367,19 @@ export function initModelCanvas() {
     
     el.setAttribute('fill', fill);
     el.style.fill = fill;
-    el.setAttribute('stroke', isSelected ? 'var(--color-accent)' : stroke);
-    el.style.stroke = isSelected ? 'var(--color-accent)' : stroke;
-    el.setAttribute('stroke-width', strokeW);
+    const isDisconnectedLatent = node.isLatent && !node.isText && !isLatentConnectedInModel(node);
+    if (isDisconnectedLatent) {
+      el.setAttribute('stroke', '#ef4444');
+      el.style.stroke = '#ef4444';
+      el.setAttribute('stroke-width', '2.5');
+      if (!isSelected) {
+        el.setAttribute('stroke-dasharray', '4 2');
+      }
+    } else {
+      el.setAttribute('stroke', isSelected ? 'var(--color-accent)' : stroke);
+      el.style.stroke = isSelected ? 'var(--color-accent)' : stroke;
+      el.setAttribute('stroke-width', strokeW);
+    }
     return el;
   }
 
@@ -1578,7 +1841,9 @@ export function initModelCanvas() {
         text.style.userSelect = 'none';
         text.style.webkitUserSelect = 'none';
         
+        let labelY = h/2 + 24;
         if (node.textInside) {
+          labelY = 5;
           text.setAttribute('y', 5); // visually centered
           const getContrast = (hex) => {
             if (!hex || hex === 'none') return '#ffffff';
@@ -1594,7 +1859,8 @@ export function initModelCanvas() {
           text.setAttribute('fill', node.color || 'var(--canvas-latent-text)');
           text.style.fill = node.color || 'var(--canvas-latent-text)';
         } else {
-          text.setAttribute('y', h/2 + 24);
+          labelY = h/2 + 24;
+          text.setAttribute('y', labelY);
           text.setAttribute('fill', node.color || 'var(--color-text-primary)');
           text.style.fill = node.color || 'var(--color-text-primary)';
         }
@@ -1604,7 +1870,120 @@ export function initModelCanvas() {
         if (node.italic) text.setAttribute('font-style', 'italic');
         if (node.underline) text.setAttribute('text-decoration', 'underline');
         text.setAttribute('font-family', node.fontFamily || 'var(--font-sans)');
+        if (node._isRenaming) {
+          text.style.visibility = 'hidden';
+        }
         g.appendChild(text);
+
+        // If indicators are hidden, render a clean minimal vector eye-off icon beside the text in accent color
+        if (node.indicatorsHidden) {
+          const childInds = nodes.filter(n => n.parentId === node.id && !n.isLatent);
+          if (childInds.length > 0 && !node._isRenaming) {
+            let textLen = 0;
+            try {
+              textLen = text.getComputedTextLength();
+            } catch (e) {}
+            if (!textLen || textLen <= 0) {
+              textLen = (node.label || '').length * 8.2;
+            }
+            const iconX = (textLen / 2) + 6;
+            const iconY = labelY - 5; // Exactly aligned with the visual vertical center of the text
+
+            const hideBtn = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            hideBtn.setAttribute('class', 'canvas-hidden-indicators-icon-btn');
+            hideBtn.setAttribute('transform', `translate(${iconX}, ${iconY})`);
+            hideBtn.style.cursor = 'pointer';
+
+            // Invisible hit rect for easy clicking
+            const hitRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            hitRect.setAttribute('x', '-2');
+            hitRect.setAttribute('y', '-8');
+            hitRect.setAttribute('width', '22');
+            hitRect.setAttribute('height', '16');
+            hitRect.setAttribute('fill', 'transparent');
+            hitRect.setAttribute('pointer-events', 'all');
+            hideBtn.appendChild(hitRect);
+
+            // Sleek accent pill badge
+            const bgPill = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            bgPill.setAttribute('x', '0');
+            bgPill.setAttribute('y', '-7');
+            bgPill.setAttribute('width', '18');
+            bgPill.setAttribute('height', '14');
+            bgPill.setAttribute('rx', '7');
+            bgPill.setAttribute('fill', 'rgba(107, 78, 230, 0.12)');
+            bgPill.setAttribute('stroke', 'var(--color-accent, #6B4EE6)');
+            bgPill.setAttribute('stroke-width', '1.2');
+            bgPill.style.transition = 'all var(--transition-fast)';
+            hideBtn.appendChild(bgPill);
+
+            // Eye outline
+            const eyePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            eyePath.setAttribute('d', 'M 3 0 C 5 -3.2, 13 -3.2, 15 0 C 13 3.2, 5 3.2, 3 0 Z');
+            eyePath.setAttribute('fill', 'none');
+            eyePath.setAttribute('stroke', 'var(--color-accent, #6B4EE6)');
+            eyePath.setAttribute('stroke-width', '1.2');
+            eyePath.setAttribute('stroke-linecap', 'round');
+            eyePath.setAttribute('stroke-linejoin', 'round');
+            eyePath.style.transition = 'stroke var(--transition-fast)';
+            hideBtn.appendChild(eyePath);
+
+            // Pupil
+            const pupil = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            pupil.setAttribute('cx', '9');
+            pupil.setAttribute('cy', '0');
+            pupil.setAttribute('r', '1.6');
+            pupil.setAttribute('fill', 'var(--color-accent, #6B4EE6)');
+            pupil.style.transition = 'fill var(--transition-fast)';
+            hideBtn.appendChild(pupil);
+
+            // Diagonal slash line
+            const slash = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            slash.setAttribute('x1', '2.5');
+            slash.setAttribute('y1', '-5');
+            slash.setAttribute('x2', '15.5');
+            slash.setAttribute('y2', '5');
+            slash.setAttribute('stroke', 'var(--color-accent, #6B4EE6)');
+            slash.setAttribute('stroke-width', '1.3');
+            slash.setAttribute('stroke-linecap', 'round');
+            slash.style.transition = 'stroke var(--transition-fast)';
+            hideBtn.appendChild(slash);
+
+            const titleEl = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+            titleEl.textContent = `${childInds.length} indicators hidden. Click to show.`;
+            hideBtn.appendChild(titleEl);
+
+            hideBtn.addEventListener('mouseenter', () => {
+              bgPill.setAttribute('fill', 'var(--color-accent, #6B4EE6)');
+              eyePath.setAttribute('stroke', '#ffffff');
+              pupil.setAttribute('fill', '#ffffff');
+              slash.setAttribute('stroke', '#ffffff');
+            });
+            hideBtn.addEventListener('mouseleave', () => {
+              bgPill.setAttribute('fill', 'rgba(107, 78, 230, 0.12)');
+              eyePath.setAttribute('stroke', 'var(--color-accent, #6B4EE6)');
+              pupil.setAttribute('fill', 'var(--color-accent, #6B4EE6)');
+              slash.setAttribute('stroke', 'var(--color-accent, #6B4EE6)');
+            });
+
+            // Prevent drag from intercepting clicks
+            hideBtn.addEventListener('mousedown', (ev) => {
+              ev.stopPropagation();
+            });
+            hideBtn.addEventListener('mouseup', (ev) => {
+              ev.stopPropagation();
+            });
+            hideBtn.addEventListener('click', (ev) => {
+              ev.stopPropagation();
+              node.indicatorsHidden = false;
+              render();
+              pushHistory();
+              window.dispatchEvent(new CustomEvent('canvas-changed'));
+            });
+
+            g.appendChild(hideBtn);
+          }
+        }
 
         // Display R² inside circle for endogenous latent constructs
         const metrics = getConstructMetrics(node);
@@ -1655,6 +2034,31 @@ export function initModelCanvas() {
           }
           g.appendChild(r2Group);
         }
+
+        const isDisconnectedLatent = !isLatentConnectedInModel(node);
+        if (isDisconnectedLatent) {
+          const warnG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+          warnG.setAttribute('transform', `translate(${w/2 - 4}, ${-h/2 + 4})`);
+          warnG.setAttribute('pointer-events', 'auto');
+          const warnCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          warnCircle.setAttribute('r', '8');
+          warnCircle.setAttribute('fill', '#ef4444');
+          warnCircle.setAttribute('stroke', '#ffffff');
+          warnCircle.setAttribute('stroke-width', '1.5');
+          const warnExcl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          warnExcl.setAttribute('text-anchor', 'middle');
+          warnExcl.setAttribute('dominant-baseline', 'central');
+          warnExcl.setAttribute('fill', '#ffffff');
+          warnExcl.setAttribute('font-size', '10');
+          warnExcl.setAttribute('font-weight', 'bold');
+          warnExcl.textContent = '!';
+          const warnTitle = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+          warnTitle.textContent = 'Disconnected latent variable: Not connected to any other latent variable in the model';
+          warnG.appendChild(warnCircle);
+          warnG.appendChild(warnExcl);
+          warnG.appendChild(warnTitle);
+          g.appendChild(warnG);
+        }
       } else if (node.isText) {
         const rectBox = node.rectBox || {width: 100, height: 40};
         
@@ -1674,6 +2078,7 @@ export function initModelCanvas() {
         if (node.italic) text.setAttribute('font-style', 'italic');
         if (node.underline) text.setAttribute('text-decoration', 'underline');
         text.setAttribute('font-family', node.fontFamily || 'var(--font-sans)');
+        if (node._isRenaming) text.style.visibility = 'hidden';
         g.appendChild(text);
         
         if (isSelected) {
@@ -1713,6 +2118,12 @@ export function initModelCanvas() {
         g.appendChild(text);
       } else {
         // Indicator
+        if (node.parentId) {
+          const parent = nodes.find(n => n.id === node.parentId);
+          if (parent && parent.indicatorsHidden) {
+            return;
+          }
+        }
         const indWidth = 64;
         const indHeight = 24;
         let w = node.width || indWidth;
@@ -1768,6 +2179,7 @@ export function initModelCanvas() {
         if (node.italic) indText.setAttribute('font-style', 'italic');
         if (node.underline) indText.setAttribute('text-decoration', 'underline');
         indText.setAttribute('font-family', node.fontFamily || 'var(--font-mono)');
+        if (node._isRenaming) indText.style.visibility = 'hidden';
         g.appendChild(indText);
 
         if (node.isMissingInDataset) {
@@ -1804,21 +2216,109 @@ export function initModelCanvas() {
           const parent = nodes.find(n => n.id === node.parentId);
           if (parent) {
             const isFormative = parent.type === 'formative';
-            const { x1, y1, x2, y2 } = isFormative
-              ? getEdgeCoordinates(node, parent, true)
-              : getEdgeCoordinates(parent, node, true);
+            const indEdgeId = `edge_ind_${node.id}`;
+            const indEdgeObj = {
+              id: indEdgeId,
+              isIndicatorEdge: true,
+              indicatorNode: node,
+              parentNode: parent,
+              waypoints: node.edgeWaypoints || (node.edgeWaypoints = [])
+            };
+            const source = isFormative ? node : parent;
+            const target = isFormative ? parent : node;
+            const { x1, y1, x2, y2 } = getEdgeCoordinates(source, target, indEdgeObj);
+
+            let d = `M ${x1} ${y1}`;
+            if (indEdgeObj.waypoints && indEdgeObj.waypoints.length > 0) {
+              indEdgeObj.waypoints.forEach(wp => {
+                d += ` L ${wp.x} ${wp.y}`;
+              });
+            }
+            d += ` L ${x2} ${y2}`;
+
+            const isIndEdgeSelected = selectedIds.has(indEdgeId) || isSelected;
             const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-            path.setAttribute('d', `M ${x1} ${y1} L ${x2} ${y2}`);
-            path.setAttribute('stroke', 'var(--canvas-edge-stroke)');
-            path.setAttribute('stroke-width', '1.5');
-            path.setAttribute('marker-end', 'url(#arrow-solid)');
+            path.setAttribute('d', d);
+            path.setAttribute('stroke', isIndEdgeSelected ? 'var(--color-accent, #6B4EE6)' : 'var(--canvas-edge-stroke)');
+            path.setAttribute('stroke-width', isIndEdgeSelected ? '2.5' : '1.5');
+            path.setAttribute('marker-end', isIndEdgeSelected ? 'url(#arrow-solid-selected)' : 'url(#arrow-solid)');
+            path.style.fill = 'none';
             edgesLayer.appendChild(path);
+
+            const clickPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            clickPath.setAttribute('d', d);
+            clickPath.style.stroke = 'rgba(0,0,0,0.01)';
+            clickPath.style.strokeWidth = '16';
+            clickPath.style.fill = 'none';
+            clickPath.style.cursor = 'pointer';
+            clickPath.addEventListener('click', (e) => {
+              e.stopPropagation();
+              if (mode === 'erase') {
+                node.edgeWaypoints = [];
+                render();
+                pushHistory();
+                return;
+              }
+              if (!e.shiftKey) clearSelection();
+              selectedIds.add(indEdgeId);
+              render();
+            });
+            clickPath.addEventListener('contextmenu', (e) => showContextMenu(e, indEdgeId));
+            edgesLayer.appendChild(clickPath);
+
+            // Bending handles when indicator or its arrow is selected
+            if (isIndEdgeSelected) {
+              if (indEdgeObj.waypoints && indEdgeObj.waypoints.length > 0) {
+                indEdgeObj.waypoints.forEach((wp, idx) => {
+                  const handle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                  handle.setAttribute('cx', wp.x);
+                  handle.setAttribute('cy', wp.y);
+                  handle.setAttribute('r', 5);
+                  handle.setAttribute('fill', 'var(--color-accent, #6B4EE6)');
+                  handle.style.cursor = 'move';
+                  handle.addEventListener('mousedown', (e) => {
+                    e.stopPropagation();
+                    draggingWaypoint = { edge: indEdgeObj, idx };
+                  });
+                  edgesLayer.appendChild(handle);
+                });
+              }
+              const pts = [{ x: x1, y: y1 }, ...(indEdgeObj.waypoints || []), { x: x2, y: y2 }];
+              for (let i = 0; i < pts.length - 1; i++) {
+                const midX = (pts[i].x + pts[i + 1].x) / 2;
+                const midY = (pts[i].y + pts[i + 1].y) / 2;
+                const midHandle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                midHandle.setAttribute('cx', midX);
+                midHandle.setAttribute('cy', midY);
+                midHandle.setAttribute('r', 5);
+                midHandle.setAttribute('fill', 'rgba(168,85,247,0.8)');
+                midHandle.style.cursor = 'crosshair';
+                midHandle.addEventListener('mousedown', (e) => {
+                  e.stopPropagation();
+                  pendingWaypoint = { edge: indEdgeObj, idx: i, midX, midY };
+                });
+                edgesLayer.appendChild(midHandle);
+              }
+            }
 
             // Measurement outer loading badge
             const loading = getOuterLoading(parent, node);
             if (loading !== null && loading !== undefined) {
-              const indMidX = (x1 + x2) / 2;
-              const indMidY = (y1 + y2) / 2;
+              let indMidX = (x1 + x2) / 2;
+              let indMidY = (y1 + y2) / 2;
+              if (indEdgeObj.waypoints && indEdgeObj.waypoints.length > 0) {
+                const nw = indEdgeObj.waypoints.length;
+                if (nw % 2 === 1) {
+                  const mIdx = Math.floor(nw / 2);
+                  indMidX = indEdgeObj.waypoints[mIdx].x;
+                  indMidY = indEdgeObj.waypoints[mIdx].y;
+                } else {
+                  const i1 = nw / 2 - 1;
+                  const i2 = nw / 2;
+                  indMidX = (indEdgeObj.waypoints[i1].x + indEdgeObj.waypoints[i2].x) / 2;
+                  indMidY = (indEdgeObj.waypoints[i1].y + indEdgeObj.waypoints[i2].y) / 2;
+                }
+              }
 
               const badgeG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
               badgeG.setAttribute('class', 'edge-result-badge indicator-badge');
@@ -1871,50 +2371,7 @@ export function initModelCanvas() {
       g.addEventListener('contextmenu', (e) => showContextMenu(e, node.id));
       g.addEventListener('dblclick', (e) => {
         e.stopPropagation();
-        
-        // Inline editing logic
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.value = node.label;
-        input.style.position = 'absolute';
-        
-        // Calculate position based on current transform (approximate)
-        const CTM = svg.getScreenCTM();
-        const pt = svg.createSVGPoint();
-        pt.x = node.x;
-        pt.y = node.y;
-        const screenPt = pt.matrixTransform(CTM);
-        
-        input.style.left = `${screenPt.x - 50}px`;
-        input.style.top = `${screenPt.y - 15}px`;
-        input.style.width = '100px';
-        input.style.textAlign = 'center';
-        input.style.zIndex = '1000';
-        input.style.fontFamily = 'var(--font-sans)';
-        input.style.fontSize = '14px';
-        
-        document.body.appendChild(input);
-        input.focus();
-        input.select();
-        
-        const finishEdit = () => {
-          if (input.parentNode) {
-            const newName = input.value;
-            if (newName && newName.trim()) {
-              node.label = newName.trim();
-              render();
-            }
-            document.body.removeChild(input);
-          }
-        };
-        
-        input.addEventListener('blur', finishEdit);
-        input.addEventListener('keydown', (ke) => {
-          if (ke.key === 'Enter') finishEdit();
-          if (ke.key === 'Escape') {
-            if (input.parentNode) document.body.removeChild(input);
-          }
-        });
+        startInlineNodeRename(node);
       });
 
       nodesLayer.appendChild(g);
@@ -2515,154 +2972,101 @@ export function initModelCanvas() {
   }
 
   // --- Context Menu ---
-  const contextMenu = document.createElement('div');
-  contextMenu.style.position = 'absolute';
-  contextMenu.style.background = 'white';
-  contextMenu.style.border = '1px solid rgba(0,0,0,0.1)';
-  contextMenu.style.borderRadius = '6px';
-  contextMenu.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
-  contextMenu.style.padding = '4px';
-  contextMenu.style.display = 'none';
-  contextMenu.style.zIndex = '1000';
-  contextMenu.style.minWidth = '120px';
-  contextMenu.style.fontFamily = 'var(--font-sans)';
-  contextMenu.style.fontSize = '13px';
-  document.body.appendChild(contextMenu);
+  let contextMenu = document.getElementById('canvas-context-menu');
+  if (!contextMenu) {
+    contextMenu = document.createElement('div');
+    contextMenu.id = 'canvas-context-menu';
+    contextMenu.className = 'canvas-context-menu';
+    document.body.appendChild(contextMenu);
+  }
 
   function hideContextMenu() {
     contextMenu.style.display = 'none';
+    contextMenu.innerHTML = '';
     draggingNode = null;
     isMarquee = false;
-  }
-  
-  contextMenu.innerHTML = `
-    <div class="ctx-item" id="ctx-copy" style="padding: 6px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
-      <span class="material-symbols-outlined" style="font-size: 16px;">content_copy</span> Copy
-    </div>
-    <div class="ctx-item" id="ctx-paste" style="padding: 6px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
-      <span class="material-symbols-outlined" style="font-size: 16px;">content_paste</span> Paste
-    </div>
-    <div class="ctx-item" id="ctx-duplicate" style="padding: 6px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
-      <span class="material-symbols-outlined" style="font-size: 16px;">control_point_duplicate</span> Duplicate
-    </div>
-    <div class="ctx-item" id="ctx-rename" style="padding: 6px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
-      <span class="material-symbols-outlined" style="font-size: 16px;">edit</span> Rename
-    </div>
-    <div class="ctx-item" id="ctx-toggle-mode" style="padding: 6px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
-      <span class="material-symbols-outlined" style="font-size: 16px;">swap_horiz</span> Switch Mode
-    </div>
-    <div class="ctx-item" id="ctx-delete" style="padding: 6px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px; color: #ef4444;">
-      <span class="material-symbols-outlined" style="font-size: 16px;">delete</span> Delete
-    </div>
-  `;
-  
-  // Hover effects
-  const ctxItems = contextMenu.querySelectorAll('.ctx-item');
-  ctxItems.forEach(item => {
-    item.addEventListener('mouseenter', () => item.style.backgroundColor = 'rgba(0,0,0,0.04)');
-    item.addEventListener('mouseleave', () => item.style.backgroundColor = 'transparent');
-  });
-
-  let ctxTargetId = null;
-
-  contextMenu.querySelector('#ctx-copy')?.addEventListener('click', () => {
-    if (ctxTargetId && !selectedIds.has(ctxTargetId)) {
-      selectedIds.clear();
-      selectedIds.add(ctxTargetId);
-    }
-    copySelected();
-    hideContextMenu();
-  });
-
-  contextMenu.querySelector('#ctx-paste')?.addEventListener('click', () => {
-    pasteClipboard();
-    hideContextMenu();
-  });
-
-  contextMenu.querySelector('#ctx-delete').addEventListener('click', () => {
-    if (ctxTargetId) {
-      if (!selectedIds.has(ctxTargetId)) {
-        selectedIds.clear();
-        selectedIds.add(ctxTargetId);
-      }
-      deleteSelected();
-    }
-    hideContextMenu();
-  });
-  
-  contextMenu.querySelector('#ctx-duplicate').addEventListener('click', () => {
-    if (ctxTargetId) {
-      const node = nodes.find(n => n.id === ctxTargetId);
-      if (node) {
-        const copy = JSON.parse(JSON.stringify(node));
-        copy.id = generateId();
-        copy.x = (node.x || 0) + 40;
-        copy.y = (node.y || 0) + 40;
-        if (copy.label) {
-          copy.label = `${copy.label}_copy`;
-        }
-        nodes.push(copy);
-        render();
-        pushHistory();
-        window.dispatchEvent(new CustomEvent('canvas-changed'));
-      }
-    }
-    hideContextMenu();
-  });
-
-  contextMenu.querySelector('#ctx-rename').addEventListener('click', () => {
-    if (ctxTargetId) {
-      const node = nodes.find(n => n.id === ctxTargetId);
-      if (node) {
-        // Spawn inline edit
-        const pt = svg.createSVGPoint();
-        pt.x = node.x; pt.y = node.y;
-        const screenPt = pt.matrixTransform(zoomLayer.getScreenCTM());
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.value = node.label;
-        input.style.position = 'absolute';
-        input.style.left = `${screenPt.x - 50}px`;
-        input.style.top = `${screenPt.y - 12}px`;
-        input.style.width = '100px';
-        input.style.textAlign = 'center';
-        input.style.zIndex = '1000';
-        document.body.appendChild(input);
-        input.focus();
-        input.select();
-        const finishEdit = () => {
-          if (input.value.trim()) node.label = input.value.trim();
-          if (input.parentNode) document.body.removeChild(input);
-          render();
-        };
-        input.addEventListener('blur', finishEdit);
-        input.addEventListener('keydown', (ke) => {
-          if (ke.key === 'Enter') finishEdit();
-          if (ke.key === 'Escape') if (input.parentNode) document.body.removeChild(input);
-        });
-      }
-    }
-    hideContextMenu();
-  });
-
-  const ctxToggleMode = contextMenu.querySelector('#ctx-toggle-mode');
-  if (ctxToggleMode) {
-    ctxToggleMode.addEventListener('click', () => {
-      if (ctxTargetId) {
-        const node = nodes.find(n => n.id === ctxTargetId);
-        if (node && node.isLatent !== false && !node.isText) {
-          node.type = node.type === 'formative' ? 'reflective' : 'formative';
-          render();
-          pushHistory();
-        }
-      }
-      hideContextMenu();
-    });
   }
 
   window.addEventListener('click', hideContextMenu);
 
   let contextMenuMousePos = null;
+  let ctxTargetId = null;
+
+  function hasClipboardData() {
+    let payload = window.__statsem_clipboard;
+    if (!payload) {
+      try {
+        const stored = localStorage.getItem('statsem_model_clipboard');
+        if (stored) payload = JSON.parse(stored);
+      } catch (e) {}
+    }
+    return !!(payload && payload.nodes && payload.nodes.length > 0);
+  }
+
+  function renderContextMenuItems(items) {
+    contextMenu.innerHTML = '';
+    items.forEach(item => {
+      if (item.divider) {
+        const div = document.createElement('div');
+        div.className = 'canvas-ctx-divider';
+        contextMenu.appendChild(div);
+        return;
+      }
+      const el = document.createElement('div');
+      el.className = `canvas-ctx-item ${item.danger ? 'canvas-ctx-item--danger' : ''} ${item.disabled ? 'canvas-ctx-item--disabled' : ''}`;
+      if (item.id) el.id = item.id;
+      if (item.disabled) {
+        el.setAttribute('aria-disabled', 'true');
+        el.style.opacity = '0.35';
+        el.style.cursor = 'not-allowed';
+        el.style.pointerEvents = 'none';
+      }
+
+      const icon = document.createElement('span');
+      icon.className = 'material-symbols-outlined';
+      icon.textContent = item.icon;
+      el.appendChild(icon);
+
+      const label = document.createElement('span');
+      label.textContent = item.label;
+      label.style.flex = '1';
+      el.appendChild(label);
+
+      if (item.shortcut) {
+        const sc = document.createElement('span');
+        sc.className = 'canvas-ctx-shortcut';
+        sc.textContent = item.shortcut;
+        el.appendChild(sc);
+      }
+
+      if (!item.disabled) {
+        el.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          hideContextMenu();
+          if (item.action) item.action();
+        });
+      }
+
+      contextMenu.appendChild(el);
+    });
+  }
+
+  function positionContextMenu(clientX, clientY) {
+    contextMenu.style.display = 'block';
+    contextMenu.style.visibility = 'hidden';
+    const menuRect = contextMenu.getBoundingClientRect();
+    let x = clientX;
+    let y = clientY;
+    if (x + menuRect.width > window.innerWidth - 10) {
+      x = window.innerWidth - menuRect.width - 10;
+    }
+    if (y + menuRect.height > window.innerHeight - 10) {
+      y = window.innerHeight - menuRect.height - 10;
+    }
+    contextMenu.style.left = `${Math.max(10, x)}px`;
+    contextMenu.style.top = `${Math.max(10, y)}px`;
+    contextMenu.style.visibility = 'visible';
+  }
 
   function showContextMenu(e, id) {
     e.preventDefault();
@@ -2670,87 +3074,186 @@ export function initModelCanvas() {
     draggingNode = null;
     isMarquee = false;
     ctxTargetId = id;
+
     const pt = svg.createSVGPoint();
     pt.x = e.clientX;
     pt.y = e.clientY;
     contextMenuMousePos = pt.matrixTransform(zoomLayer.getScreenCTM().inverse());
-    
-    // Select the item
-    if (!e.shiftKey && !selectedIds.has(id)) {
-      clearSelection();
-    }
-    selectedIds.add(id);
-    render();
-    
-    contextMenu.style.display = 'block';
-    
-    // Check if it's an edge (no duplicate or rename)
-    const isEdge = edges.some(edge => edge.id === id);
-    const targetNode = nodes.find(n => n.id === id);
-    const isLatent = !isEdge && targetNode && targetNode.isLatent !== false && !targetNode.isText;
 
-    contextMenu.querySelector('#ctx-duplicate').style.display = isEdge ? 'none' : 'flex';
-    contextMenu.querySelector('#ctx-rename').style.display = isEdge ? 'none' : 'flex';
-
-    if (ctxToggleMode) {
-      if (isLatent) {
-        ctxToggleMode.style.display = 'flex';
-        const currentMode = targetNode.type === 'formative' ? 'Formative' : 'Reflective';
-        const nextMode = targetNode.type === 'formative' ? 'Reflective' : 'Formative';
-        ctxToggleMode.innerHTML = `<span class="material-symbols-outlined" style="font-size: 16px;">swap_horiz</span> Make ${nextMode} <span style="font-size:10px; opacity:0.6; margin-left:auto;">(${currentMode})</span>`;
-      } else {
-        ctxToggleMode.style.display = 'none';
+    if (id) {
+      if (!e.shiftKey && !selectedIds.has(id)) {
+        clearSelection();
       }
+      selectedIds.add(id);
+      render();
     }
-    
-    const ctxCopy = contextMenu.querySelector('#ctx-copy');
-    const ctxPaste = contextMenu.querySelector('#ctx-paste');
-    if (ctxCopy) ctxCopy.style.display = 'flex';
-    if (ctxPaste) ctxPaste.style.display = 'flex';
 
-    // Position menu
-    let x = e.clientX;
-    let y = e.clientY;
-    if (x + 120 > window.innerWidth) x -= 120;
-    if (y + 100 > window.innerHeight) y -= 100;
-    contextMenu.style.left = `${x}px`;
-    contextMenu.style.top = `${y}px`;
+    const isEdge = edges.some(edge => edge.id === id);
+    const isIndEdge = id && String(id).startsWith('edge_ind_');
+    const targetNode = nodes.find(n => n.id === id);
+    const isLatent = !isEdge && !isIndEdge && targetNode && targetNode.isLatent !== false && !targetNode.isText;
+    const isIndicator = !isEdge && !isIndEdge && targetNode && !targetNode.isLatent && !targetNode.isText;
+
+    const canUndo = historyIndex > 0;
+    const canRedo = historyIndex < history.length - 1;
+    const hasClipboard = hasClipboardData();
+    const hasCanvasElements = nodes.length > 0;
+    const hasSelectable = nodes.length > 0 || edges.length > 0;
+
+    let items = [];
+
+    if (!id || id === 'canvas') {
+      // ─── Empty Canvas Menu ───
+      items = [
+        { id: 'ctx-undo', label: 'Undo', icon: 'undo', shortcut: '⌘Z', disabled: !canUndo, action: () => undo() },
+        { id: 'ctx-redo', label: 'Redo', icon: 'redo', shortcut: '⌘⇧Z', disabled: !canRedo, action: () => redo() },
+        { divider: true },
+        { id: 'ctx-new-latent', label: 'New Latent Variable', icon: 'add_circle', shortcut: 'O', action: () => createAndEditNewLatentNode(contextMenuMousePos?.x, contextMenuMousePos?.y) },
+        { id: 'ctx-paste', label: 'Paste', icon: 'content_paste', shortcut: '⌘V', disabled: !hasClipboard, action: () => pasteClipboard() },
+        { divider: true },
+        { id: 'ctx-select-all', label: 'Select All', icon: 'select_all', shortcut: '⌘A', disabled: !hasSelectable, action: () => {
+            selectedIds.clear();
+            nodes.forEach(n => {
+              if (n.parentId) {
+                const parent = nodes.find(p => p.id === n.parentId);
+                if (parent && parent.indicatorsHidden) return;
+              }
+              selectedIds.add(n.id);
+            });
+            edges.forEach(ed => selectedIds.add(ed.id));
+            render();
+          }
+        },
+        { id: 'ctx-clear-all', label: 'Clear All', icon: 'delete_sweep', danger: true, disabled: !hasCanvasElements, action: () => {
+            if (window._customClearCanvasHandler) {
+              window._customClearCanvasHandler();
+            } else if (confirm('Are you sure you want to clear the entire canvas?')) {
+              nodes = [];
+              edges = [];
+              selectedIds.clear();
+              if (emptyHint) emptyHint.style.display = 'block';
+              render();
+              pushHistory();
+              window.dispatchEvent(new CustomEvent('canvas-changed'));
+            }
+          }
+        },
+        { divider: true },
+        { id: 'ctx-fit', label: 'Fit Screen', icon: 'fit_screen', disabled: !hasCanvasElements, action: () => fitToScreen() },
+        { id: 'ctx-export', label: 'Export as Image', icon: 'image', disabled: !hasCanvasElements, action: () => exportCanvasAsImage() },
+        { divider: true },
+        { id: 'ctx-snap', label: isSnapping ? 'Disable Snap to Grid' : 'Enable Snap to Grid', icon: isSnapping ? 'grid_off' : 'grid_on', action: () => toggleSnapToGrid() },
+        { id: 'ctx-reset-styles', label: 'Reset Default Styles', icon: 'restart_alt', disabled: !hasCanvasElements, action: () => {
+            if (window._customResetStylesHandler) {
+              window._customResetStylesHandler();
+            } else {
+              resetModelStyles();
+            }
+          }
+        }
+      ];
+    } else if (isLatent) {
+      // ─── Latent Variable Menu ───
+      const isReflective = targetNode.type !== 'formative';
+      const areIndicatorsHidden = !!targetNode.indicatorsHidden;
+      const childInds = nodes.filter(n => n.parentId === targetNode.id && !n.isLatent);
+      const hasIndicators = childInds.length > 0;
+
+      items = [
+        { id: 'ctx-copy', label: 'Copy', icon: 'content_copy', shortcut: '⌘C', action: () => copySelected() },
+        { id: 'ctx-paste', label: 'Paste', icon: 'content_paste', shortcut: '⌘V', disabled: !hasClipboard, action: () => pasteClipboard() },
+        { id: 'ctx-duplicate', label: 'Duplicate', icon: 'control_point_duplicate', shortcut: '⌘D', action: () => duplicateNode(targetNode) },
+        { divider: true },
+        { id: 'ctx-rename', label: 'Rename', icon: 'edit', action: () => startInlineNodeRename(targetNode) },
+        { divider: true },
+        { id: 'ctx-mode', label: isReflective ? 'Make Formative' : 'Make Reflexive', icon: 'swap_horiz', action: () => {
+            targetNode.type = isReflective ? 'formative' : 'reflective';
+            render();
+            pushHistory();
+          }
+        },
+        { divider: true },
+        { id: 'ctx-hide-ind', label: areIndicatorsHidden ? 'Show Indicators' : 'Hide Indicators', icon: areIndicatorsHidden ? 'visibility' : 'visibility_off', disabled: !hasIndicators, action: () => {
+            targetNode.indicatorsHidden = !targetNode.indicatorsHidden;
+            if (targetNode.indicatorsHidden) {
+              // Deselect child indicators so selection state isn't dirty
+              childInds.forEach(c => {
+                selectedIds.delete(c.id);
+                selectedIds.delete(`edge_ind_${c.id}`);
+              });
+            }
+            render();
+            pushHistory();
+            window.dispatchEvent(new CustomEvent('canvas-changed'));
+          }
+        },
+        { divider: true },
+        { id: 'ctx-align-left', label: 'Align Indicators Left', icon: 'align_horizontal_left', disabled: !hasIndicators, action: () => alignIndicators('left', targetNode.id) },
+        { id: 'ctx-align-right', label: 'Align Indicators Right', icon: 'align_horizontal_right', disabled: !hasIndicators, action: () => alignIndicators('right', targetNode.id) },
+        { id: 'ctx-align-top', label: 'Align Indicators Top', icon: 'align_vertical_top', disabled: !hasIndicators, action: () => alignIndicators('top', targetNode.id) },
+        { id: 'ctx-align-bottom', label: 'Align Indicators Bottom', icon: 'align_vertical_bottom', disabled: !hasIndicators, action: () => alignIndicators('bottom', targetNode.id) },
+        { divider: true },
+        { id: 'ctx-delete', label: 'Delete', icon: 'delete', danger: true, shortcut: 'Del', action: () => deleteSelected() }
+      ];
+    } else if (isIndicator) {
+      // ─── Indicator Node Menu ───
+      items = [
+        { id: 'ctx-copy', label: 'Copy', icon: 'content_copy', shortcut: '⌘C', action: () => copySelected() },
+        { id: 'ctx-paste', label: 'Paste', icon: 'content_paste', shortcut: '⌘V', disabled: !hasClipboard, action: () => pasteClipboard() },
+        { id: 'ctx-duplicate', label: 'Duplicate', icon: 'control_point_duplicate', shortcut: '⌘D', action: () => duplicateNode(targetNode) },
+        { divider: true },
+        { id: 'ctx-rename', label: 'Rename', icon: 'edit', action: () => startInlineNodeRename(targetNode) },
+        { divider: true },
+        { id: 'ctx-delete', label: 'Delete', icon: 'delete', danger: true, shortcut: 'Del', action: () => deleteSelected() }
+      ];
+    } else if (isIndEdge) {
+      // ─── Indicator Arrow Menu ───
+      const indId = String(id).replace('edge_ind_', '');
+      const indNode = nodes.find(n => n.id === indId);
+      const hasWaypoints = !!(indNode && indNode.edgeWaypoints && indNode.edgeWaypoints.length > 0);
+      items = [
+        { id: 'ctx-reset-bend', label: 'Reset Arrow Bend', icon: 'restart_alt', danger: true, disabled: !hasWaypoints, action: () => {
+            if (indNode) {
+              indNode.edgeWaypoints = [];
+              render();
+              pushHistory();
+            }
+          }
+        }
+      ];
+    } else if (isEdge) {
+      // ─── Structural Edge Menu ───
+      items = [
+        { id: 'ctx-delete-edge', label: 'Delete Connection', icon: 'delete', danger: true, shortcut: 'Del', action: () => deleteSelected() }
+      ];
+    } else {
+      // General node fallback (e.g. text notes)
+      items = [
+        { id: 'ctx-copy', label: 'Copy', icon: 'content_copy', shortcut: '⌘C', action: () => copySelected() },
+        { id: 'ctx-paste', label: 'Paste', icon: 'content_paste', shortcut: '⌘V', disabled: !hasClipboard, action: () => pasteClipboard() },
+        { id: 'ctx-duplicate', label: 'Duplicate', icon: 'control_point_duplicate', shortcut: '⌘D', action: () => duplicateNode(targetNode) },
+        { divider: true },
+        { id: 'ctx-rename', label: 'Rename', icon: 'edit', action: () => startInlineNodeRename(targetNode) },
+        { divider: true },
+        { id: 'ctx-delete', label: 'Delete', icon: 'delete', danger: true, shortcut: 'Del', action: () => deleteSelected() }
+      ];
+    }
+
+    renderContextMenuItems(items);
+    positionContextMenu(e.clientX, e.clientY);
   }
 
   svg.addEventListener('contextmenu', (e) => {
-    draggingNode = null;
-    isMarquee = false;
-    const pt = svg.createSVGPoint();
-    pt.x = e.clientX;
-    pt.y = e.clientY;
-    contextMenuMousePos = pt.matrixTransform(zoomLayer.getScreenCTM().inverse());
-
-    if (e.target === svg || e.target === bgRect) {
-      e.preventDefault();
-      ctxTargetId = null;
-      contextMenu.style.display = 'block';
-      const ctxCopy = contextMenu.querySelector('#ctx-copy');
-      const ctxPaste = contextMenu.querySelector('#ctx-paste');
-      const ctxDuplicate = contextMenu.querySelector('#ctx-duplicate');
-      const ctxRename = contextMenu.querySelector('#ctx-rename');
-      const ctxToggleMode = contextMenu.querySelector('#ctx-toggle-mode');
-      const ctxDelete = contextMenu.querySelector('#ctx-delete');
-
-      if (ctxCopy) ctxCopy.style.display = selectedIds.size > 0 ? 'flex' : 'none';
-      if (ctxPaste) ctxPaste.style.display = 'flex';
-      if (ctxDuplicate) ctxDuplicate.style.display = 'none';
-      if (ctxRename) ctxRename.style.display = 'none';
-      if (ctxToggleMode) ctxToggleMode.style.display = 'none';
-      if (ctxDelete) ctxDelete.style.display = selectedIds.size > 0 ? 'flex' : 'none';
-
-      let x = e.clientX;
-      let y = e.clientY;
-      if (x + 120 > window.innerWidth) x -= 120;
-      if (y + 100 > window.innerHeight) y -= 100;
-      contextMenu.style.left = `${x}px`;
-      contextMenu.style.top = `${y}px`;
-    }
+    e.preventDefault();
+    showContextMenu(e, null);
   });
+  if (emptyHint) {
+    emptyHint.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showContextMenu(e, null);
+    });
+  }
 
   function copySelected() {
     if (selectedIds.size === 0) return;
@@ -2953,6 +3456,15 @@ export function initModelCanvas() {
 
   function deleteSelected() {
     if (selectedIds.size === 0) return;
+
+    // Reset bent indicator arrows if selected
+    nodes.forEach(n => {
+      if (selectedIds.has(`edge_ind_${n.id}`)) {
+        n.edgeWaypoints = [];
+        selectedIds.delete(`edge_ind_${n.id}`);
+      }
+    });
+
     const selectedEdges = edges.filter(e => selectedIds.has(e.id));
     const nodesToDelete = new Set(selectedIds);
     
@@ -3014,11 +3526,23 @@ export function initModelCanvas() {
       } else if (e.key.toLowerCase() === 'e') {
         setMode('erase');
         updateToolbarUI(document.querySelector('.canvas-toolbar .tb-btn[title*="Erase"]'));
+      } else if (e.key.toLowerCase() === 'o') {
+        createAndEditNewLatentNode();
       }
     }
 
     // Classic Undo & Redo shortcuts
     if (e.metaKey || e.ctrlKey) {
+      if (e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (selectedIds.size === 1) {
+          const id = Array.from(selectedIds)[0];
+          const node = nodes.find(n => n.id === id);
+          if (node) duplicateNode(node);
+        }
+        return;
+      }
       if (e.key.toLowerCase() === 'c') {
         e.preventDefault();
         e.stopPropagation();
@@ -3178,6 +3702,12 @@ export function initModelCanvas() {
   window.renderModelCanvas = render;
   window.clearModelCanvas = clearModelCanvas;
   window.resetModelStyles = resetModelStyles;
+  window.fitToScreen = fitToScreen;
+  window.toggleSnapToGrid = toggleSnapToGrid;
+  window.exportCanvasAsImage = exportCanvasAsImage;
+  window.createAndEditNewLatentNode = createAndEditNewLatentNode;
+  window.selectCanvasNodesByVarNames = selectCanvasNodesByVarNames;
+  window.startInlineNodeRename = startInlineNodeRename;
 
   try {
     if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined') {
@@ -3284,4 +3814,35 @@ export function canvasRedo() {
     window.canvasRedo();
   }
 }
+
+export function fitToScreen() {
+  if (typeof window !== 'undefined' && window.fitToScreen) {
+    window.fitToScreen();
+  }
+}
+
+export function exportCanvasAsImage() {
+  if (typeof window !== 'undefined' && window.exportCanvasAsImage) {
+    window.exportCanvasAsImage();
+  }
+}
+
+export function createAndEditNewLatentNode(x, y) {
+  if (typeof window !== 'undefined' && window.createAndEditNewLatentNode) {
+    return window.createAndEditNewLatentNode(x, y);
+  }
+}
+
+export function selectCanvasNodesByVarNames(varNames) {
+  if (typeof window !== 'undefined' && window.selectCanvasNodesByVarNames) {
+    window.selectCanvasNodesByVarNames(varNames);
+  }
+}
+
+if (import.meta.hot) {
+  import.meta.hot.accept(() => {
+    window.location.reload();
+  });
+}
+
 

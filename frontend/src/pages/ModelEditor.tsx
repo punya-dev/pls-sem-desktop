@@ -5,16 +5,13 @@ import { initModelCanvas, exportModelSpec, getModelCanvasState, loadModelCanvasS
 import { BootstrapModal } from '../components/BootstrapModal';
 import { AnalysisModal } from '../components/AnalysisModal';
 import { AdvancedResultPanels } from '../components/AdvancedResultPanels';
-import { RulesOfThumbDrawer } from '../components/RulesOfThumbDrawer';
-import { GlossaryModal } from '../components/GlossaryModal';
 import type { ParsedDataset } from '../utils/dataset-parser';
 import { parseDatasetFile, processData } from '../utils/dataset-parser';
 import { api, type ValidationResponse } from '../utils/api';
 
 import {
   Upload, Trash2, RotateCcw, AlertTriangle, History, Check,
-  FileText, FileSpreadsheet, Code, FileCheck, GitCompare, Copy, Download,
-  BookOpen, HelpCircle
+  FileText, FileSpreadsheet, Code, FileCheck, GitCompare, Copy, Download
 } from 'lucide-react';
 import AppSidebar from '../components/AppSidebar';
 import '../model-canvas.css';
@@ -206,8 +203,6 @@ const ModelEditor = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const calcDropdownRef = useRef<HTMLDivElement>(null);
   const autoSaveTimerRef = useRef<any>(null);
-  const [isRulesDrawerOpen, setIsRulesDrawerOpen] = useState(false);
-  const [isGlossaryModalOpen, setIsGlossaryModalOpen] = useState(false);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -232,8 +227,10 @@ const ModelEditor = () => {
   }, [isCalcMenuOpen, isDatasetMenuOpen]);
 
   useEffect(() => {
-    // Default to collapsed sidebar in canvas/results page to maximize space
-    useStore.getState().setSidebarCollapsed(true);
+    // Default to collapsed sidebar in canvas/results page to maximize space if not locked
+    if (!useStore.getState().settings.lockExpandedSidebar) {
+      useStore.getState().setSidebarCollapsed(true);
+    }
   }, []);
 
   const fixedFills = ['#334155', '#ffffff'];
@@ -518,6 +515,7 @@ const ModelEditor = () => {
   };
 
   const handleVariableClick = (event: React.MouseEvent, variableName: string) => {
+    let next: Set<string>;
     if (event.shiftKey && lastSelectedVar) {
       const allNames = visibleVariables.map(v => String(v.name));
       const idx1 = allNames.indexOf(lastSelectedVar);
@@ -526,22 +524,23 @@ const ModelEditor = () => {
         const start = Math.min(idx1, idx2);
         const end = Math.max(idx1, idx2);
         const range = allNames.slice(start, end + 1);
-        setSelectedVarNames(new Set(range));
+        next = new Set(range);
+        setSelectedVarNames(next);
+        (window as any).selectCanvasNodesByVarNames?.(Array.from(next));
         return;
       }
     }
     if (event.metaKey || event.ctrlKey) {
-      setSelectedVarNames(prev => {
-        const next = new Set(prev);
-        if (next.has(variableName)) next.delete(variableName);
-        else next.add(variableName);
-        return next;
-      });
+      next = new Set(selectedVarNames);
+      if (next.has(variableName)) next.delete(variableName);
+      else next.add(variableName);
       setLastSelectedVar(variableName);
     } else {
-      setSelectedVarNames(new Set([variableName]));
+      next = new Set([variableName]);
       setLastSelectedVar(variableName);
     }
+    setSelectedVarNames(next);
+    (window as any).selectCanvasNodesByVarNames?.(Array.from(next));
   };
 
   const handleVariableDragStart = (event: React.DragEvent<HTMLDivElement>, variableName: string) => {
@@ -1847,28 +1846,6 @@ const ModelEditor = () => {
           </div>
         )}
       </div>
-
-      {/* Rules of Thumb & Glossary Reference Buttons */}
-      <button
-        type="button"
-        className="subheader__btn"
-        onClick={() => setIsRulesDrawerOpen(true)}
-        title="Hair et al. (2018) Rules of Thumb Guidelines"
-        style={{ gap: 5, padding: '5px 10px', fontSize: 12, fontWeight: 500 }}
-      >
-        <BookOpen size={14} />
-        <span>Rules of Thumb</span>
-      </button>
-      <button
-        type="button"
-        className="subheader__btn"
-        onClick={() => setIsGlossaryModalOpen(true)}
-        title="PLS-SEM Advanced Glossary & Formula Definitions"
-        style={{ gap: 5, padding: '5px 10px', fontSize: 12, fontWeight: 500 }}
-      >
-        <HelpCircle size={14} />
-        <span>Glossary</span>
-      </button>
     </div>
   </div>
   {/* ═══ APP BODY ═══ */}
@@ -2173,7 +2150,15 @@ const ModelEditor = () => {
           <div className="tb-divider" />
 
           {/* Group 2: Latent, Moderation, Quadratic, Gaussian, Text */}
-          <div className="tb-btn" title="Latent variable (O)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx={12} cy={12} r={8} /></svg></div>
+          <div
+            className="tb-btn"
+            id="btn-add-latent"
+            title="Latent variable (O)"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <circle cx={12} cy={12} r={8} />
+            </svg>
+          </div>
           <div className="tb-btn" title="Moderation Effect (M)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx={12} cy={12} r={10} /><line x1={12} y1={8} x2={12} y2={16} /><line x1={8} y1={12} x2={16} y2={12} /></svg></div>
           <div className="tb-btn" title="Quadratic Effect (Q)"><span className="tb-btn--text">x²</span></div>
           <div className="tb-btn" title="Gaussian Copula"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M4 22h14a2 2 0 0 0 2-2V7.5L14.5 2H6a2 2 0 0 0-2 2v4" /><polyline points="14 2 14 8 20 8" /><path d="M2 15h10" /><path d="M6 11l-4 4 4 4" /></svg></div>
@@ -4207,16 +4192,6 @@ const ModelEditor = () => {
       setTimeout(() => setValidationSuccessToast(null), 3500);
     }}
     onClose={() => setIsAnalysisModalOpen(false)}
-  />
-
-  <RulesOfThumbDrawer
-    isOpen={isRulesDrawerOpen}
-    onClose={() => setIsRulesDrawerOpen(false)}
-  />
-
-  <GlossaryModal
-    isOpen={isGlossaryModalOpen}
-    onClose={() => setIsGlossaryModalOpen(false)}
   />
 
   {/* ─── Validation Error Modal ─── */}

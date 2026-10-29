@@ -12,6 +12,7 @@ export interface Workspace {
   archivedAt?: string;
   createdAt?: string;
   modifiedAt?: string;
+  isPinned?: boolean;
 }
 
 export interface Model {
@@ -43,6 +44,7 @@ export interface Study {
   lastModified: string;
   path: string;
   createdAt?: string;
+  isPinned?: boolean;
 }
 
 export interface Variable {
@@ -84,6 +86,7 @@ export interface ContextMenuItem {
   label: string;
   icon: string;
   danger?: boolean;
+  disabled?: boolean;
   action: () => void;
 }
 
@@ -100,6 +103,8 @@ export interface AppSettings {
   keyboardLayout: 'qwerty' | 'azerty' | 'qwertz';
   flipOrientation: boolean;
   accentColor: string;
+  sidebarPosition: 'left' | 'right';
+  lockExpandedSidebar: boolean;
 }
 
 export const LICENSE_INFO = {
@@ -199,12 +204,14 @@ interface AppState {
   deleteDataset: (studyId: string, datasetId?: string) => void;
   renameWorkspace: (id: string, name: string) => void;
   duplicateWorkspace: (id: string) => void | Promise<void>;
+  togglePinWorkspace: (id: string) => void;
   setActiveWorkspace: (id: string) => void;
   addStudy: (study: Study) => void;
   syncWorkspaceStudies: (workspaceId: string, diskProjects: Array<{ path: string; name: string; fullPath: string }>) => void;
   removeStudy: (id: string) => void;
   renameStudy: (id: string, name: string) => void;
   duplicateStudy: (id: string) => void;
+  togglePinStudy: (id: string) => void;
   moveStudyToWorkspace: (studyId: string, targetWorkspaceId: string, targetWorkspacePath: string) => Promise<{ success: boolean; error?: string }>;
   copyStudyToWorkspace: (studyId: string, targetWorkspaceId: string, targetWorkspacePath: string, newStudyName: string) => Promise<{ success: boolean; newStudyId?: string; error?: string }>;
   setActiveStudy: (id: string) => void;
@@ -274,6 +281,8 @@ const INITIAL_SETTINGS: AppSettings = {
   keyboardLayout: 'qwerty',
   flipOrientation: false,
   accentColor: '#6B4EE6',
+  sidebarPosition: 'left',
+  lockExpandedSidebar: false,
 };
 
 export const useStore = create<AppState>()(
@@ -294,9 +303,17 @@ export const useStore = create<AppState>()(
         if (partial.theme) {
           nextTheme = partial.theme === 'dark' ? 'dark' : 'light';
         }
+        if (partial.sidebarPosition) {
+          document.documentElement.dataset.sidebarPosition = partial.sidebarPosition;
+        }
+        let nextSidebarCollapsed = state.isSidebarCollapsed;
+        if (partial.lockExpandedSidebar === true) {
+          nextSidebarCollapsed = false;
+        }
         return {
           settings: { ...state.settings, ...partial },
           theme: nextTheme,
+          isSidebarCollapsed: nextSidebarCollapsed,
         };
       }),
       isSettingsOpen: false,
@@ -307,8 +324,18 @@ export const useStore = create<AppState>()(
       isLicenseActive: true,
       setIsLicenseActive: (active) => set({ isLicenseActive: active }),
       isSidebarCollapsed: false,
-      toggleSidebar: () => set((state) => ({ isSidebarCollapsed: !state.isSidebarCollapsed })),
-      setSidebarCollapsed: (collapsed) => set({ isSidebarCollapsed: collapsed }),
+      toggleSidebar: () => set((state) => {
+        if (state.settings.lockExpandedSidebar) {
+          return { isSidebarCollapsed: false };
+        }
+        return { isSidebarCollapsed: !state.isSidebarCollapsed };
+      }),
+      setSidebarCollapsed: (collapsed) => set((state) => {
+        if (state.settings.lockExpandedSidebar && collapsed) {
+          return { isSidebarCollapsed: false };
+        }
+        return { isSidebarCollapsed: collapsed };
+      }),
 
       // Deletion Confirmation Modal
       deleteConfirmation: null,
@@ -770,6 +797,9 @@ export const useStore = create<AppState>()(
         workspaces: state.workspaces.map(workspace => workspace.id === id ? { ...workspace, name } : workspace),
         tabs: state.tabs.map(tab => tab.type === 'workspace' && tab.workspaceId === id ? { ...tab, title: name } : tab),
       })),
+      togglePinWorkspace: (id) => set((state) => ({
+        workspaces: state.workspaces.map(w => w.id === id ? { ...w, isPinned: !w.isPinned } : w),
+      })),
       setActiveWorkspace: (id) => set({ activeWorkspaceId: id }),
       addStudy: (study) => set((state) => {
         // If it's the exact same study by ID or non-empty path, update it in place
@@ -902,6 +932,9 @@ export const useStore = create<AppState>()(
           } : curr.datasetsByStudy,
         }));
       },
+      togglePinStudy: (id) => set((state) => ({
+        studies: state.studies.map(s => s.id === id ? { ...s, isPinned: !s.isPinned } : s),
+      })),
       moveStudyToWorkspace: async (studyId, targetWorkspaceId, targetWorkspacePath) => {
         const state = get();
         const study = state.studies.find((item) => item.id === studyId);

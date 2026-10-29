@@ -1465,8 +1465,18 @@ def create_model_from_snapshot_endpoint(req: CreateModelFromSnapshotRequest):
 
 @app.post("/project/save-model")
 def save_project_model(req: SaveModelRequest):
+    if not req.project_path:
+        return {"error": "Project path is required"}
+
     if not os.path.exists(req.project_path):
-        return {"error": "Project file does not exist"}
+        try:
+            parent = os.path.dirname(req.project_path)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            p_name = os.path.splitext(os.path.basename(req.project_path))[0] or "Study"
+            project_io.create_project(req.project_path, p_name)
+        except Exception as e:
+            return {"error": f"Project file does not exist and could not be created: {e}"}
 
     ds_id = req.spec.dataset_id if req.spec else None
     project_data = project_io.load_data(req.project_path, dataset_id=ds_id)
@@ -1491,8 +1501,8 @@ def save_project_model(req: SaveModelRequest):
 
 @app.get("/project/load-model")
 def load_project_model(path: str, model_id: Optional[str] = None):
-    if not os.path.exists(path):
-        return {"error": "Project file does not exist"}
+    if not path or not os.path.exists(path):
+        return {"spec": None, "diagram_layout": None, "updated_at": None, "model_key": model_id}
 
     model_data = project_io.load_model_spec(path, model_id=model_id)
     if model_data is None or model_data.get("spec") is None:

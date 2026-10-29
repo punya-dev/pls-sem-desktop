@@ -69,6 +69,7 @@ export function applyAccentColor(hexColor: string, isDark?: boolean) {
 
   const root = document.documentElement;
   root.style.setProperty('--color-accent', color);
+  root.style.setProperty('--color-primary', color);
   root.style.setProperty('--color-accent-hover', hoverColor);
   root.style.setProperty('--color-accent-subtle', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${subtleAlpha})`);
   root.style.setProperty('--color-accent-muted', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${mutedAlpha})`);

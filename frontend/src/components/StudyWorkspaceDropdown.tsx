@@ -72,8 +72,8 @@ export const StudyWorkspaceDropdown: React.FC<StudyWorkspaceDropdownProps> = ({
   }, [isOpen, onClose]);
 
   // Combine store workspaces and recent workspaces
-  const allWorkspaces: Array<{ id: string; name: string; path?: string }> = useMemo(() => {
-    const list: Array<{ id: string; name: string; path?: string }> = [...workspaces];
+  const allWorkspaces: Array<{ id: string; name: string; path?: string; isPinned?: boolean }> = useMemo(() => {
+    const list: Array<{ id: string; name: string; path?: string; isPinned?: boolean }> = [...workspaces];
     const existingPaths = new Set(workspaces.map((w) => (w.path || '').toLowerCase()));
 
     for (const recent of recentWorkspaces) {
@@ -99,11 +99,18 @@ export const StudyWorkspaceDropdown: React.FC<StudyWorkspaceDropdownProps> = ({
     }
 
     const query = searchQuery.toLowerCase().trim();
-    if (!query) return list;
+    const result = query
+      ? list.filter((w) =>
+          w.name.toLowerCase().includes(query) || (w.path && w.path.toLowerCase().includes(query))
+        )
+      : list;
 
-    return list.filter((w) =>
-      w.name.toLowerCase().includes(query) || (w.path && w.path.toLowerCase().includes(query))
-    );
+    return [...result].sort((a, b) => {
+      const aPinned = Boolean(a.isPinned);
+      const bPinned = Boolean(b.isPinned);
+      if (aPinned !== bPinned) return aPinned ? -1 : 1;
+      return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+    });
   }, [allWorkspaces, study, mode, searchQuery, workspaces]);
 
   if (!isOpen || !study || !position) return null;
@@ -242,11 +249,13 @@ export const StudyWorkspaceDropdown: React.FC<StudyWorkspaceDropdownProps> = ({
             <button
               key={ws.id}
               type="button"
-              className="tab-menu-dropdown__item"
+              className={`tab-menu-dropdown__item ${ws.isPinned ? 'tab-menu-dropdown__item--pinned' : ''}`}
               onClick={() => handleSelectWorkspace(ws)}
               title={ws.path || ws.name}
             >
-              <span className="material-symbols-outlined">folder</span>
+              <span className="material-symbols-outlined" style={ws.isPinned ? { color: 'var(--color-accent)' } : undefined}>
+                {ws.isPinned ? 'push_pin' : 'folder'}
+              </span>
               <span className="tab-menu-dropdown__item-title">{ws.name}</span>
               {ws.id === study.workspaceId && (
                 <span className="tab-menu-dropdown__badge">Current</span>

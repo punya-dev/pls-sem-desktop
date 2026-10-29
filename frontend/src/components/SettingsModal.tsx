@@ -13,7 +13,8 @@ export const SettingsModal: React.FC = () => {
     settingsActiveTab, 
     setSettingsActiveTab, 
     isLicenseActive, 
-    setIsLicenseActive 
+    setIsLicenseActive,
+    setSidebarCollapsed
   } = useStore();
   const [activeTab, setActiveTab] = useState<SettingsTab>(settingsActiveTab || 'about');
   const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'latest'>('idle');
@@ -452,6 +453,67 @@ export const SettingsModal: React.FC = () => {
                   <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-accent)' }}>
                     Active Accent Link
                   </span>
+                </div>
+              </div>
+
+              {/* ─── SIDEBAR & NAVIGATION ─── */}
+              <div className="settings-section">
+                <div className="settings-section__header">Sidebar &amp; Navigation</div>
+                <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '12px' }}>
+                  Customize the positioning and behavior of the main navigation sidebar
+                </div>
+
+                <div className="settings-row" style={{ alignItems: 'flex-start', marginBottom: '16px' }}>
+                  <div className="settings-row__label">
+                    Sidebar Position
+                    <div className="settings-row__desc">Position the sidebar on the left or right side of the screen</div>
+                  </div>
+                  <div className="settings-theme-grid" style={{ gridTemplateColumns: 'repeat(2, 100px)', gap: '8px' }}>
+                    {[
+                      { id: 'left', label: 'Left', icon: 'dock_to_left' },
+                      { id: 'right', label: 'Right', icon: 'dock_to_right' },
+                    ].map((pos) => {
+                      const isActive = (settings.sidebarPosition || 'left') === pos.id;
+                      return (
+                        <button
+                          key={pos.id}
+                          type="button"
+                          className={`settings-theme-btn ${isActive ? 'settings-theme-btn--active' : ''}`}
+                          onClick={() => {
+                            updateSettings({ sidebarPosition: pos.id as AppSettings['sidebarPosition'] });
+                            document.documentElement.dataset.sidebarPosition = pos.id;
+                          }}
+                        >
+                          <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>
+                            {pos.icon}
+                          </span>
+                          <span>{pos.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="settings-row">
+                  <div className="settings-row__label">
+                    Lock Expanded Sidebar
+                    <div className="settings-row__desc">Keep the sidebar permanently open and prevent automatic collapsing</div>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={Boolean(settings.lockExpandedSidebar)}
+                    className={`settings-toggle ${settings.lockExpandedSidebar ? 'settings-toggle--on' : ''}`}
+                    onClick={() => {
+                      const nextLocked = !settings.lockExpandedSidebar;
+                      updateSettings({ lockExpandedSidebar: nextLocked });
+                      if (nextLocked) {
+                        setSidebarCollapsed(false);
+                      }
+                    }}
+                  >
+                    <span className="settings-toggle__thumb" />
+                  </button>
                 </div>
               </div>
 
