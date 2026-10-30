@@ -15,6 +15,13 @@ export function initModelCanvas() {
   const svg = document.getElementById('model-svg');
   if (!svg) return;
 
+  if (window.__canvasCleanup) {
+    try { window.__canvasCleanup(); } catch (e) {}
+  }
+  const ac = new AbortController();
+  const { signal } = ac;
+  window.__canvasCleanup = () => ac.abort();
+
 
   const zoomLayer = document.getElementById('zoom-layer');
   const nodesLayer = document.getElementById('nodes-layer');
@@ -645,7 +652,7 @@ export function initModelCanvas() {
     let screenCenterX = 0;
     let screenCenterY = 0;
 
-    if (textEl) {
+    if (textEl && textEl.getBoundingClientRect().width > 0) {
       const rect = textEl.getBoundingClientRect();
       screenCenterX = rect.left + rect.width / 2;
       screenCenterY = rect.top + rect.height / 2;
@@ -717,6 +724,10 @@ export function initModelCanvas() {
     input.focus();
     input.select();
 
+    input.addEventListener('mousedown', (e) => e.stopPropagation());
+    input.addEventListener('click', (e) => e.stopPropagation());
+    input.addEventListener('dblclick', (e) => e.stopPropagation());
+
     let finished = false;
     const finishEdit = () => {
       if (finished) return;
@@ -731,6 +742,13 @@ export function initModelCanvas() {
             const neededW = Math.max(64, Math.ceil(newVal.length * charW + 20));
             if (neededW > (node.width || 64)) {
               node.width = neededW;
+            }
+          } else if (node.isText) {
+            const charW = (node.fontSize ? Number(node.fontSize) * 0.65 : 9);
+            const neededW = Math.max(80, Math.ceil(newVal.length * charW + 24));
+            if (!node.rectBox) node.rectBox = { width: 100, height: 40 };
+            if (neededW > node.rectBox.width) {
+              node.rectBox.width = neededW;
             }
           }
           pushHistory();
@@ -1094,35 +1112,18 @@ export function initModelCanvas() {
       nodes.filter(n => selectedIds.has(n.id)).forEach(n => n.color = color);
       render();
     }
-  });
+  }, { signal });
 
   document.addEventListener('color-picker-closed', (e) => {
     const { id } = e.detail;
     if (id === 'picker-fill' || id === 'picker-border' || id === 'picker-text') {
       pushHistory();
+      window.dispatchEvent(new CustomEvent('canvas-changed'));
     }
-  });
+  }, { signal });
 
-  // Old event listeners removed due to React re-rendering. Now handled via global delegation.
-
-  // Alignment, Style, and Text Format Dropdowns
+  // Alignment, Style, and Text Format Dropdown Actions
   document.addEventListener('click', (e) => {
-    // Hide all menus first if we click outside a dropdown container
-    if (!e.target.closest('.tb-dropdown-container')) {
-      document.querySelectorAll('.tb-dropdown-menu.show').forEach(m => m.classList.remove('show'));
-    }
-
-    // Toggle specific menu
-    const btn = e.target.closest('.tb-dropdown-btn');
-    if (btn) {
-      const menu = btn.nextElementSibling;
-      const isShowing = menu.classList.contains('show');
-      document.querySelectorAll('.tb-dropdown-menu.show').forEach(m => m.classList.remove('show'));
-      if (!isShowing) {
-        menu.classList.add('show');
-      }
-    }
-
     // Handle item clicks globally
     const item = e.target.closest('.tb-dropdown-item, .tb-font-btn, [data-edge-action]');
     if (item) {
@@ -1136,49 +1137,75 @@ export function initModelCanvas() {
         else if (action === 'shape-circle') {
           nodes.filter(n => selectedIds.has(n.id) && !n.isText).forEach(n => n.shape = 'circle');
           render();
+          pushHistory();
+          window.dispatchEvent(new CustomEvent('canvas-changed'));
         } else if (action === 'shape-rect') {
           nodes.filter(n => selectedIds.has(n.id) && !n.isText).forEach(n => n.shape = 'rect');
           render();
+          pushHistory();
+          window.dispatchEvent(new CustomEvent('canvas-changed'));
         } else if (action === 'shape-hex') {
           nodes.filter(n => selectedIds.has(n.id) && !n.isText).forEach(n => n.shape = 'hexagon');
           render();
+          pushHistory();
+          window.dispatchEvent(new CustomEvent('canvas-changed'));
         } else if (action === 'shape-oct') {
           nodes.filter(n => selectedIds.has(n.id) && !n.isText).forEach(n => n.shape = 'octagon');
           render();
+          pushHistory();
+          window.dispatchEvent(new CustomEvent('canvas-changed'));
         }
         
         else if (action === 'text-bold') {
           nodes.filter(n => selectedIds.has(n.id)).forEach(n => n.bold = !n.bold);
           render();
+          pushHistory();
+          window.dispatchEvent(new CustomEvent('canvas-changed'));
         } else if (action === 'text-italic') {
           nodes.filter(n => selectedIds.has(n.id)).forEach(n => n.italic = !n.italic);
           render();
+          pushHistory();
+          window.dispatchEvent(new CustomEvent('canvas-changed'));
         } else if (action === 'text-underline') {
           nodes.filter(n => selectedIds.has(n.id)).forEach(n => n.underline = !n.underline);
           render();
+          pushHistory();
+          window.dispatchEvent(new CustomEvent('canvas-changed'));
         } else if (action === 'font-inc') {
           nodes.filter(n => selectedIds.has(n.id)).forEach(n => n.fontSize = (n.fontSize || 14) + 2);
           render();
+          pushHistory();
+          window.dispatchEvent(new CustomEvent('canvas-changed'));
         } else if (action === 'font-dec') {
           nodes.filter(n => selectedIds.has(n.id)).forEach(n => n.fontSize = Math.max(6, (n.fontSize || 14) - 2));
           render();
+          pushHistory();
+          window.dispatchEvent(new CustomEvent('canvas-changed'));
         } else if (action === 'text-increase') {
           nodes.filter(n => selectedIds.has(n.id)).forEach(n => n.fontSize = (n.fontSize || 14) + 2);
           render();
+          pushHistory();
+          window.dispatchEvent(new CustomEvent('canvas-changed'));
         } else if (action === 'text-decrease') {
           nodes.filter(n => selectedIds.has(n.id)).forEach(n => n.fontSize = Math.max(6, (n.fontSize || 14) - 2));
           render();
+          pushHistory();
+          window.dispatchEvent(new CustomEvent('canvas-changed'));
         } else if (action === 'text-inside') {
           nodes.filter(n => selectedIds.has(n.id) && !n.isText).forEach(n => {
             n.labelInside = n.labelInside === undefined ? true : !n.labelInside;
           });
           render();
+          pushHistory();
+          window.dispatchEvent(new CustomEvent('canvas-changed'));
         }
         
         // Edge styling
         else if (action.startsWith('arrowhead-')) {
           edges.filter(edge => selectedIds.has(edge.id)).forEach(edge => edge.arrowhead = action.replace('arrowhead-', ''));
           render();
+          pushHistory();
+          window.dispatchEvent(new CustomEvent('canvas-changed'));
         } else if (action.startsWith('line-')) {
           const style = action.replace('line-', '');
           edges.filter(edge => selectedIds.has(edge.id)).forEach(edge => {
@@ -1192,20 +1219,19 @@ export function initModelCanvas() {
             }
           });
           render();
+          pushHistory();
+          window.dispatchEvent(new CustomEvent('canvas-changed'));
         } else if (action.startsWith('weight-')) {
           edges.filter(edge => selectedIds.has(edge.id)).forEach(edge => edge.strokeWidth = parseFloat(action.replace('weight-', '')));
           render();
+          pushHistory();
+          window.dispatchEvent(new CustomEvent('canvas-changed'));
         }
       }
       // Update UI after any formatting action
       document.dispatchEvent(new CustomEvent('selectionChange'));
-      
-      if (!e.target.closest('input') && !e.target.closest('.tb-font-size') && !e.target.closest('select') && !e.target.closest('.tb-font-btn')) {
-        const menu = item.closest('.tb-dropdown-menu');
-        if(menu) menu.classList.remove('show');
-      }
     }
-  });
+  }, { signal });
 
   // Global change listener for inputs that might be re-rendered
   document.addEventListener('change', (e) => {
@@ -1214,18 +1240,51 @@ export function initModelCanvas() {
       if (!isNaN(size) && size > 0) {
         nodes.filter(n => selectedIds.has(n.id)).forEach(n => n.fontSize = size);
         render();
+        pushHistory();
+        window.dispatchEvent(new CustomEvent('canvas-changed'));
       }
     } else if (e.target.id === 'input-font-family') {
       const family = e.target.value;
       nodes.filter(n => selectedIds.has(n.id)).forEach(n => n.fontFamily = family);
       render();
+      pushHistory();
+      window.dispatchEvent(new CustomEvent('canvas-changed'));
     }
-  });
+  }, { signal });
 
   function alignIndicators(direction, targetParentId = null) {
-    const parentId = targetParentId || (selectedIds.size === 1 ? Array.from(selectedIds)[0] : null);
+    if (selectedIds.size > 1 && !targetParentId) {
+      // Multi-node alignment (aligns all selected nodes together)
+      const selNodes = nodes.filter(n => selectedIds.has(n.id));
+      if (selNodes.length > 1) {
+        if (direction === 'top') {
+          const minY = Math.min(...selNodes.map(n => n.y));
+          selNodes.forEach(n => n.y = minY);
+        } else if (direction === 'bottom') {
+          const maxY = Math.max(...selNodes.map(n => n.y));
+          selNodes.forEach(n => n.y = maxY);
+        } else if (direction === 'left') {
+          const minX = Math.min(...selNodes.map(n => n.x));
+          selNodes.forEach(n => n.x = minX);
+        } else if (direction === 'right') {
+          const maxX = Math.max(...selNodes.map(n => n.x));
+          selNodes.forEach(n => n.x = maxX);
+        }
+        render();
+        pushHistory();
+        window.dispatchEvent(new CustomEvent('canvas-changed'));
+        return;
+      }
+    }
+
+    let parentId = targetParentId || (selectedIds.size === 1 ? Array.from(selectedIds)[0] : null);
     if (!parentId) return;
-    const parent = nodes.find(n => n.id === parentId);
+    let parent = nodes.find(n => n.id === parentId);
+    if (!parent) return;
+    if (!parent.isLatent && parent.parentId) {
+      parentId = parent.parentId;
+      parent = nodes.find(n => n.id === parentId);
+    }
     if (!parent || !parent.isLatent) return;
     
     const indicators = nodes.filter(n => n.parentId === parentId && !n.isLatent);
@@ -1471,19 +1530,23 @@ export function initModelCanvas() {
     let shape = node.shape || (node.isLatent ? 'circle' : 'rect');
     let fill = node.fill;
     let stroke = node.stroke;
-    if (!fill || fill === '#334155' || fill === '#1e293b' || fill === '#1e1b4b' || fill === '#e2e8f0' || (typeof fill === 'string' && fill.includes('var(--canvas-latent-fill)'))) {
-      fill = defaultFill;
-    }
-    if (!stroke || stroke === '#1e293b' || stroke === '#475569' || stroke === '#94a3b8' || stroke === 'none' || (typeof stroke === 'string' && stroke.includes('var(--canvas-latent-stroke)'))) {
-      stroke = defaultStroke;
-    }
-    if (node.isLatent === false) {
+    if (node.isLatent) {
+      if (!fill || fill === '#334155' || fill === '#1e293b' || fill === '#1e1b4b' || fill === '#e2e8f0' || (typeof fill === 'string' && fill.includes('var(--canvas-latent-fill)'))) {
+        fill = defaultFill;
+      }
+      if (!stroke || stroke === '#1e293b' || stroke === '#475569' || stroke === '#94a3b8' || stroke === 'none' || (typeof stroke === 'string' && stroke.includes('var(--canvas-latent-stroke)'))) {
+        stroke = defaultStroke;
+      }
+    } else if (node.isLatent === false && !node.isText) {
       if (!node.fill || node.fill === '#fef08a' || node.fill === '#451a03' || (typeof node.fill === 'string' && node.fill.includes('var(--canvas-manifest-fill)'))) {
         fill = defaultFill;
       }
       if (!node.stroke || node.stroke === '#ca8a04' || node.stroke === '#b45309' || (typeof node.stroke === 'string' && node.stroke.includes('var(--canvas-manifest-stroke)'))) {
         stroke = defaultStroke;
       }
+    } else {
+      fill = node.fill || defaultFill;
+      stroke = node.stroke || defaultStroke;
     }
     let strokeW = '1.5';
     let el;
@@ -2449,6 +2512,9 @@ export function initModelCanvas() {
       const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
       g.setAttribute('transform', `translate(${node.x}, ${node.y})`);
       g.setAttribute('class', 'construct-node');
+      g.setAttribute('data-id', node.id);
+      g.setAttribute('pointer-events', 'all');
+      g.style.pointerEvents = 'all';
       g.style.cursor = mode === 'select' ? 'move' : (mode === 'connect' ? 'crosshair' : (mode === 'erase' ? 'pointer' : 'default'));
 
       const isSelected = selectedIds.has(node.id);
@@ -2712,6 +2778,8 @@ export function initModelCanvas() {
         
         // Background shape for text box
         const shapeEl = createNodeShape(node, rectBox.width, rectBox.height, node.fill || 'transparent', node.stroke || 'transparent', isSelected);
+        shapeEl.setAttribute('pointer-events', 'all');
+        shapeEl.style.pointerEvents = 'all';
         if (!node.stroke && !isSelected) shapeEl.setAttribute('stroke', 'transparent');
         g.appendChild(shapeEl);
 
@@ -2726,6 +2794,8 @@ export function initModelCanvas() {
         if (node.italic) text.setAttribute('font-style', 'italic');
         if (node.underline) text.setAttribute('text-decoration', 'underline');
         text.setAttribute('font-family', node.fontFamily || 'var(--font-sans)');
+        text.setAttribute('pointer-events', 'none');
+        text.style.pointerEvents = 'none';
         if (node._isRenaming) text.style.visibility = 'hidden';
         g.appendChild(text);
         
@@ -3023,7 +3093,10 @@ export function initModelCanvas() {
       g.addEventListener('contextmenu', (e) => showContextMenu(e, node.id));
       g.addEventListener('dblclick', (e) => {
         e.stopPropagation();
-        startInlineNodeRename(node);
+        e.preventDefault();
+        setTimeout(() => {
+          startInlineNodeRename(node);
+        }, 30);
       });
 
       nodesLayer.appendChild(g);

@@ -278,6 +278,19 @@ const ModelEditor = () => {
   const [activeBorder, setActiveBorder] = useState<string>('#cbd5e1');
   const [activeText, setActiveText] = useState<string>('#1e293b');
 
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handleClose = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target?.closest('.tb-dropdown-container')) {
+        setOpenDropdown(null);
+      }
+    };
+    window.addEventListener('click', handleClose);
+    return () => window.removeEventListener('click', handleClose);
+  }, []);
+
   const [autoSaveStatus, setAutoSaveStatus] = useState<'saved' | 'saving' | 'error' | null>('saved');
   const [autoSaveError, setAutoSaveError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -2355,11 +2368,22 @@ const ModelEditor = () => {
           <div className="tb-divider" id="formatting-divider" style={{display: 'none'}} />
           <div id="node-formatting-tools" style={{display: 'none', gap: '4px'}}>
           <div className="tb-dropdown-container" id="container-align">
-            <button className="tb-dropdown-btn" type="button" title="Alignment" id="btn-align">
+            <button
+              className={`tb-dropdown-btn ${openDropdown === 'align' ? 'active' : ''}`}
+              type="button"
+              title="Alignment"
+              id="btn-align"
+              onClick={(e) => { e.stopPropagation(); setOpenDropdown(prev => prev === 'align' ? null : 'align'); }}
+            >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><line x1={21} y1={6} x2={3} y2={6} /><line x1={15} y1={12} x2={3} y2={12} /><line x1={17} y1={18} x2={3} y2={18} /></svg>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><polyline points="6 9 12 15 18 9" /></svg>
             </button>
-            <div className="tb-dropdown-menu" id="menu-align">
+            <div
+              className={`tb-dropdown-menu ${openDropdown === 'align' ? 'show' : ''}`}
+              id="menu-align"
+              style={{ display: openDropdown === 'align' ? 'flex' : 'none' }}
+              onClick={() => setOpenDropdown(null)}
+            >
               <div className="tb-dropdown-item" data-action="align-top"><span className="material-symbols-outlined">align_vertical_top</span> Align Top</div>
               <div className="tb-dropdown-item" data-action="align-bottom"><span className="material-symbols-outlined">align_vertical_bottom</span> Align Bottom</div>
               <div className="tb-dropdown-item" data-action="align-left"><span className="material-symbols-outlined">align_horizontal_left</span> Align Left</div>
@@ -2367,11 +2391,22 @@ const ModelEditor = () => {
             </div>
           </div>
           <div className="tb-dropdown-container" id="container-style">
-            <button className="tb-dropdown-btn" type="button" title="Style" id="btn-style">
+            <button
+              className={`tb-dropdown-btn ${openDropdown === 'style' ? 'active' : ''}`}
+              type="button"
+              title="Style"
+              id="btn-style"
+              onClick={(e) => { e.stopPropagation(); setOpenDropdown(prev => prev === 'style' ? null : 'style'); }}
+            >
               <div className="tb-shape-preview" />
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><polyline points="6 9 12 15 18 9" /></svg>
             </button>
-            <div className="tb-dropdown-menu" id="menu-style">
+            <div
+              className={`tb-dropdown-menu ${openDropdown === 'style' ? 'show' : ''}`}
+              id="menu-style"
+              style={{ display: openDropdown === 'style' ? 'flex' : 'none' }}
+              onClick={() => setOpenDropdown(null)}
+            >
               <div className="tb-dropdown-item" data-action="shape-circle"><span className="material-symbols-outlined">radio_button_unchecked</span> Circle</div>
               <div className="tb-dropdown-item" data-action="shape-rect"><span className="material-symbols-outlined">crop_square</span> Rectangle</div>
               <div className="tb-dropdown-item" data-action="shape-hex"><span className="material-symbols-outlined">hexagon</span> Hexagon</div>
@@ -2379,11 +2414,21 @@ const ModelEditor = () => {
             </div>
           </div>
           <div className="tb-dropdown-container" id="container-colors">
-            <button className="tb-dropdown-btn" type="button" title="Color &amp; Stroke Styling" id="btn-colors">
+            <button
+              className={`tb-dropdown-btn ${openDropdown === 'colors' ? 'active' : ''}`}
+              type="button"
+              title="Color &amp; Stroke Styling"
+              id="btn-colors"
+              onClick={(e) => { e.stopPropagation(); setOpenDropdown(prev => prev === 'colors' ? null : 'colors'); }}
+            >
               <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>palette</span>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 14, height: 14}}><polyline points="6 9 12 15 18 9" /></svg>
             </button>
-            <div className="tb-dropdown-menu" id="menu-colors" style={{width: '240px', padding: '12px'}}>
+            <div
+              className={`tb-dropdown-menu ${openDropdown === 'colors' ? 'show' : ''}`}
+              id="menu-colors"
+              style={{ width: '240px', padding: '12px', display: openDropdown === 'colors' ? 'flex' : 'none' }}
+            >
               <div style={{marginBottom: '12px'}}>
                 <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', color: 'var(--color-text-hint)', marginBottom: '8px'}}>Fill Color</div>
                 <div style={{display: 'flex', gap: '8px', flexWrap: 'wrap'}}>
@@ -2392,6 +2437,7 @@ const ModelEditor = () => {
                       document.dispatchEvent(new CustomEvent('color-picker-input', { detail: { id: 'picker-fill', color } }));
                       document.dispatchEvent(new CustomEvent('color-picker-closed', { detail: { id: 'picker-fill', color } }));
                       setActiveFill(color);
+                      setOpenDropdown(null);
                     }} title={color}></button>
                   ))}
                   <button type="button" style={{width: '24px', height: '24px', borderRadius: '50%', background: '#f4f4f5', border: '1px dashed rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(0,0,0,0.5)', position: 'relative'}} title="Custom Color">
@@ -2414,6 +2460,7 @@ const ModelEditor = () => {
                       document.dispatchEvent(new CustomEvent('color-picker-input', { detail: { id: 'picker-border', color } }));
                       document.dispatchEvent(new CustomEvent('color-picker-closed', { detail: { id: 'picker-border', color } }));
                       setActiveBorder(color);
+                      setOpenDropdown(null);
                     }} title={color}></button>
                   ))}
                   <button type="button" style={{width: '24px', height: '24px', borderRadius: '50%', background: '#f4f4f5', border: '1px dashed rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(0,0,0,0.5)', position: 'relative'}} title="Custom Color">
@@ -2429,12 +2476,22 @@ const ModelEditor = () => {
           </div>
           
           <div className="tb-dropdown-container" id="container-text">
-            <button className="tb-dropdown-btn" type="button" title="Typography Settings" id="btn-text">
+            <button
+              className={`tb-dropdown-btn ${openDropdown === 'text' ? 'active' : ''}`}
+              type="button"
+              title="Typography Settings"
+              id="btn-text"
+              onClick={(e) => { e.stopPropagation(); setOpenDropdown(prev => prev === 'text' ? null : 'text'); }}
+            >
               <span style={{fontWeight: 600, fontSize: '13px', color: 'var(--color-text-primary)'}}>Aa</span>
               <span className="tb-font-size-label" style={{fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-text-hint)', marginLeft: '2px'}}>14</span>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 14, height: 14, marginLeft: '2px'}}><polyline points="6 9 12 15 18 9" /></svg>
             </button>
-            <div className="tb-dropdown-menu" id="menu-text" style={{width: '240px', padding: '12px'}}>
+            <div
+              className={`tb-dropdown-menu ${openDropdown === 'text' ? 'show' : ''}`}
+              id="menu-text"
+              style={{ width: '240px', padding: '12px', display: openDropdown === 'text' ? 'flex' : 'none' }}
+            >
               <div style={{marginBottom: '12px'}}>
                 <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', color: 'var(--color-text-hint)', marginBottom: '8px'}}>Font Family</div>
                 <select id="input-font-family" style={{width: '100%', background: '#f8fafc', border: '1px solid rgba(0,0,0,0.06)', borderRadius: '4px', padding: '4px 8px', fontSize: '11px', color: '#334155', outline: 'none'}}>
@@ -2471,6 +2528,7 @@ const ModelEditor = () => {
                       document.dispatchEvent(new CustomEvent('color-picker-input', { detail: { id: 'picker-text', color } }));
                       document.dispatchEvent(new CustomEvent('color-picker-closed', { detail: { id: 'picker-text', color } }));
                       setActiveText(color);
+                      setOpenDropdown(null);
                     }} title={color}></button>
                   ))}
                   <button type="button" style={{width: '20px', height: '20px', borderRadius: '50%', background: '#f4f4f5', border: '1px dashed rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(0,0,0,0.5)', cursor: 'pointer', position: 'relative'}} title="Custom Color">
@@ -2488,13 +2546,31 @@ const ModelEditor = () => {
           
           <div id="edge-formatting-tools" style={{display: 'none', gap: '4px'}}>
             <div className="tb-dropdown-container">
-              <button className="tb-dropdown-btn" type="button" title="Line Style">
+              <button
+                className={`tb-dropdown-btn ${openDropdown === 'line' ? 'active' : ''}`}
+                type="button"
+                title="Line Style"
+                id="btn-line-style"
+                onClick={(e) => { e.stopPropagation(); setOpenDropdown(prev => prev === 'line' ? null : 'line'); }}
+              >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 16, height: 16}}><path d="M5 12h14" /></svg>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 14, height: 14, marginLeft: '2px'}}><polyline points="6 9 12 15 18 9" /></svg>
               </button>
               
-              <div className="tb-dropdown-menu" style={{width: '120px', padding: '8px', borderRadius: '10px', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.12), 0 2px 6px rgba(15, 23, 42, 0.06)', border: '1px solid #e2e8f0', left: 0}}>
-                
+              <div
+                className={`tb-dropdown-menu ${openDropdown === 'line' ? 'show' : ''}`}
+                id="menu-line-style"
+                style={{
+                  width: '120px',
+                  padding: '8px',
+                  borderRadius: '10px',
+                  boxShadow: '0 8px 24px rgba(15, 23, 42, 0.12), 0 2px 6px rgba(15, 23, 42, 0.06)',
+                  border: '1px solid #e2e8f0',
+                  left: 0,
+                  display: openDropdown === 'line' ? 'flex' : 'none'
+                }}
+                onClick={() => setOpenDropdown(null)}
+              >
                 <div className="tb-dropdown-item" data-edge-action="line-solid" style={{display: 'flex', alignItems: 'center', justifyContent: 'center', height: '36px', borderRadius: '6px', marginBottom: '4px'}}>
                   <svg width="80" height="24" style={{flexShrink: 0}}><line x1="0" y1="12" x2="80" y2="12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="edge-stroke-preview" /></svg>
                 </div>
@@ -2510,18 +2586,35 @@ const ModelEditor = () => {
                 <div className="tb-dropdown-item" data-edge-action="line-curved" style={{display: 'flex', alignItems: 'center', justifyContent: 'center', height: '36px', borderRadius: '6px'}}>
                   <svg width="80" height="24" style={{flexShrink: 0}}><path d="M 0 16 Q 40 0 80 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="edge-stroke-preview" /></svg>
                 </div>
-
               </div>
             </div>
 
             <div className="tb-dropdown-container">
-              <button className="tb-dropdown-btn" type="button" title="Arrowhead Style">
+              <button
+                className={`tb-dropdown-btn ${openDropdown === 'arrowhead' ? 'active' : ''}`}
+                type="button"
+                title="Arrowhead Style"
+                id="btn-arrowhead-style"
+                onClick={(e) => { e.stopPropagation(); setOpenDropdown(prev => prev === 'arrowhead' ? null : 'arrowhead'); }}
+              >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 16, height: 16}}><path d="M5 12h14" /><path d="M15 16l4-4-4-4" /></svg>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 14, height: 14, marginLeft: '2px'}}><polyline points="6 9 12 15 18 9" /></svg>
               </button>
               
-              <div className="tb-dropdown-menu" style={{width: '120px', padding: '8px', borderRadius: '10px', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.12), 0 2px 6px rgba(15, 23, 42, 0.06)', border: '1px solid #e2e8f0', left: 0}}>
-
+              <div
+                className={`tb-dropdown-menu ${openDropdown === 'arrowhead' ? 'show' : ''}`}
+                id="menu-arrowhead-style"
+                style={{
+                  width: '120px',
+                  padding: '8px',
+                  borderRadius: '10px',
+                  boxShadow: '0 8px 24px rgba(15, 23, 42, 0.12), 0 2px 6px rgba(15, 23, 42, 0.06)',
+                  border: '1px solid #e2e8f0',
+                  left: 0,
+                  display: openDropdown === 'arrowhead' ? 'flex' : 'none'
+                }}
+                onClick={() => setOpenDropdown(null)}
+              >
                 <div className="tb-dropdown-item" data-edge-action="arrowhead-solid" style={{display: 'flex', alignItems: 'center', justifyContent: 'center', height: '36px', borderRadius: '6px', marginBottom: '4px'}}>
                   <svg width="80" height="24" style={{flexShrink: 0}}>
                     <line x1="0" y1="12" x2="68" y2="12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="edge-stroke-preview" />
@@ -2549,7 +2642,6 @@ const ModelEditor = () => {
                     <circle cx="74" cy="12" r="5" fill="currentColor" className="edge-fill-preview" />
                   </svg>
                 </div>
-
               </div>
             </div>
           </div>
