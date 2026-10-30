@@ -23,32 +23,32 @@ const Canvas = () => {
             <polygon points="0 0, 10 3.5, 0 7" fill="#64748b" />
           </marker>
           {/* User Defined Markers */}
-          <marker id="arrow-solid" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
-            <polygon points="1 2, 9 5, 1 8" fill="var(--color-text-primary)"/>
+          <marker id="arrow-solid" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+            <polygon points="0 1.5, 9 5, 0 8.5" fill="currentColor"/>
           </marker>
-          <marker id="arrow-solid-selected" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
-            <polygon points="1 2, 9 5, 1 8" fill="var(--color-accent)"/>
+          <marker id="arrow-solid-selected" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+            <polygon points="0 1.5, 9 5, 0 8.5" fill="var(--color-accent)"/>
           </marker>
           
-          <marker id="arrow-open" markerWidth="10" markerHeight="10" refX="7" refY="5" orient="auto">
-            <path d="M 2 2 L 8 5 L 2 8" fill="none" stroke="var(--color-text-primary)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          <marker id="arrow-open" markerWidth="10" markerHeight="10" refX="8.5" refY="5" orient="auto">
+            <path d="M 1 1.5 L 8.5 5 L 1 8.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
           </marker>
-          <marker id="arrow-open-selected" markerWidth="10" markerHeight="10" refX="7" refY="5" orient="auto">
-            <path d="M 2 2 L 8 5 L 2 8" fill="none" stroke="var(--color-accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-          </marker>
-
-          <marker id="arrow-diamond" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
-            <polygon points="5 1.5, 8.5 5, 5 8.5, 1.5 5" fill="var(--color-text-primary)"/>
-          </marker>
-          <marker id="arrow-diamond-selected" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
-            <polygon points="5 1.5, 8.5 5, 5 8.5, 1.5 5" fill="var(--color-accent)"/>
+          <marker id="arrow-open-selected" markerWidth="10" markerHeight="10" refX="8.5" refY="5" orient="auto">
+            <path d="M 1 1.5 L 8.5 5 L 1 8.5" fill="none" stroke="var(--color-accent)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
           </marker>
 
-          <marker id="arrow-circle" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
-            <circle cx="5" cy="5" r="3" fill="var(--color-text-primary)"/>
+          <marker id="arrow-diamond" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+            <polygon points="1 5, 5 1.8, 9 5, 5 8.2" fill="currentColor"/>
           </marker>
-          <marker id="arrow-circle-selected" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
-            <circle cx="5" cy="5" r="3" fill="var(--color-accent)"/>
+          <marker id="arrow-diamond-selected" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+            <polygon points="1 5, 5 1.8, 9 5, 5 8.2" fill="var(--color-accent)"/>
+          </marker>
+
+          <marker id="arrow-circle" markerWidth="10" markerHeight="10" refX="8.5" refY="5" orient="auto">
+            <circle cx="5" cy="5" r="3.5" fill="currentColor"/>
+          </marker>
+          <marker id="arrow-circle-selected" markerWidth="10" markerHeight="10" refX="8.5" refY="5" orient="auto">
+            <circle cx="5" cy="5" r="3.5" fill="var(--color-accent)"/>
           </marker>
         </defs>
         <rect id="bg-rect" x="-5000" y="-5000" width="10000" height="10000" fill="url(#dot-grid)" />

@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore, getStudyDatasets } from '../store';
-import { initModelCanvas, exportModelSpec, getModelCanvasState, loadModelCanvasState, setCanvasResults, renderModelCanvas, clearModelCanvas, resetModelStyles, setCanvasDatasetColumns, updateModeratingEffect, deleteModeratingEffect, getSelectedModeratingEffect } from '../utils/model-canvas';
+import { initModelCanvas, exportModelSpec, getModelCanvasState, loadModelCanvasState, setCanvasResults, renderModelCanvas, clearModelCanvas, resetModelStyles, setCanvasDatasetColumns, updateModeratingEffect, deleteModeratingEffect, getSelectedModeratingEffect, hasInvalidLatentVariables, getCanvasGridColors } from '../utils/model-canvas';
 import { BootstrapModal } from '../components/BootstrapModal';
 import { AnalysisModal } from '../components/AnalysisModal';
 import { AdvancedResultPanels } from '../components/AdvancedResultPanels';
@@ -157,6 +157,10 @@ const ModelEditor = () => {
     [datasetsByStudy, effectiveStudyId]
   );
 
+  const canvasGridColors = useMemo(() => {
+    return getCanvasGridColors(settings?.canvasBgColor);
+  }, [settings?.canvasBgColor, theme, settings?.theme]);
+
   useEffect(() => {
     renderModelCanvas();
   }, [theme, settings?.theme, settings?.darkVariant]);
@@ -266,17 +270,129 @@ const ModelEditor = () => {
     }
   }, []);
 
-  const fixedFills = ['#334155', '#ffffff'];
-  const fixedBorders = ['transparent', '#1e293b'];
-  const fixedTexts = ['#ffffff', '#1e293b'];
+  const [selectedNodeType, setSelectedNodeType] = useState<'latent' | 'indicator' | 'text'>('latent');
 
-  const [recentFills, setRecentFills] = useState<string[]>(['#fef08a']);
-  const [recentBorders, setRecentBorders] = useState<string[]>(['#ca8a04']);
-  const [recentTextColors, setRecentTextColors] = useState<string[]>(['#ca8a04']);
+  const fixedFills = selectedNodeType === 'indicator'
+    ? ['transparent', '#fef08a', '#ffffff']
+    : ['transparent', '#334155', '#ffffff'];
+
+  const fixedBorders = selectedNodeType === 'indicator'
+    ? ['transparent', '#ca8a04', '#1e293b']
+    : ['transparent', '#1e293b', '#ffffff'];
+
+  const fixedTexts = selectedNodeType === 'indicator'
+    ? ['#422006', '#0f172a', '#ffffff']
+    : (selectedNodeType === 'latent' ? ['#ffffff', '#0f172a', '#334155'] : ['#0f172a', '#334155', '#ffffff']);
+
+  const [recentFills, setRecentFills] = useState<string[]>([]);
+  const [recentBorders, setRecentBorders] = useState<string[]>([]);
+  const [recentTextColors, setRecentTextColors] = useState<string[]>([]);
   
-  const [activeFill, setActiveFill] = useState<string>('#ffffff');
-  const [activeBorder, setActiveBorder] = useState<string>('#cbd5e1');
-  const [activeText, setActiveText] = useState<string>('#1e293b');
+  const [activeFill, setActiveFill] = useState<string>('#334155');
+  const [activeBorder, setActiveBorder] = useState<string>('#1e293b');
+  const [activeText, setActiveText] = useState<string>('#ffffff');
+
+  const [activeBorderWeight, setActiveBorderWeight] = useState<number>(1.5);
+  const [textboxAlign, setTextboxAlign] = useState<'left' | 'center' | 'right' | 'justify'>('center');
+  const [textboxValign, setTextboxValign] = useState<'top' | 'middle' | 'bottom'>('middle');
+  const [edgeLineStyle, setEdgeLineStyle] = useState<'solid' | 'dashed' | 'dotted' | 'curved'>('solid');
+  const [edgeArrowhead, setEdgeArrowhead] = useState<'solid' | 'open' | 'diamond' | 'circle'>('solid');
+  const [activeNodeShape, setActiveNodeShape] = useState<string>('circle');
+  const [edgeStrokeWidth, setEdgeStrokeWidth] = useState<number>(1.5);
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+
+  const fixedArrowColors = ['#0f172a', '#334155', '#ffffff'];
+  const [recentArrowColors, setRecentArrowColors] = useState<string[]>([]);
+  const [activeArrowColor, setActiveArrowColor] = useState<string>('#0f172a');
+
+  const isDefaultColor = (color: string) => {
+    if (!color) return true;
+    const defaults = [
+      'transparent',
+      '#334155', '#1e293b', '#ffffff', '#0f172a', '#64748b',
+      '#fef08a', '#ca8a04', '#422006', '#451a03', '#b45309'
+    ];
+    return defaults.some(d => d.toLowerCase() === color.toLowerCase());
+  };
+
+  const handleArrowColorSelect = (color: string) => {
+    setActiveArrowColor(color);
+    if (!isDefaultColor(color)) {
+      setRecentArrowColors(prev => [...prev.filter(c => c.toLowerCase() !== color.toLowerCase()), color].slice(-3));
+    }
+    document.dispatchEvent(new CustomEvent('edge-color-change', { detail: { color } }));
+  };
+
+  const handleFillColorSelect = (color: string) => {
+    setActiveFill(color);
+    if (!isDefaultColor(color)) {
+      setRecentFills(prev => [...prev.filter(c => c.toLowerCase() !== color.toLowerCase()), color].slice(-3));
+    }
+    document.dispatchEvent(new CustomEvent('color-picker-input', { detail: { id: 'picker-fill', color } }));
+    document.dispatchEvent(new CustomEvent('color-picker-closed', { detail: { id: 'picker-fill', color } }));
+  };
+
+  const handleBorderColorSelect = (color: string) => {
+    setActiveBorder(color);
+    if (!isDefaultColor(color)) {
+      setRecentBorders(prev => [...prev.filter(c => c.toLowerCase() !== color.toLowerCase()), color].slice(-3));
+    }
+    document.dispatchEvent(new CustomEvent('color-picker-input', { detail: { id: 'picker-border', color } }));
+    document.dispatchEvent(new CustomEvent('color-picker-closed', { detail: { id: 'picker-border', color } }));
+  };
+
+  const handleTextColorSelect = (color: string) => {
+    setActiveText(color);
+    if (!isDefaultColor(color)) {
+      setRecentTextColors(prev => [...prev.filter(c => c.toLowerCase() !== color.toLowerCase()), color].slice(-3));
+    }
+    document.dispatchEvent(new CustomEvent('color-picker-input', { detail: { id: 'picker-text', color } }));
+    document.dispatchEvent(new CustomEvent('color-picker-closed', { detail: { id: 'picker-text', color } }));
+  };
+
+  useEffect(() => {
+    const handleClose = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target?.closest('.tb-dropdown-container')) {
+        setOpenDropdown(null);
+      }
+    };
+    window.addEventListener('click', handleClose);
+    return () => window.removeEventListener('click', handleClose);
+  }, []);
+
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      if (typeof window !== 'undefined' && (window as any).getSelectedEdgeInfo) {
+        const info = (window as any).getSelectedEdgeInfo();
+        if (info) {
+          if (info.lineStyle) setEdgeLineStyle(info.lineStyle);
+          if (info.arrowhead) setEdgeArrowhead(info.arrowhead);
+          if (info.color) setActiveArrowColor(info.color);
+          if (info.strokeWidth !== undefined) setEdgeStrokeWidth(info.strokeWidth);
+        }
+      }
+      if (typeof window !== 'undefined' && (window as any).getSelectedNodeInfo) {
+        const nInfo = (window as any).getSelectedNodeInfo();
+        if (nInfo) {
+          setSelectedNodeType(nInfo.isText ? 'text' : (nInfo.isLatent ? 'latent' : 'indicator'));
+          if (nInfo.strokeWidth !== undefined) setActiveBorderWeight(nInfo.strokeWidth);
+          if (nInfo.shape) setActiveNodeShape(nInfo.shape);
+          if (nInfo.textAlign) setTextboxAlign(nInfo.textAlign);
+          if (nInfo.verticalAlign) setTextboxValign(nInfo.verticalAlign);
+          if (nInfo.fill) setActiveFill(nInfo.fill);
+          if (nInfo.stroke) setActiveBorder(nInfo.stroke);
+          if (nInfo.color) setActiveText(nInfo.color);
+        }
+      }
+    };
+    window.addEventListener('selectionChange', handleSelectionChange);
+    document.addEventListener('selectionChange', handleSelectionChange);
+    return () => {
+      window.removeEventListener('selectionChange', handleSelectionChange);
+      document.removeEventListener('selectionChange', handleSelectionChange);
+    };
+  }, []);
 
   const [autoSaveStatus, setAutoSaveStatus] = useState<'saved' | 'saving' | 'error' | null>('saved');
   const [autoSaveError, setAutoSaveError] = useState<string | null>(null);
@@ -687,6 +803,10 @@ const ModelEditor = () => {
 
   const performSilentRecalculate = async () => {
     if (!hasCalculatedOnceRef.current || isAutoCalculatingRef.current || !activeStudy?.path) return;
+    if (hasInvalidLatentVariables()) {
+      setIsModelOutdated(true);
+      return;
+    }
     try {
       isAutoCalculatingRef.current = true;
       const spec = exportModelSpec();
@@ -789,6 +909,10 @@ const ModelEditor = () => {
   const handleCalculate = async () => {
     if (!activeStudy?.path) {
       alert('Please open or select an active project study first.');
+      return;
+    }
+    if (hasInvalidLatentVariables()) {
+      alert('Cannot calculate model: all latent variables must be connected and have indicators assigned.');
       return;
     }
     try {
@@ -1564,24 +1688,22 @@ const ModelEditor = () => {
 
     const handleColorPickerClosed = (e: any) => {
       const { id, color } = e.detail;
+      if (!color) return;
       if (id === 'picker-fill') {
         setActiveFill(color);
-        setRecentFills(prev => {
-          if (['#334155', '#ffffff'].includes(color)) return prev;
-          return [...prev.filter(c => c !== color), color].slice(-3);
-        });
+        if (!isDefaultColor(color)) {
+          setRecentFills(prev => [...prev.filter(c => c.toLowerCase() !== color.toLowerCase()), color].slice(-3));
+        }
       } else if (id === 'picker-border') {
         setActiveBorder(color);
-        setRecentBorders(prev => {
-          if (['transparent', '#1e293b'].includes(color)) return prev;
-          return [...prev.filter(c => c !== color), color].slice(-3);
-        });
+        if (!isDefaultColor(color)) {
+          setRecentBorders(prev => [...prev.filter(c => c.toLowerCase() !== color.toLowerCase()), color].slice(-3));
+        }
       } else if (id === 'picker-text') {
         setActiveText(color);
-        setRecentTextColors(prev => {
-          if (['#ffffff', '#1e293b'].includes(color)) return prev;
-          return [...prev.filter(c => c !== color), color].slice(-1);
-        });
+        if (!isDefaultColor(color)) {
+          setRecentTextColors(prev => [...prev.filter(c => c.toLowerCase() !== color.toLowerCase()), color].slice(-3));
+        }
       }
     };
     
@@ -1623,9 +1745,20 @@ const ModelEditor = () => {
       }
     };
 
+    const handleModelStylesReset = () => {
+      setActiveFill('#ffffff');
+      setActiveBorder('#334155');
+      setActiveText('#0f172a');
+      setActiveArrowColor('#0f172a');
+      setActiveBorderWeight(1.5);
+      setEdgeLineStyle('solid');
+      setEdgeArrowhead('solid');
+    };
+
     window.addEventListener('moderation-selected', handleModSelected);
     window.addEventListener('selectionChange', handleSelectionChange);
     window.addEventListener('keydown', handleKeyDownMod);
+    window.addEventListener('model-styles-reset', handleModelStylesReset);
 
     return () => {
       clearTimeout(timer);
@@ -1635,6 +1768,7 @@ const ModelEditor = () => {
       window.removeEventListener('moderation-selected', handleModSelected);
       window.removeEventListener('selectionChange', handleSelectionChange);
       window.removeEventListener('keydown', handleKeyDownMod);
+      window.removeEventListener('model-styles-reset', handleModelStylesReset);
       setCanvasResults(null);
       loadModelCanvasState({ nodes: [], edges: [] });
     };
@@ -2295,6 +2429,7 @@ const ModelEditor = () => {
       {/* ─── Center Canvas Area ─── */}
       <main
         className="canvas-area"
+        style={{ backgroundColor: settings.canvasBgColor || undefined }}
         onDragEnter={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }}
         onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }}
         onDrop={handleCanvasDrop}
@@ -2334,209 +2469,7 @@ const ModelEditor = () => {
           <div className="tb-btn" title="Moderation Effect (M)" style={{ display: 'none' }}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx={12} cy={12} r={10} /><line x1={12} y1={8} x2={12} y2={16} /><line x1={8} y1={12} x2={16} y2={12} /></svg></div>
           <div className="tb-btn" title="Quadratic Effect (Q)"><span className="tb-btn--text">x²</span></div>
           <div className="tb-btn" title="Gaussian Copula"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M4 22h14a2 2 0 0 0 2-2V7.5L14.5 2H6a2 2 0 0 0-2 2v4" /><polyline points="14 2 14 8 20 8" /><path d="M2 15h10" /><path d="M6 11l-4 4 4 4" /></svg></div>
-          <div className="tb-btn" title="Text Note (T)" data-action="add-text-note"><span className="tb-btn--text">T</span></div>
-          
-          <div className="tb-divider" />
-          <div id="node-formatting-tools" style={{display: 'flex', gap: '4px'}}>
-          <div className="tb-dropdown-container">
-            <button className="tb-dropdown-btn" type="button" title="Alignment" id="btn-align">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><line x1={21} y1={6} x2={3} y2={6} /><line x1={15} y1={12} x2={3} y2={12} /><line x1={17} y1={18} x2={3} y2={18} /></svg>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><polyline points="6 9 12 15 18 9" /></svg>
-            </button>
-            <div className="tb-dropdown-menu" id="menu-align">
-              <div className="tb-dropdown-item" data-action="align-top"><span className="material-symbols-outlined">align_vertical_top</span> Align Top</div>
-              <div className="tb-dropdown-item" data-action="align-bottom"><span className="material-symbols-outlined">align_vertical_bottom</span> Align Bottom</div>
-              <div className="tb-dropdown-item" data-action="align-left"><span className="material-symbols-outlined">align_horizontal_left</span> Align Left</div>
-              <div className="tb-dropdown-item" data-action="align-right"><span className="material-symbols-outlined">align_horizontal_right</span> Align Right</div>
-            </div>
-          </div>
-          <div className="tb-dropdown-container">
-            <button className="tb-dropdown-btn" type="button" title="Style" id="btn-style">
-              <div className="tb-shape-preview" />
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><polyline points="6 9 12 15 18 9" /></svg>
-            </button>
-            <div className="tb-dropdown-menu" id="menu-style">
-              <div className="tb-dropdown-item" data-action="shape-circle"><span className="material-symbols-outlined">radio_button_unchecked</span> Circle</div>
-              <div className="tb-dropdown-item" data-action="shape-rect"><span className="material-symbols-outlined">crop_square</span> Rectangle</div>
-              <div className="tb-dropdown-item" data-action="shape-hex"><span className="material-symbols-outlined">hexagon</span> Hexagon</div>
-              <div className="tb-dropdown-item" data-action="shape-oct"><span className="material-symbols-outlined">stop_circle</span> Octagon</div>
-            </div>
-          </div>
-          <div className="tb-dropdown-container">
-            <button className="tb-dropdown-btn" type="button" title="Color &amp; Stroke Styling" id="btn-colors">
-              <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>palette</span>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 14, height: 14}}><polyline points="6 9 12 15 18 9" /></svg>
-            </button>
-            <div className="tb-dropdown-menu" id="menu-colors" style={{width: '240px', padding: '12px'}}>
-              <div style={{marginBottom: '12px'}}>
-                <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', color: 'var(--color-text-hint)', marginBottom: '8px'}}>Fill Color</div>
-                <div style={{display: 'flex', gap: '8px', flexWrap: 'wrap'}}>
-                  {[...fixedFills, ...recentFills].map((color, i) => (
-                    <button key={'fill'+i} type="button" style={{width: '24px', height: '24px', borderRadius: '50%', background: color === 'transparent' ? 'url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVQIW2NkYGD4z8DAwMgAI0AMDA4YAQc0D+oAAAAASUVORK5CYII=)' : color, border: activeFill === color ? '2px solid #4f46e5' : '1px solid rgba(0,0,0,0.1)', boxShadow: activeFill === color ? '0 0 0 2px rgba(79, 70, 229, 0.2)' : 'none'}} onClick={() => { 
-                      document.dispatchEvent(new CustomEvent('color-picker-input', { detail: { id: 'picker-fill', color } }));
-                      document.dispatchEvent(new CustomEvent('color-picker-closed', { detail: { id: 'picker-fill', color } }));
-                      setActiveFill(color);
-                    }} title={color}></button>
-                  ))}
-                  <button type="button" style={{width: '24px', height: '24px', borderRadius: '50%', background: '#f4f4f5', border: '1px dashed rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(0,0,0,0.5)', position: 'relative'}} title="Custom Color">
-                    <span style={{fontSize: '14px', fontWeight: 500}}>+</span>
-                    <input type="color" id="picker-fill" title="Fill Color" defaultValue="#f8fafc" style={{position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer'}} 
-                      onInput={(e: any) => document.dispatchEvent(new CustomEvent('color-picker-input', { detail: { id: 'picker-fill', color: e.target.value } }))}
-                      onChange={(e: any) => document.dispatchEvent(new CustomEvent('color-picker-closed', { detail: { id: 'picker-fill', color: e.target.value } }))}
-                    />
-                  </button>
-                </div>
-              </div>
-
-              <div className="tb-divider" style={{width: '100%', height: '1px', margin: '8px 0'}}></div>
-
-              <div>
-                <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', color: 'var(--color-text-hint)', marginBottom: '8px'}}>Border Color</div>
-                <div style={{display: 'flex', gap: '8px', flexWrap: 'wrap'}}>
-                  {[...fixedBorders, ...recentBorders].map((color, i) => (
-                    <button key={'border'+i} type="button" style={{width: '24px', height: '24px', borderRadius: '50%', background: color === 'transparent' ? 'url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVQIW2NkYGD4z8DAwMgAI0AMDA4YAQc0D+oAAAAASUVORK5CYII=)' : color, border: activeBorder === color ? '2px solid #4f46e5' : '1px solid rgba(0,0,0,0.1)', boxShadow: activeBorder === color ? '0 0 0 2px rgba(79, 70, 229, 0.2)' : 'none'}} onClick={() => { 
-                      document.dispatchEvent(new CustomEvent('color-picker-input', { detail: { id: 'picker-border', color } }));
-                      document.dispatchEvent(new CustomEvent('color-picker-closed', { detail: { id: 'picker-border', color } }));
-                      setActiveBorder(color);
-                    }} title={color}></button>
-                  ))}
-                  <button type="button" style={{width: '24px', height: '24px', borderRadius: '50%', background: '#f4f4f5', border: '1px dashed rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(0,0,0,0.5)', position: 'relative'}} title="Custom Color">
-                    <span style={{fontSize: '14px', fontWeight: 500}}>+</span>
-                    <input type="color" id="picker-border" title="Border Color" defaultValue="#cbd5e1" style={{position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer'}}
-                      onInput={(e: any) => document.dispatchEvent(new CustomEvent('color-picker-input', { detail: { id: 'picker-border', color: e.target.value } }))}
-                      onChange={(e: any) => document.dispatchEvent(new CustomEvent('color-picker-closed', { detail: { id: 'picker-border', color: e.target.value } }))}
-                    />
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-          
-          <div className="tb-dropdown-container">
-            <button className="tb-dropdown-btn" type="button" title="Typography Settings" id="btn-text">
-              <span style={{fontWeight: 600, fontSize: '13px', color: 'var(--color-text-primary)'}}>Aa</span>
-              <span className="tb-font-size-label" style={{fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-text-hint)', marginLeft: '2px'}}>14</span>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 14, height: 14, marginLeft: '2px'}}><polyline points="6 9 12 15 18 9" /></svg>
-            </button>
-            <div className="tb-dropdown-menu" id="menu-text" style={{width: '240px', padding: '12px'}}>
-              <div style={{marginBottom: '12px'}}>
-                <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', color: 'var(--color-text-hint)', marginBottom: '8px'}}>Font Family</div>
-                <select id="input-font-family" style={{width: '100%', background: '#f8fafc', border: '1px solid rgba(0,0,0,0.06)', borderRadius: '4px', padding: '4px 8px', fontSize: '11px', color: '#334155', outline: 'none'}}>
-                  <option value="Inter">Inter (Sans)</option>
-                  <option value="JetBrains Mono">JetBrains Mono</option>
-                  <option value="Roboto">Roboto</option>
-                  <option value="system-ui">System Default</option>
-                </select>
-              </div>
-
-              <div className="tb-divider" style={{width: '100%', height: '1px', margin: '6px 0'}}></div>
-              
-              <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px'}}>
-                <span style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', color: 'var(--color-text-hint)'}}>Font Size</span>
-                <div className="tb-font-size" style={{background: 'rgba(0,0,0,0.03)', borderRadius: '4px', border: '1px solid rgba(0,0,0,0.06)', padding: '2px', display: 'flex', alignItems: 'center'}}>
-                  <button className="tb-font-btn" data-action="font-dec" style={{width: '22px', height: '22px', border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: '2px'}}>−</button>
-                  <input type="number" className="tb-font-input" id="input-font-size" defaultValue={14} style={{display: 'none'}} />
-                  <span className="tb-font-size-label" style={{fontFamily: 'var(--font-mono)', fontSize: '12px', width: '32px', textAlign: 'center', fontWeight: 600}}>14px</span>
-                  <button className="tb-font-btn" data-action="font-inc" style={{width: '22px', height: '22px', border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: '2px'}}>+</button>
-                </div>
-              </div>
-              <div className="tb-divider" style={{width: '100%', height: '1px', margin: '6px 0'}}></div>
-              
-              <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px'}}>
-                <div style={{display: 'flex', background: 'rgba(0,0,0,0.03)', borderRadius: '4px', border: '1px solid rgba(0,0,0,0.06)', padding: '2px'}}>
-                  <button className="tb-font-btn" data-action="text-bold" style={{width: '26px', height: '26px', border: 'none', background: 'transparent', cursor: 'pointer', fontWeight: 700, borderRadius: '2px'}} title="Bold">B</button>
-                  <button className="tb-font-btn" data-action="text-italic" style={{width: '26px', height: '26px', border: 'none', background: 'transparent', cursor: 'pointer', fontStyle: 'italic', borderRadius: '2px'}} title="Italic">I</button>
-                  <button className="tb-font-btn" data-action="text-underline" style={{width: '26px', height: '26px', border: 'none', background: 'transparent', cursor: 'pointer', textDecoration: 'underline', borderRadius: '2px'}} title="Underline">U</button>
-                  <button className="tb-font-btn" data-action="text-inside" style={{width: '26px', height: '26px', border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: '2px', display: 'flex', alignItems: 'center', justifyContent: 'center'}} title="Move Inside/Outside"><span className="material-symbols-outlined" style={{fontSize: '16px'}}>vertical_align_center</span></button>
-                </div>
-                <div style={{display: 'flex', background: 'rgba(0,0,0,0.03)', borderRadius: '4px', border: '1px solid rgba(0,0,0,0.06)', padding: '4px', gap: '6px', alignItems: 'center'}}>
-                  {[...fixedTexts, ...recentTextColors].map((color, i) => (
-                    <button key={'text'+i} type="button" style={{width: '20px', height: '20px', borderRadius: '50%', background: color === 'transparent' ? 'url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVQIW2NkYGD4z8DAwMgAI0AMDA4YAQc0D+oAAAAASUVORK5CYII=)' : color, border: activeText === color ? '2px solid #4f46e5' : '1px solid rgba(0,0,0,0.1)', cursor: 'pointer', boxShadow: activeText === color ? '0 0 0 2px rgba(79, 70, 229, 0.2)' : 'none'}} onClick={() => { 
-                      document.dispatchEvent(new CustomEvent('color-picker-input', { detail: { id: 'picker-text', color } }));
-                      document.dispatchEvent(new CustomEvent('color-picker-closed', { detail: { id: 'picker-text', color } }));
-                      setActiveText(color);
-                    }} title={color}></button>
-                  ))}
-                  <button type="button" style={{width: '20px', height: '20px', borderRadius: '50%', background: '#f4f4f5', border: '1px dashed rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(0,0,0,0.5)', cursor: 'pointer', position: 'relative'}} title="Custom Color">
-                    <span style={{fontSize: '12px', fontWeight: 500}}>+</span>
-                    <input type="color" id="picker-text" title="Text Color" defaultValue="#1e293b" style={{position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer'}}
-                      onInput={(e: any) => document.dispatchEvent(new CustomEvent('color-picker-input', { detail: { id: 'picker-text', color: e.target.value } }))}
-                      onChange={(e: any) => document.dispatchEvent(new CustomEvent('color-picker-closed', { detail: { id: 'picker-text', color: e.target.value } }))}
-                    />
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-          </div>
-          
-          <div id="edge-formatting-tools" style={{display: 'none', gap: '4px'}}>
-            <div className="tb-dropdown-container">
-              <button className="tb-dropdown-btn" type="button" title="Line Style">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 16, height: 16}}><path d="M5 12h14" /></svg>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 14, height: 14, marginLeft: '2px'}}><polyline points="6 9 12 15 18 9" /></svg>
-              </button>
-              
-              <div className="tb-dropdown-menu" style={{width: '120px', padding: '8px', borderRadius: '10px', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.12), 0 2px 6px rgba(15, 23, 42, 0.06)', border: '1px solid #e2e8f0', left: 0}}>
-                
-                <div className="tb-dropdown-item" data-edge-action="line-solid" style={{display: 'flex', alignItems: 'center', justifyContent: 'center', height: '36px', borderRadius: '6px', marginBottom: '4px'}}>
-                  <svg width="80" height="24" style={{flexShrink: 0}}><line x1="0" y1="12" x2="80" y2="12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="edge-stroke-preview" /></svg>
-                </div>
-
-                <div className="tb-dropdown-item" data-edge-action="line-dashed" style={{display: 'flex', alignItems: 'center', justifyContent: 'center', height: '36px', borderRadius: '6px', marginBottom: '4px'}}>
-                  <svg width="80" height="24" style={{flexShrink: 0}}><line x1="0" y1="12" x2="80" y2="12" stroke="currentColor" strokeWidth="2" strokeDasharray="6,4" strokeLinecap="round" className="edge-stroke-preview" /></svg>
-                </div>
-
-                <div className="tb-dropdown-item" data-edge-action="line-dotted" style={{display: 'flex', alignItems: 'center', justifyContent: 'center', height: '36px', borderRadius: '6px', marginBottom: '4px'}}>
-                  <svg width="80" height="24" style={{flexShrink: 0}}><line x1="0" y1="12" x2="80" y2="12" stroke="currentColor" strokeWidth="2" strokeDasharray="2,5" strokeLinecap="round" className="edge-stroke-preview" /></svg>
-                </div>
-
-                <div className="tb-dropdown-item" data-edge-action="line-curved" style={{display: 'flex', alignItems: 'center', justifyContent: 'center', height: '36px', borderRadius: '6px'}}>
-                  <svg width="80" height="24" style={{flexShrink: 0}}><path d="M 0 16 Q 40 0 80 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="edge-stroke-preview" /></svg>
-                </div>
-
-              </div>
-            </div>
-
-            <div className="tb-dropdown-container">
-              <button className="tb-dropdown-btn" type="button" title="Arrowhead Style">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 16, height: 16}}><path d="M5 12h14" /><path d="M15 16l4-4-4-4" /></svg>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 14, height: 14, marginLeft: '2px'}}><polyline points="6 9 12 15 18 9" /></svg>
-              </button>
-              
-              <div className="tb-dropdown-menu" style={{width: '120px', padding: '8px', borderRadius: '10px', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.12), 0 2px 6px rgba(15, 23, 42, 0.06)', border: '1px solid #e2e8f0', left: 0}}>
-
-                <div className="tb-dropdown-item" data-edge-action="arrowhead-solid" style={{display: 'flex', alignItems: 'center', justifyContent: 'center', height: '36px', borderRadius: '6px', marginBottom: '4px'}}>
-                  <svg width="80" height="24" style={{flexShrink: 0}}>
-                    <line x1="0" y1="12" x2="68" y2="12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="edge-stroke-preview" />
-                    <polygon points="68,7 80,12 68,17" fill="currentColor" className="edge-fill-preview" />
-                  </svg>
-                </div>
-
-                <div className="tb-dropdown-item" data-edge-action="arrowhead-open" style={{display: 'flex', alignItems: 'center', justifyContent: 'center', height: '36px', borderRadius: '6px', marginBottom: '4px'}}>
-                  <svg width="80" height="24" style={{flexShrink: 0}}>
-                    <line x1="0" y1="12" x2="74" y2="12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="edge-stroke-preview" />
-                    <path d="M 68 7 L 78 12 L 68 17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="edge-stroke-preview" />
-                  </svg>
-                </div>
-
-                <div className="tb-dropdown-item" data-edge-action="arrowhead-diamond" style={{display: 'flex', alignItems: 'center', justifyContent: 'center', height: '36px', borderRadius: '6px', marginBottom: '4px'}}>
-                  <svg width="80" height="24" style={{flexShrink: 0}}>
-                    <line x1="0" y1="12" x2="66" y2="12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="edge-stroke-preview" />
-                    <polygon points="72,6 80,12 72,18 64,12" fill="currentColor" className="edge-fill-preview" />
-                  </svg>
-                </div>
-
-                <div className="tb-dropdown-item" data-edge-action="arrowhead-circle" style={{display: 'flex', alignItems: 'center', justifyContent: 'center', height: '36px', borderRadius: '6px'}}>
-                  <svg width="80" height="24" style={{flexShrink: 0}}>
-                    <line x1="0" y1="12" x2="70" y2="12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="edge-stroke-preview" />
-                    <circle cx="74" cy="12" r="5" fill="currentColor" className="edge-fill-preview" />
-                  </svg>
-                </div>
-
-              </div>
-            </div>
-          </div>
+          <div className="tb-btn" id="btn-add-text-note" title="Text Note (T)" data-action="add-text-note"><span className="tb-btn--text">T</span></div>
           
           <div className="tb-divider" />
           <button className="tb-btn" type="button" title="Undo (Cmd+Z / Ctrl+Z)" id="btn-undo">
@@ -2545,6 +2478,742 @@ const ModelEditor = () => {
           <button className="tb-btn" type="button" title="Redo (Cmd+Shift+Z / Ctrl+Y)" id="btn-redo">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 16, height: 16}}><path strokeLinecap="round" strokeLinejoin="round" d="M21 7v6h-6" /><path strokeLinecap="round" strokeLinejoin="round" d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13" /></svg>
           </button>
+
+          <div className="tb-divider" id="formatting-divider" style={{display: 'none'}} />
+          <div id="node-formatting-tools" style={{display: 'none', gap: '4px'}}>
+          {/* Construct Indicator Alignment (Latent & Indicator variables) */}
+          <div className="tb-dropdown-container" id="container-align">
+            <button
+              className={`tb-dropdown-btn ${openDropdown === 'align' ? 'active' : ''}`}
+              type="button"
+              title="Alignment"
+              id="btn-align"
+              onClick={(e) => { e.stopPropagation(); setOpenDropdown(prev => prev === 'align' ? null : 'align'); }}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><line x1={21} y1={6} x2={3} y2={6} /><line x1={15} y1={12} x2={3} y2={12} /><line x1={17} y1={18} x2={3} y2={18} /></svg>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><polyline points="6 9 12 15 18 9" /></svg>
+            </button>
+            <div
+              className={`tb-dropdown-menu ${openDropdown === 'align' ? 'show' : ''}`}
+              id="menu-align"
+              style={{ display: openDropdown === 'align' ? 'flex' : 'none' }}
+              onClick={() => setOpenDropdown(null)}
+            >
+              <div className="tb-dropdown-item" data-action="align-top"><span className="material-symbols-outlined">align_vertical_top</span> Align Top</div>
+              <div className="tb-dropdown-item" data-action="align-bottom"><span className="material-symbols-outlined">align_vertical_bottom</span> Align Bottom</div>
+              <div className="tb-dropdown-item" data-action="align-left"><span className="material-symbols-outlined">align_horizontal_left</span> Align Left</div>
+              <div className="tb-dropdown-item" data-action="align-right"><span className="material-symbols-outlined">align_horizontal_right</span> Align Right</div>
+            </div>
+          </div>
+
+          {/* Textbox Text Alignment (Left, Center, Right, Justify & Top, Middle, Bottom) */}
+          <div className="tb-dropdown-container" id="container-textbox-align" style={{ display: 'none' }}>
+            <button
+              className={`tb-dropdown-btn ${openDropdown === 'textbox-align' ? 'active' : ''}`}
+              type="button"
+              title="Text Alignment"
+              id="btn-textbox-align"
+              onClick={(e) => { e.stopPropagation(); setOpenDropdown(prev => prev === 'textbox-align' ? null : 'textbox-align'); }}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: 16 }}>
+                {textboxAlign === 'left' ? 'format_align_left' : (textboxAlign === 'right' ? 'format_align_right' : (textboxAlign === 'justify' ? 'format_align_justify' : 'format_align_center'))}
+              </span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 14, height: 14 }}><polyline points="6 9 12 15 18 9" /></svg>
+            </button>
+            <div
+              className={`tb-dropdown-menu ${openDropdown === 'textbox-align' ? 'show' : ''}`}
+              id="menu-textbox-align"
+              style={{ width: '180px', padding: '10px 12px', display: openDropdown === 'textbox-align' ? 'flex' : 'none', flexDirection: 'column' }}
+            >
+              <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '6px' }}>
+                Horizontal Alignment
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '4px', marginBottom: '10px' }}>
+                {[
+                  { id: 'left', icon: 'format_align_left', label: 'Left' },
+                  { id: 'center', icon: 'format_align_center', label: 'Center' },
+                  { id: 'right', icon: 'format_align_right', label: 'Right' },
+                  { id: 'justify', icon: 'format_align_justify', label: 'Justify' },
+                ].map(opt => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    data-textbox-action={`align-${opt.id}`}
+                    title={opt.label}
+                    onClick={() => {
+                      setTextboxAlign(opt.id as any);
+                      document.dispatchEvent(new CustomEvent('textbox-align-change', { detail: { align: opt.id } }));
+                    }}
+                    style={{
+                      height: '28px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      border: textboxAlign === opt.id ? '1px solid var(--color-accent)' : '1px solid var(--color-border-subtle, #e2e8f0)',
+                      background: textboxAlign === opt.id ? 'var(--color-accent-subtle)' : 'transparent',
+                      color: textboxAlign === opt.id ? 'var(--color-accent)' : 'var(--color-text-secondary)',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <span className="material-symbols-outlined" style={{ fontSize: '17px' }}>{opt.icon}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '6px' }}>
+                Vertical Alignment
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
+                {[
+                  { id: 'top', icon: 'vertical_align_top', label: 'Top' },
+                  { id: 'middle', icon: 'vertical_align_center', label: 'Center' },
+                  { id: 'bottom', icon: 'vertical_align_bottom', label: 'Bottom' },
+                ].map(opt => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    data-textbox-action={`valign-${opt.id}`}
+                    title={opt.label}
+                    onClick={() => {
+                      setTextboxValign(opt.id as any);
+                      document.dispatchEvent(new CustomEvent('textbox-valign-change', { detail: { valign: opt.id } }));
+                    }}
+                    style={{
+                      height: '28px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      border: textboxValign === opt.id ? '1px solid var(--color-accent)' : '1px solid var(--color-border-subtle, #e2e8f0)',
+                      background: textboxValign === opt.id ? 'var(--color-accent-subtle)' : 'transparent',
+                      color: textboxValign === opt.id ? 'var(--color-accent)' : 'var(--color-text-secondary)',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <span className="material-symbols-outlined" style={{ fontSize: '17px' }}>{opt.icon}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="tb-dropdown-container" id="container-style">
+            <button
+              className={`tb-dropdown-btn ${openDropdown === 'style' ? 'active' : ''}`}
+              type="button"
+              title="Style"
+              id="btn-style"
+              onClick={(e) => { e.stopPropagation(); setOpenDropdown(prev => prev === 'style' ? null : 'style'); }}
+            >
+              <div className="tb-shape-preview" />
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><polyline points="6 9 12 15 18 9" /></svg>
+            </button>
+            <div
+              className={`tb-dropdown-menu ${openDropdown === 'style' ? 'show' : ''}`}
+              id="menu-style"
+              style={{ display: openDropdown === 'style' ? 'flex' : 'none' }}
+              onClick={() => setOpenDropdown(null)}
+            >
+              {[
+                { id: 'circle', action: 'shape-circle', icon: 'radio_button_unchecked', label: 'Circle' },
+                { id: 'rect', action: 'shape-rect', icon: 'crop_square', label: 'Rectangle' },
+                { id: 'rounded', action: 'shape-rounded', icon: 'rectangle', label: 'Rounded Rect' },
+                { id: 'hexagon', action: 'shape-hex', icon: 'hexagon', label: 'Hexagon' },
+                { id: 'octagon', action: 'shape-oct', icon: 'stop_circle', label: 'Octagon' },
+              ].map(opt => (
+                <div
+                  key={opt.id}
+                  className={`tb-dropdown-item ${activeNodeShape === opt.id ? 'active-edge-option' : ''}`}
+                  data-action={opt.action}
+                  onClick={() => {
+                    setActiveNodeShape(opt.id);
+                    document.dispatchEvent(new CustomEvent('node-shape-change', { detail: { shape: opt.id } }));
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '6px 8px',
+                    height: '32px',
+                    borderRadius: '6px',
+                    marginBottom: '2px',
+                    background: activeNodeShape === opt.id ? 'var(--color-accent-subtle)' : 'transparent',
+                    border: activeNodeShape === opt.id ? '1px solid var(--color-accent)' : '1px solid transparent',
+                    color: activeNodeShape === opt.id ? 'var(--color-accent)' : 'var(--color-text-primary)',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>{opt.icon}</span>
+                    <span style={{ fontSize: '11px', fontWeight: 500 }}>{opt.label}</span>
+                  </div>
+                  {activeNodeShape === opt.id && (
+                    <span className="material-symbols-outlined" style={{ fontSize: '16px', color: 'var(--color-accent)' }}>check</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="tb-dropdown-container" id="container-colors">
+            <button
+              className={`tb-dropdown-btn ${openDropdown === 'colors' ? 'active' : ''}`}
+              type="button"
+              title="Color &amp; Stroke Styling"
+              id="btn-colors"
+              onClick={(e) => { e.stopPropagation(); setOpenDropdown(prev => prev === 'colors' ? null : 'colors'); }}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>palette</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 14, height: 14}}><polyline points="6 9 12 15 18 9" /></svg>
+            </button>
+            <div
+              className={`tb-dropdown-menu ${openDropdown === 'colors' ? 'show' : ''}`}
+              id="menu-colors"
+              style={{ width: '202px', boxSizing: 'border-box', padding: '10px 12px', display: openDropdown === 'colors' ? 'flex' : 'none', flexDirection: 'column' }}
+            >
+              <div style={{marginBottom: '10px'}}>
+                <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '6px'}}>Fill Color</div>
+                <div style={{display: 'flex', gap: '6px', flexWrap: 'nowrap', alignItems: 'center'}}>
+                  {[...fixedFills, ...recentFills.filter(c => !isDefaultColor(c))].map((color, i) => (
+                    <button
+                      key={'fill'+i}
+                      type="button"
+                      style={{
+                        width: '20px',
+                        height: '20px',
+                        flexShrink: 0,
+                        borderRadius: '50%',
+                        background: color === 'transparent' ? 'url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVQIW2NkYGD4z8DAwMgAI0AMDA4YAQc0D+oAAAAASUVORK5CYII=)' : color,
+                        border: activeFill?.toLowerCase() === color.toLowerCase() ? '2px solid var(--color-accent)' : '1px solid rgba(0,0,0,0.12)',
+                        boxShadow: activeFill?.toLowerCase() === color.toLowerCase() ? '0 0 0 2px var(--color-accent-subtle)' : 'none',
+                        cursor: 'pointer'
+                      }}
+                      onClick={() => handleFillColorSelect(color)}
+                      title={color}
+                    />
+                  ))}
+                  <button type="button" style={{width: '20px', height: '20px', flexShrink: 0, borderRadius: '50%', background: 'transparent', border: '1px dashed var(--color-border-subtle, #cbd5e1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', position: 'relative', cursor: 'pointer'}} title="Custom Color">
+                    <span style={{fontSize: '12px', lineHeight: 1}}>+</span>
+                    <input
+                      type="color"
+                      id="picker-fill"
+                      title="Fill Color"
+                      defaultValue="#f8fafc"
+                      style={{position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer'}} 
+                      onInput={(e: any) => handleFillColorSelect(e.target.value)}
+                      onChange={(e: any) => handleFillColorSelect(e.target.value)}
+                    />
+                  </button>
+                </div>
+              </div>
+
+              <div className="tb-divider" style={{width: '100%', height: '1px', margin: '4px 0 8px', opacity: 0.2}}></div>
+
+              <div style={{marginBottom: '10px'}}>
+                <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '6px'}}>Border Color</div>
+                <div style={{display: 'flex', gap: '6px', flexWrap: 'nowrap', alignItems: 'center'}}>
+                  {[...fixedBorders, ...recentBorders.filter(c => !isDefaultColor(c))].map((color, i) => (
+                    <button
+                      key={'border'+i}
+                      type="button"
+                      style={{
+                        width: '20px',
+                        height: '20px',
+                        flexShrink: 0,
+                        borderRadius: '50%',
+                        background: color === 'transparent' ? 'url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVQIW2NkYGD4z8DAwMgAI0AMDA4YAQc0D+oAAAAASUVORK5CYII=)' : color,
+                        border: activeBorder?.toLowerCase() === color.toLowerCase() ? '2px solid var(--color-accent)' : '1px solid rgba(0,0,0,0.12)',
+                        boxShadow: activeBorder?.toLowerCase() === color.toLowerCase() ? '0 0 0 2px var(--color-accent-subtle)' : 'none',
+                        cursor: 'pointer'
+                      }}
+                      onClick={() => handleBorderColorSelect(color)}
+                      title={color}
+                    />
+                  ))}
+                  <button type="button" style={{width: '20px', height: '20px', flexShrink: 0, borderRadius: '50%', background: 'transparent', border: '1px dashed var(--color-border-subtle, #cbd5e1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', position: 'relative', cursor: 'pointer'}} title="Custom Color">
+                    <span style={{fontSize: '12px', lineHeight: 1}}>+</span>
+                    <input
+                      type="color"
+                      id="picker-border"
+                      title="Border Color"
+                      defaultValue="#cbd5e1"
+                      style={{position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer'}}
+                      onInput={(e: any) => handleBorderColorSelect(e.target.value)}
+                      onChange={(e: any) => handleBorderColorSelect(e.target.value)}
+                    />
+                  </button>
+                </div>
+              </div>
+
+              <div className="tb-divider" style={{width: '100%', height: '1px', margin: '4px 0 8px', opacity: 0.2}}></div>
+
+              {/* Border Weight Stepper (- / +) */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)' }}>Border Weight</span>
+                <div style={{ display: 'flex', alignItems: 'center', background: 'var(--color-bg-base)', borderRadius: '6px', border: '1px solid var(--color-border-subtle, #e2e8f0)', padding: '2px' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const newWeight = Math.max(0, Math.round((activeBorderWeight - 0.5) * 10) / 10);
+                      setActiveBorderWeight(newWeight);
+                      document.dispatchEvent(new CustomEvent('border-weight-change', { detail: { weight: newWeight } }));
+                    }}
+                    style={{ width: '22px', height: '22px', border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', fontSize: '12px' }}
+                    title="Decrease Border Weight"
+                  >−</button>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', width: '32px', textAlign: 'center', fontWeight: 600, color: 'var(--color-text-primary)' }}>
+                    {activeBorderWeight}px
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const newWeight = Math.min(20, Math.round((activeBorderWeight + 0.5) * 10) / 10);
+                      setActiveBorderWeight(newWeight);
+                      document.dispatchEvent(new CustomEvent('border-weight-change', { detail: { weight: newWeight } }));
+                    }}
+                    style={{ width: '22px', height: '22px', border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', fontSize: '12px' }}
+                    title="Increase Border Weight"
+                  >+</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div className="tb-dropdown-container" id="container-text">
+            <button
+              className={`tb-dropdown-btn ${openDropdown === 'text' ? 'active' : ''}`}
+              type="button"
+              title="Typography Settings"
+              id="btn-text"
+              onClick={(e) => { e.stopPropagation(); setOpenDropdown(prev => prev === 'text' ? null : 'text'); }}
+            >
+              <span style={{fontWeight: 600, fontSize: '13px', color: 'var(--color-text-primary)'}}>Aa</span>
+              <span className="tb-font-size-label" style={{fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-text-hint)', marginLeft: '2px'}}>14</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 14, height: 14, marginLeft: '2px'}}><polyline points="6 9 12 15 18 9" /></svg>
+            </button>
+            <div
+              className={`tb-dropdown-menu ${openDropdown === 'text' ? 'show' : ''}`}
+              id="menu-text"
+              style={{ width: '236px', padding: '10px 12px', display: openDropdown === 'text' ? 'flex' : 'none', flexDirection: 'column' }}
+            >
+              <div style={{marginBottom: '10px'}}>
+                <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '5px'}}>Font Family</div>
+                <select
+                  id="input-font-family"
+                  style={{
+                    width: '100%',
+                    background: 'var(--color-bg-base)',
+                    border: '1px solid var(--color-border-subtle, #e2e8f0)',
+                    borderRadius: '6px',
+                    padding: '4px 6px',
+                    fontSize: '11px',
+                    color: 'var(--color-text-primary)',
+                    outline: 'none',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <option value="Inter">Inter (Sans-Serif)</option>
+                  <option value="JetBrains Mono">JetBrains Mono</option>
+                  <option value="Roboto">Roboto</option>
+                  <option value="system-ui">System Default</option>
+                </select>
+              </div>
+
+              <div className="tb-divider" style={{width: '100%', height: '1px', margin: '4px 0 8px', opacity: 0.2}}></div>
+              
+              <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', marginBottom: '10px'}}>
+                <div>
+                  <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '5px'}}>Size</div>
+                  <div className="tb-font-size" style={{background: 'var(--color-bg-base)', borderRadius: '6px', border: '1px solid var(--color-border-subtle, #e2e8f0)', padding: '2px', display: 'flex', alignItems: 'center'}}>
+                    <button className="tb-font-btn" data-action="font-dec" style={{width: '20px', height: '20px', border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)'}}>−</button>
+                    <input type="number" className="tb-font-input" id="input-font-size" defaultValue={14} style={{display: 'none'}} />
+                    <span className="tb-font-size-label" style={{fontFamily: 'var(--font-mono)', fontSize: '11px', width: '28px', textAlign: 'center', fontWeight: 600, color: 'var(--color-text-primary)'}}>14px</span>
+                    <button className="tb-font-btn" data-action="font-inc" style={{width: '20px', height: '20px', border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)'}}>+</button>
+                  </div>
+                </div>
+                <div>
+                  <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '5px'}}>Style</div>
+                  <div style={{display: 'flex', background: 'var(--color-bg-base)', borderRadius: '6px', border: '1px solid var(--color-border-subtle, #e2e8f0)', padding: '2px', gap: '2px'}}>
+                    <button className="tb-font-btn" data-action="text-bold" style={{width: '22px', height: '20px', border: 'none', background: 'transparent', cursor: 'pointer', fontWeight: 700, fontSize: '11px', borderRadius: '4px'}} title="Bold">B</button>
+                    <button className="tb-font-btn" data-action="text-italic" style={{width: '22px', height: '20px', border: 'none', background: 'transparent', cursor: 'pointer', fontStyle: 'italic', fontSize: '11px', borderRadius: '4px'}} title="Italic">I</button>
+                    <button className="tb-font-btn" data-action="text-underline" style={{width: '22px', height: '20px', border: 'none', background: 'transparent', cursor: 'pointer', textDecoration: 'underline', fontSize: '11px', borderRadius: '4px'}} title="Underline">U</button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="tb-divider" style={{width: '100%', height: '1px', margin: '4px 0 8px', opacity: 0.2}}></div>
+
+              <div style={{marginBottom: '8px'}}>
+                <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '6px'}}>Text Color</div>
+                <div style={{display: 'flex', gap: '6px', flexWrap: 'nowrap', alignItems: 'center'}}>
+                  {[...fixedTexts, ...recentTextColors.filter(c => !isDefaultColor(c))].map((color, i) => (
+                    <button
+                      key={'text'+i}
+                      type="button"
+                      style={{
+                        width: '20px',
+                        height: '20px',
+                        flexShrink: 0,
+                        borderRadius: '50%',
+                        background: color === 'transparent' ? 'url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVQIW2NkYGD4z8DAwMgAI0AMDA4YAQc0D+oAAAAASUVORK5CYII=)' : color,
+                        border: activeText?.toLowerCase() === color.toLowerCase() ? '2px solid var(--color-accent)' : '1px solid rgba(0,0,0,0.12)',
+                        cursor: 'pointer',
+                        boxShadow: activeText?.toLowerCase() === color.toLowerCase() ? '0 0 0 2px var(--color-accent-subtle)' : 'none'
+                      }}
+                      onClick={() => handleTextColorSelect(color)}
+                      title={color}
+                    />
+                  ))}
+                  <button type="button" style={{width: '20px', height: '20px', flexShrink: 0, borderRadius: '50%', background: 'transparent', border: '1px dashed var(--color-border-subtle, #cbd5e1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', cursor: 'pointer', position: 'relative'}} title="Custom Color">
+                    <span style={{fontSize: '12px', lineHeight: 1}}>+</span>
+                    <input
+                      type="color"
+                      id="picker-text"
+                      title="Text Color"
+                      defaultValue="#0f172a"
+                      style={{position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer'}}
+                      onInput={(e: any) => handleTextColorSelect(e.target.value)}
+                      onChange={(e: any) => handleTextColorSelect(e.target.value)}
+                    />
+                  </button>
+                </div>
+              </div>
+
+              <div id="row-text-inside" style={{borderTop: '1px solid var(--color-border-subtle, #e2e8f0)', paddingTop: '8px', marginTop: '2px', display: 'none', alignItems: 'center', gap: '6px'}}>
+                <button
+                  className="tb-font-btn"
+                  data-action="text-inside"
+                  type="button"
+                  style={{
+                    flex: 1,
+                    height: '28px',
+                    border: '1px solid var(--color-border-subtle, #e2e8f0)',
+                    background: 'var(--color-bg-base)',
+                    color: 'var(--color-text-primary)',
+                    cursor: 'pointer',
+                    borderRadius: '6px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '4px',
+                    fontSize: '11px',
+                    fontWeight: 500,
+                    transition: 'all 0.15s ease',
+                    whiteSpace: 'nowrap',
+                    padding: '0 8px'
+                  }}
+                  title="Toggle text label position inside or outside"
+                >
+                  <span className="material-symbols-outlined" style={{fontSize: '15px', color: 'var(--color-accent)'}}>vertical_align_center</span>
+                  <span id="text-inside-label">Move Inside</span>
+                </button>
+                <div id="container-text-outside-pos" style={{display: 'none', alignItems: 'center', gap: '2px', background: 'var(--color-bg-base)', borderRadius: '6px', border: '1px solid var(--color-border-subtle, #e2e8f0)', padding: '2px', height: '28px', boxSizing: 'border-box'}}>
+                  <button className="tb-font-btn" data-action="text-pos-top" type="button" style={{width: '22px', height: '22px', border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', padding: 0}} title="Position Top">
+                    <span className="material-symbols-outlined" style={{fontSize: '15px'}}>align_vertical_top</span>
+                  </button>
+                  <button className="tb-font-btn" data-action="text-pos-bottom" type="button" style={{width: '22px', height: '22px', border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', padding: 0}} title="Position Bottom">
+                    <span className="material-symbols-outlined" style={{fontSize: '15px'}}>align_vertical_bottom</span>
+                  </button>
+                  <button className="tb-font-btn" data-action="text-pos-left" type="button" style={{width: '22px', height: '22px', border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', padding: 0}} title="Position Left">
+                    <span className="material-symbols-outlined" style={{fontSize: '15px'}}>align_horizontal_left</span>
+                  </button>
+                  <button className="tb-font-btn" data-action="text-pos-right" type="button" style={{width: '22px', height: '22px', border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', padding: 0}} title="Position Right">
+                    <span className="material-symbols-outlined" style={{fontSize: '15px'}}>align_horizontal_right</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+          </div>
+          
+          {/* Edge Formatting Tools (Line style & Arrowhead with active selection highlight) */}
+          <div id="edge-formatting-tools" style={{display: 'none', gap: '4px'}}>
+            {/* Line Style Dropdown */}
+            <div className="tb-dropdown-container">
+              <button
+                className={`tb-dropdown-btn ${openDropdown === 'line' ? 'active' : ''}`}
+                type="button"
+                title="Line Style"
+                id="btn-line-style"
+                onClick={(e) => { e.stopPropagation(); setOpenDropdown(prev => prev === 'line' ? null : 'line'); }}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 16, height: 16}}><path d="M5 12h14" /></svg>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 14, height: 14, marginLeft: '2px'}}><polyline points="6 9 12 15 18 9" /></svg>
+              </button>
+              
+              <div
+                className={`tb-dropdown-menu ${openDropdown === 'line' ? 'show' : ''}`}
+                id="menu-line-style"
+                style={{
+                  width: '150px',
+                  padding: '6px',
+                  borderRadius: '8px',
+                  boxShadow: 'var(--shadow-float, 0 8px 24px rgba(15, 23, 42, 0.12))',
+                  border: '1px solid var(--color-border-default, #e2e8f0)',
+                  left: 0,
+                  display: openDropdown === 'line' ? 'flex' : 'none',
+                  flexDirection: 'column'
+                }}
+              >
+                {[
+                  {
+                    id: 'solid',
+                    label: 'Solid',
+                    svg: <svg width="60" height="20" style={{flexShrink: 0}}><line x1="0" y1="10" x2="60" y2="10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="edge-stroke-preview" /></svg>
+                  },
+                  {
+                    id: 'dashed',
+                    label: 'Dashed',
+                    svg: <svg width="60" height="20" style={{flexShrink: 0}}><line x1="0" y1="10" x2="60" y2="10" stroke="currentColor" strokeWidth="2" strokeDasharray="6,4" strokeLinecap="round" className="edge-stroke-preview" /></svg>
+                  },
+                  {
+                    id: 'dotted',
+                    label: 'Dotted',
+                    svg: <svg width="60" height="20" style={{flexShrink: 0}}><line x1="0" y1="10" x2="60" y2="10" stroke="currentColor" strokeWidth="2" strokeDasharray="2,4" strokeLinecap="round" className="edge-stroke-preview" /></svg>
+                  },
+                  {
+                    id: 'curved',
+                    label: 'Curved',
+                    svg: <svg width="60" height="20" style={{flexShrink: 0}}><path d="M 0 14 Q 30 2 60 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="edge-stroke-preview" /></svg>
+                  }
+                ].map(opt => (
+                  <div
+                    key={opt.id}
+                    className={`tb-dropdown-item ${edgeLineStyle === opt.id ? 'active-edge-option' : ''}`}
+                    data-edge-action={`line-${opt.id}`}
+                    onClick={() => {
+                      setEdgeLineStyle(opt.id as any);
+                      document.dispatchEvent(new CustomEvent('edge-line-style-change', { detail: { style: opt.id } }));
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '6px 8px',
+                      height: '32px',
+                      borderRadius: '6px',
+                      marginBottom: '2px',
+                      background: edgeLineStyle === opt.id ? 'var(--color-accent-subtle)' : 'transparent',
+                      border: edgeLineStyle === opt.id ? '1px solid var(--color-accent)' : '1px solid transparent',
+                      color: edgeLineStyle === opt.id ? 'var(--color-accent)' : 'var(--color-text-primary)',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <div style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
+                      {opt.svg}
+                      <span style={{fontSize: '11px', fontWeight: 500}}>{opt.label}</span>
+                    </div>
+                    {edgeLineStyle === opt.id && (
+                      <span className="material-symbols-outlined" style={{fontSize: '16px', color: 'var(--color-accent)'}}>check</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Arrowhead Style Dropdown */}
+            <div className="tb-dropdown-container">
+              <button
+                className={`tb-dropdown-btn ${openDropdown === 'arrowhead' ? 'active' : ''}`}
+                type="button"
+                title="Arrowhead Style"
+                id="btn-arrowhead-style"
+                onClick={(e) => { e.stopPropagation(); setOpenDropdown(prev => prev === 'arrowhead' ? null : 'arrowhead'); }}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 16, height: 16}}><path d="M5 12h14" /><path d="M15 16l4-4-4-4" /></svg>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 14, height: 14, marginLeft: '2px'}}><polyline points="6 9 12 15 18 9" /></svg>
+              </button>
+              
+              <div
+                className={`tb-dropdown-menu ${openDropdown === 'arrowhead' ? 'show' : ''}`}
+                id="menu-arrowhead-style"
+                style={{
+                  width: '150px',
+                  padding: '6px',
+                  borderRadius: '8px',
+                  boxShadow: 'var(--shadow-float, 0 8px 24px rgba(15, 23, 42, 0.12))',
+                  border: '1px solid var(--color-border-default, #e2e8f0)',
+                  left: 0,
+                  display: openDropdown === 'arrowhead' ? 'flex' : 'none',
+                  flexDirection: 'column'
+                }}
+              >
+                {[
+                  {
+                    id: 'solid',
+                    label: 'Solid',
+                    svg: (
+                      <svg width="60" height="20" style={{flexShrink: 0}}>
+                        <line x1="0" y1="10" x2="48" y2="10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="edge-stroke-preview" />
+                        <polygon points="48,6 58,10 48,14" fill="currentColor" className="edge-fill-preview" />
+                      </svg>
+                    )
+                  },
+                  {
+                    id: 'open',
+                    label: 'Open',
+                    svg: (
+                      <svg width="60" height="20" style={{flexShrink: 0}}>
+                        <line x1="0" y1="10" x2="52" y2="10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="edge-stroke-preview" />
+                        <path d="M 48 6 L 56 10 L 48 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="edge-stroke-preview" />
+                      </svg>
+                    )
+                  },
+                  {
+                    id: 'diamond',
+                    label: 'Diamond',
+                    svg: (
+                      <svg width="60" height="20" style={{flexShrink: 0}}>
+                        <line x1="0" y1="10" x2="46" y2="10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="edge-stroke-preview" />
+                        <polygon points="50,5 57,10 50,15 43,10" fill="currentColor" className="edge-fill-preview" />
+                      </svg>
+                    )
+                  },
+                  {
+                    id: 'circle',
+                    label: 'Circle',
+                    svg: (
+                      <svg width="60" height="20" style={{flexShrink: 0}}>
+                        <line x1="0" y1="10" x2="50" y2="10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="edge-stroke-preview" />
+                        <circle cx="53" cy="10" r="4" fill="currentColor" className="edge-fill-preview" />
+                      </svg>
+                    )
+                  }
+                ].map(opt => (
+                  <div
+                    key={opt.id}
+                    className={`tb-dropdown-item ${edgeArrowhead === opt.id ? 'active-edge-option' : ''}`}
+                    data-edge-action={`arrowhead-${opt.id}`}
+                    onClick={() => {
+                      setEdgeArrowhead(opt.id as any);
+                      document.dispatchEvent(new CustomEvent('edge-arrowhead-change', { detail: { arrowhead: opt.id } }));
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '6px 8px',
+                      height: '32px',
+                      borderRadius: '6px',
+                      marginBottom: '2px',
+                      background: edgeArrowhead === opt.id ? 'var(--color-accent-subtle)' : 'transparent',
+                      border: edgeArrowhead === opt.id ? '1px solid var(--color-accent)' : '1px solid transparent',
+                      color: edgeArrowhead === opt.id ? 'var(--color-accent)' : 'var(--color-text-primary)',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <div style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
+                      {opt.svg}
+                      <span style={{fontSize: '11px', fontWeight: 500}}>{opt.label}</span>
+                    </div>
+                    {edgeArrowhead === opt.id && (
+                      <span className="material-symbols-outlined" style={{fontSize: '16px', color: 'var(--color-accent)'}}>check</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Arrow Color Dropdown */}
+            <div className="tb-dropdown-container">
+              <button
+                className={`tb-dropdown-btn ${openDropdown === 'arrow-color' ? 'active' : ''}`}
+                type="button"
+                title="Arrow Color"
+                id="btn-arrow-color"
+                onClick={(e) => { e.stopPropagation(); setOpenDropdown(prev => prev === 'arrow-color' ? null : 'arrow-color'); }}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>palette</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 14, height: 14, marginLeft: '2px'}}><polyline points="6 9 12 15 18 9" /></svg>
+              </button>
+              
+              <div
+                className={`tb-dropdown-menu ${openDropdown === 'arrow-color' ? 'show' : ''}`}
+                id="menu-arrow-color"
+                style={{
+                  width: '202px',
+                  boxSizing: 'border-box',
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  boxShadow: 'var(--shadow-float, 0 8px 24px rgba(15, 23, 42, 0.12))',
+                  border: '1px solid var(--color-border-default, #e2e8f0)',
+                  left: 0,
+                  display: openDropdown === 'arrow-color' ? 'flex' : 'none',
+                  flexDirection: 'column'
+                }}
+              >
+                <div style={{marginBottom: '10px'}}>
+                  <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '6px'}}>
+                    Line Weight
+                  </div>
+                  <div style={{display: 'flex', gap: '4px', alignItems: 'center'}}>
+                    {[1, 1.5, 2, 3, 4].map((w) => (
+                      <button
+                        key={w}
+                        type="button"
+                        style={{
+                          flex: 1,
+                          height: '24px',
+                          border: edgeStrokeWidth === w ? '1px solid var(--color-accent)' : '1px solid var(--color-border-subtle, #cbd5e1)',
+                          background: edgeStrokeWidth === w ? 'var(--color-accent-subtle)' : 'var(--color-bg-base)',
+                          color: edgeStrokeWidth === w ? 'var(--color-accent)' : 'var(--color-text-primary)',
+                          borderRadius: '4px',
+                          fontSize: '11px',
+                          fontWeight: edgeStrokeWidth === w ? 600 : 400,
+                          cursor: 'pointer',
+                          padding: 0
+                        }}
+                        onClick={() => {
+                          setEdgeStrokeWidth(w);
+                          document.dispatchEvent(new CustomEvent('edge-stroke-width-change', { detail: { width: w } }));
+                        }}
+                      >
+                        {w}px
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '6px'}}>
+                  Arrow Color
+                </div>
+                <div style={{display: 'flex', gap: '6px', flexWrap: 'nowrap', alignItems: 'center'}}>
+                  {[...fixedArrowColors, ...recentArrowColors.filter(c => !isDefaultColor(c))].map((color, i) => (
+                    <button
+                      key={'arrow-color-'+i}
+                      type="button"
+                      style={{
+                        width: '20px',
+                        height: '20px',
+                        flexShrink: 0,
+                        borderRadius: '50%',
+                        background: color,
+                        border: activeArrowColor?.toLowerCase() === color.toLowerCase() ? '2px solid var(--color-accent)' : '1px solid rgba(0,0,0,0.12)',
+                        boxShadow: activeArrowColor?.toLowerCase() === color.toLowerCase() ? '0 0 0 2px var(--color-accent-subtle)' : 'none',
+                        cursor: 'pointer'
+                      }}
+                      onClick={() => handleArrowColorSelect(color)}
+                      title={color}
+                    />
+                  ))}
+                  <button type="button" style={{width: '20px', height: '20px', flexShrink: 0, borderRadius: '50%', background: 'transparent', border: '1px dashed var(--color-border-subtle, #cbd5e1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', position: 'relative', cursor: 'pointer'}} title="Custom Color">
+                    <span style={{fontSize: '12px', lineHeight: 1}}>+</span>
+                    <input
+                      type="color"
+                      id="picker-arrow-color"
+                      title="Arrow Color"
+                      defaultValue="#0f172a"
+                      style={{position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer'}}
+                      onInput={(e: any) => handleArrowColorSelect(e.target.value)}
+                      onChange={(e: any) => handleArrowColorSelect(e.target.value)}
+                    />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Zoom HUD */}
@@ -2732,7 +3401,10 @@ const ModelEditor = () => {
         <svg id="model-svg" width="100%" height="100%" style={{display: 'block'}} onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }} onDrop={handleCanvasDrop}>
           <defs>
             <pattern id="dot-grid" width={20} height={20} patternUnits="userSpaceOnUse">
-              <circle cx={2} cy={2} r={1} fill="var(--canvas-dot-color)" />
+              <circle cx={2} cy={2} r={1.2} fill={canvasGridColors.dot} />
+            </pattern>
+            <pattern id="line-grid" width={20} height={20} patternUnits="userSpaceOnUse">
+              <path d="M 20 0 L 0 0 0 20" fill="none" stroke={canvasGridColors.line} strokeWidth="1" />
             </pattern>
             <marker id="arrowhead" markerWidth={10} markerHeight={7} refX={9} refY="3.5" orient="auto">
               <polygon points="0 0, 10 3.5, 0 7" fill="var(--color-text-secondary)" style={{pointerEvents: 'none'}} />
@@ -2740,26 +3412,33 @@ const ModelEditor = () => {
             <marker id="arrowhead-selected" markerWidth={10} markerHeight={7} refX={9} refY="3.5" orient="auto">
               <polygon points="0 0, 10 3.5, 0 7" fill="var(--color-accent)" style={{pointerEvents: 'none'}} />
             </marker>
-            <marker id="arrow-solid" markerWidth={10} markerHeight={10} refX={8} refY={5} orient="auto">
-              <polygon points="1 2, 9 5, 1 8" fill="var(--color-text-primary)" />
+            <marker id="arrow-solid" markerWidth={10} markerHeight={10} refX={9} refY={5} orient="auto">
+              <polygon points="0 1.5, 9 5, 0 8.5" fill="currentColor" />
             </marker>
-            <marker id="arrow-solid-selected" markerWidth={10} markerHeight={10} refX={8} refY={5} orient="auto">
-              <polygon points="1 2, 9 5, 1 8" fill="var(--color-accent)" />
+            <marker id="arrow-solid-selected" markerWidth={10} markerHeight={10} refX={9} refY={5} orient="auto">
+              <polygon points="0 1.5, 9 5, 0 8.5" fill="var(--color-accent)" />
             </marker>
-            <marker id="arrow-open" markerWidth={10} markerHeight={10} refX={7} refY={5} orient="auto">
-              <path d="M 2 2 L 8 5 L 2 8" fill="none" stroke="var(--color-text-primary)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            <marker id="arrow-open" markerWidth={10} markerHeight={10} refX={8.5} refY={5} orient="auto">
+              <path d="M 1 1.5 L 8.5 5 L 1 8.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
             </marker>
-            <marker id="arrow-open-selected" markerWidth={10} markerHeight={10} refX={7} refY={5} orient="auto">
-              <path d="M 2 2 L 8 5 L 2 8" fill="none" stroke="var(--color-accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            <marker id="arrow-open-selected" markerWidth={10} markerHeight={10} refX={8.5} refY={5} orient="auto">
+              <path d="M 1 1.5 L 8.5 5 L 1 8.5" fill="none" stroke="var(--color-accent)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
             </marker>
-            <marker id="arrow-diamond" markerWidth={10} markerHeight={10} refX={5} refY={5} orient="auto">
-              <polygon points="5 1.5, 8.5 5, 5 8.5, 1.5 5" fill="var(--color-text-primary)" />
+            <marker id="arrow-diamond" markerWidth={10} markerHeight={10} refX={9} refY={5} orient="auto">
+              <polygon points="1 5, 5 1.8, 9 5, 5 8.2" fill="currentColor" />
             </marker>
-            <marker id="arrow-diamond-selected" markerWidth={10} markerHeight={10} refX={5} refY={5} orient="auto">
-              <polygon points="5 1.5, 8.5 5, 5 8.5, 1.5 5" fill="var(--color-accent)" />
+            <marker id="arrow-diamond-selected" markerWidth={10} markerHeight={10} refX={9} refY={5} orient="auto">
+              <polygon points="1 5, 5 1.8, 9 5, 5 8.2" fill="var(--color-accent)" />
+            </marker>
+            <marker id="arrow-circle" markerWidth={10} markerHeight={10} refX={8.5} refY={5} orient="auto">
+              <circle cx={5} cy={5} r={3.5} fill="currentColor" />
+            </marker>
+            <marker id="arrow-circle-selected" markerWidth={10} markerHeight={10} refX={8.5} refY={5} orient="auto">
+              <circle cx={5} cy={5} r={3.5} fill="var(--color-accent)" />
             </marker>
           </defs>
-          <rect id="bg-rect" width="100%" height="100%" fill="url(#dot-grid)" />
+          <rect id="bg-color-rect" width="100%" height="100%" fill={settings.canvasBgColor || 'transparent'} />
+          <rect id="bg-rect" width="100%" height="100%" fill={settings.canvasGrid === 'blank' ? 'transparent' : settings.canvasGrid === 'grid' ? 'url(#line-grid)' : 'url(#dot-grid)'} />
           <g id="zoom-layer">
             <g id="edges-layer" />
             <g id="nodes-layer" />
@@ -2768,155 +3447,7 @@ const ModelEditor = () => {
         </svg>
         <div className="canvas-empty-hint" id="canvas-empty-hint">Drag variables from the left panel to create constructs</div>
 
-        {/* Floating Moderation Settings Inspector */}
-        {selectedModeration && moderationHelper && (
-          <div
-            style={{
-              position: 'absolute',
-              top: '68px',
-              right: '20px',
-              width: '320px',
-              backgroundColor: 'var(--color-bg-base, #ffffff)',
-              border: '1px solid var(--color-border-subtle, #e2e8f0)',
-              borderRadius: '12px',
-              boxShadow: '0 12px 28px rgba(0, 0, 0, 0.16), 0 4px 8px rgba(0, 0, 0, 0.06)',
-              zIndex: 90,
-              padding: '16px',
-              fontSize: '13px',
-              backdropFilter: 'blur(8px)',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', borderBottom: '1px solid var(--color-border-subtle, #e2e8f0)', paddingBottom: '8px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-                <span style={{ display: 'inline-flex', padding: '4px', borderRadius: '6px', backgroundColor: 'var(--color-accent-subtle, #ede9fe)', color: 'var(--color-accent, #6B4EE6)' }}>
-                  <GitCompare size={16} />
-                </span>
-                <span>Moderating Effect</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelectedModeration(null)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  color: 'var(--color-text-tertiary)',
-                  padding: '2px 4px',
-                  borderRadius: '4px',
-                }}
-              >
-                ✕
-              </button>
-            </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '14px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ color: 'var(--color-text-secondary)', fontSize: '12px' }}>Moderator:</span>
-                <span style={{ fontWeight: 600, color: 'var(--color-accent, #6B4EE6)', backgroundColor: 'var(--color-accent-subtle, #ede9fe)', padding: '2px 8px', borderRadius: '4px' }}>
-                  {moderationHelper.modLabel}
-                </span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ color: 'var(--color-text-secondary)', fontSize: '12px' }}>Target Path:</span>
-                <span style={{ fontWeight: 600, color: 'var(--color-text-primary)', backgroundColor: 'var(--color-bg-subtle, #f1f5f9)', padding: '2px 8px', borderRadius: '4px' }}>
-                  {moderationHelper.predLabel} &rarr; {moderationHelper.outLabel}
-                </span>
-              </div>
-            </div>
-
-            <div style={{ marginBottom: '12px' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--color-text-primary)', marginBottom: '5px' }}>
-                Interaction Approach:
-              </label>
-              <select
-                value={selectedModeration.method || 'two_stage'}
-                onChange={(e) => {
-                  const newMethod = e.target.value;
-                  updateModeratingEffect(selectedModeration.id, { method: newMethod });
-                  setSelectedModeration((prev: any) => ({ ...prev, method: newMethod }));
-                }}
-                style={{
-                  width: '100%',
-                  padding: '6px 10px',
-                  borderRadius: '6px',
-                  border: '1px solid var(--color-border-subtle, #cbd5e1)',
-                  backgroundColor: 'var(--color-bg-base, #fff)',
-                  color: 'var(--color-text-primary)',
-                  fontSize: '12px',
-                }}
-              >
-                <option value="two_stage">Two-stage (Default / Robust)</option>
-                <option value="product_indicator">Product indicator (Reflective)</option>
-                <option value="orthogonalizing">Orthogonalizing (Zero collinearity)</option>
-              </select>
-            </div>
-
-            <div style={{ marginBottom: '12px' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '12px', color: 'var(--color-text-secondary)' }}>
-                <input
-                  type="checkbox"
-                  checked={selectedModeration.standardize !== false}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    updateModeratingEffect(selectedModeration.id, { standardize: checked });
-                    setSelectedModeration((prev: any) => ({ ...prev, standardize: checked }));
-                  }}
-                  style={{ accentColor: 'var(--color-accent, #6B4EE6)' }}
-                />
-                <span>Standardize indicators before products</span>
-              </label>
-            </div>
-
-            {moderationHelper.showWarning && (
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: '8px',
-                  padding: '8px 10px',
-                  borderRadius: '6px',
-                  backgroundColor: '#fffbeb',
-                  border: '1px solid #fde68a',
-                  color: '#b45309',
-                  fontSize: '11px',
-                  lineHeight: '1.4',
-                  marginBottom: '12px',
-                }}
-              >
-                <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: '2px' }} />
-                <span>
-                  Combining a single-item moderator with product indicator or orthogonalizing on a multi-item predictor can introduce measurement asymmetry. Two-stage approach is recommended.
-                </span>
-              </div>
-            )}
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: '8px', borderTop: '1px solid var(--color-border-subtle, #e2e8f0)' }}>
-              <button
-                type="button"
-                onClick={() => {
-                  deleteModeratingEffect(selectedModeration.id);
-                  setSelectedModeration(null);
-                }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  padding: '5px 10px',
-                  borderRadius: '6px',
-                  border: '1px solid #fecaca',
-                  backgroundColor: '#fff1f2',
-                  color: '#e11d48',
-                  fontSize: '12px',
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                }}
-              >
-                <Trash2 size={13} />
-                <span>Delete Moderation</span>
-              </button>
-            </div>
-          </div>
-        )}
       </main>
     </div>{/* /app-body */}
   </div>{/* /view-model */}

@@ -105,6 +105,9 @@ export interface AppSettings {
   accentColor: string;
   sidebarPosition: 'left' | 'right';
   lockExpandedSidebar: boolean;
+  canvasGrid?: 'dots' | 'grid' | 'blank';
+  canvasBgColor?: string;
+  canvasRecentBgColors?: string[];
 }
 
 export const LICENSE_INFO = {
@@ -283,6 +286,9 @@ const INITIAL_SETTINGS: AppSettings = {
   accentColor: '#6B4EE6',
   sidebarPosition: 'left',
   lockExpandedSidebar: false,
+  canvasGrid: 'dots',
+  canvasBgColor: '',
+  canvasRecentBgColors: [],
 };
 
 export const useStore = create<AppState>()(
@@ -1187,3 +1193,8 @@ export const useStore = create<AppState>()(
     }
   )
 );
+
+if (typeof window !== 'undefined') {
+  (window as any).__useStore = useStore;
+}
+

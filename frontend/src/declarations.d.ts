@@ -19,6 +19,10 @@ declare module '*/utils/model-canvas' {
   export const updateModeratingEffect: (id: string, patch: any) => void;
   export const deleteModeratingEffect: (id: string) => void;
   export const getSelectedModeratingEffect: () => any;
+  export const hasInvalidLatentVariables: () => boolean;
+  export const createAndEditNewLatentNode: (x?: number, y?: number) => any;
+  export const createAndEditNewTextNode: (x?: number, y?: number) => any;
+  export const getCanvasGridColors: (bgColor?: string) => { dot: string; line: string };
 }
 declare module '*/utils/results.js' {
   const content: any;

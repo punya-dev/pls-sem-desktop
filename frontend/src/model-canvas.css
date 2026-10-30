@@ -511,6 +511,20 @@
   color: var(--color-text-secondary);
 }
 
+.tb-dropdown-item.active-edge-option {
+  background: var(--color-accent-subtle) !important;
+  color: var(--color-accent) !important;
+  border-color: var(--color-accent) !important;
+}
+
+.tb-dropdown-item.active-edge-option .edge-stroke-preview {
+  stroke: var(--color-accent) !important;
+}
+
+.tb-dropdown-item.active-edge-option .edge-fill-preview {
+  fill: var(--color-accent) !important;
+}
+
 /* ─── Zoom HUD (bottom-right) ────────────────────────────────────────────── */
 
 .canvas-hud {
@@ -724,7 +738,8 @@
 
 /* ─── Canvas Theme Support (Dark & Light) ─────────────────────────────────── */
 :root {
-  --canvas-dot-color: rgba(100, 116, 139, 0.25);
+  --canvas-dot-color: rgba(71, 85, 105, 0.40);
+  --canvas-line-color: rgba(100, 116, 139, 0.30);
   --canvas-latent-fill: #334155;
   --canvas-latent-stroke: #1e293b;
   --canvas-latent-text: #ffffff;
@@ -738,7 +753,8 @@
 }
 
 [data-theme="dark"] {
-  --canvas-dot-color: rgba(255, 255, 255, 0.15);
+  --canvas-dot-color: rgba(255, 255, 255, 0.40);
+  --canvas-line-color: rgba(255, 255, 255, 0.24);
   --canvas-latent-fill: #e2e8f0;
   --canvas-latent-stroke: #94a3b8;
   --canvas-latent-text: #0f172a;
