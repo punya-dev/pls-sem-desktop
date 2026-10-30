@@ -266,13 +266,13 @@ const ModelEditor = () => {
     }
   }, []);
 
-  const fixedFills = ['transparent', '#ffffff', '#f8fafc', '#f1f5f9', '#fee2e2', '#fef3c7', '#dcfce7', '#e0e7ff', '#ede9fe'];
-  const fixedBorders = ['transparent', '#0f172a', '#64748b', '#cbd5e1', '#ef4444', '#f59e0b', '#10b981', '#6B4EE6', '#3b82f6'];
-  const fixedTexts = ['#0f172a', '#334155', '#64748b', '#ffffff', '#ef4444', '#f59e0b', '#10b981', '#6B4EE6', '#3b82f6'];
+  const fixedFills = ['transparent', '#ffffff'];
+  const fixedBorders = ['transparent', '#0f172a'];
+  const fixedTexts = ['#0f172a', '#ffffff'];
 
   const [recentFills, setRecentFills] = useState<string[]>(['#fef08a']);
   const [recentBorders, setRecentBorders] = useState<string[]>(['#ca8a04']);
-  const [recentTextColors, setRecentTextColors] = useState<string[]>(['#ca8a04']);
+  const [recentTextColors, setRecentTextColors] = useState<string[]>(['#6B4EE6']);
   
   const [activeFill, setActiveFill] = useState<string>('#ffffff');
   const [activeBorder, setActiveBorder] = useState<string>('#cbd5e1');
@@ -288,8 +288,8 @@ const ModelEditor = () => {
 
   const handleFillColorSelect = (color: string) => {
     setActiveFill(color);
-    if (!fixedFills.includes(color) && !recentFills.includes(color)) {
-      setRecentFills(prev => [color, ...prev.slice(0, 4)]);
+    if (!fixedFills.includes(color)) {
+      setRecentFills(prev => [color, ...prev.filter(c => c !== color)].slice(0, 3));
     }
     document.dispatchEvent(new CustomEvent('color-picker-input', { detail: { id: 'picker-fill', color } }));
     document.dispatchEvent(new CustomEvent('color-picker-closed', { detail: { id: 'picker-fill', color } }));
@@ -297,8 +297,8 @@ const ModelEditor = () => {
 
   const handleBorderColorSelect = (color: string) => {
     setActiveBorder(color);
-    if (!fixedBorders.includes(color) && !recentBorders.includes(color)) {
-      setRecentBorders(prev => [color, ...prev.slice(0, 4)]);
+    if (!fixedBorders.includes(color)) {
+      setRecentBorders(prev => [color, ...prev.filter(c => c !== color)].slice(0, 3));
     }
     document.dispatchEvent(new CustomEvent('color-picker-input', { detail: { id: 'picker-border', color } }));
     document.dispatchEvent(new CustomEvent('color-picker-closed', { detail: { id: 'picker-border', color } }));
@@ -306,8 +306,8 @@ const ModelEditor = () => {
 
   const handleTextColorSelect = (color: string) => {
     setActiveText(color);
-    if (!fixedTexts.includes(color) && !recentTextColors.includes(color)) {
-      setRecentTextColors(prev => [color, ...prev.slice(0, 4)]);
+    if (!fixedTexts.includes(color)) {
+      setRecentTextColors(prev => [color, ...prev.filter(c => c !== color)].slice(0, 3));
     }
     document.dispatchEvent(new CustomEvent('color-picker-input', { detail: { id: 'picker-text', color } }));
     document.dispatchEvent(new CustomEvent('color-picker-closed', { detail: { id: 'picker-text', color } }));
@@ -2464,12 +2464,12 @@ const ModelEditor = () => {
             <div
               className={`tb-dropdown-menu ${openDropdown === 'textbox-align' ? 'show' : ''}`}
               id="menu-textbox-align"
-              style={{ width: '220px', padding: '12px', display: openDropdown === 'textbox-align' ? 'flex' : 'none', flexDirection: 'column' }}
+              style={{ width: '180px', padding: '10px 12px', display: openDropdown === 'textbox-align' ? 'flex' : 'none', flexDirection: 'column' }}
             >
-              <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '8px' }}>
+              <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '6px' }}>
                 Horizontal Alignment
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '4px', marginBottom: '12px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '4px', marginBottom: '10px' }}>
                 {[
                   { id: 'left', icon: 'format_align_left', label: 'Left' },
                   { id: 'center', icon: 'format_align_center', label: 'Center' },
@@ -2486,7 +2486,7 @@ const ModelEditor = () => {
                       document.dispatchEvent(new CustomEvent('textbox-align-change', { detail: { align: opt.id } }));
                     }}
                     style={{
-                      height: '30px',
+                      height: '28px',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -2498,12 +2498,12 @@ const ModelEditor = () => {
                       transition: 'all 0.15s ease'
                     }}
                   >
-                    <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>{opt.icon}</span>
+                    <span className="material-symbols-outlined" style={{ fontSize: '17px' }}>{opt.icon}</span>
                   </button>
                 ))}
               </div>
 
-              <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '8px' }}>
+              <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '6px' }}>
                 Vertical Alignment
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
@@ -2522,7 +2522,7 @@ const ModelEditor = () => {
                       document.dispatchEvent(new CustomEvent('textbox-valign-change', { detail: { valign: opt.id } }));
                     }}
                     style={{
-                      height: '30px',
+                      height: '28px',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -2534,7 +2534,7 @@ const ModelEditor = () => {
                       transition: 'all 0.15s ease'
                     }}
                   >
-                    <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>{opt.icon}</span>
+                    <span className="material-symbols-outlined" style={{ fontSize: '17px' }}>{opt.icon}</span>
                   </button>
                 ))}
               </div>
@@ -2578,18 +2578,18 @@ const ModelEditor = () => {
             <div
               className={`tb-dropdown-menu ${openDropdown === 'colors' ? 'show' : ''}`}
               id="menu-colors"
-              style={{ width: '250px', padding: '12px 14px', display: openDropdown === 'colors' ? 'flex' : 'none', flexDirection: 'column' }}
+              style={{ width: '190px', padding: '10px 12px', display: openDropdown === 'colors' ? 'flex' : 'none', flexDirection: 'column' }}
             >
-              <div style={{marginBottom: '12px'}}>
-                <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '8px'}}>Fill Color</div>
-                <div style={{display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center'}}>
+              <div style={{marginBottom: '10px'}}>
+                <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '6px'}}>Fill Color</div>
+                <div style={{display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center'}}>
                   {[...fixedFills, ...recentFills].map((color, i) => (
                     <button
                       key={'fill'+i}
                       type="button"
                       style={{
-                        width: '22px',
-                        height: '22px',
+                        width: '20px',
+                        height: '20px',
                         borderRadius: '50%',
                         background: color === 'transparent' ? 'url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVQIW2NkYGD4z8DAwMgAI0AMDA4YAQc0D+oAAAAASUVORK5CYII=)' : color,
                         border: activeFill === color ? '2px solid var(--color-accent)' : '1px solid rgba(0,0,0,0.12)',
@@ -2600,8 +2600,8 @@ const ModelEditor = () => {
                       title={color}
                     />
                   ))}
-                  <button type="button" style={{width: '22px', height: '22px', borderRadius: '50%', background: 'transparent', border: '1px dashed var(--color-border-subtle, #cbd5e1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', position: 'relative', cursor: 'pointer'}} title="Custom Color">
-                    <span style={{fontSize: '13px', lineHeight: 1}}>+</span>
+                  <button type="button" style={{width: '20px', height: '20px', borderRadius: '50%', background: 'transparent', border: '1px dashed var(--color-border-subtle, #cbd5e1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', position: 'relative', cursor: 'pointer'}} title="Custom Color">
+                    <span style={{fontSize: '12px', lineHeight: 1}}>+</span>
                     <input
                       type="color"
                       id="picker-fill"
@@ -2615,18 +2615,18 @@ const ModelEditor = () => {
                 </div>
               </div>
 
-              <div className="tb-divider" style={{width: '100%', height: '1px', margin: '6px 0', opacity: 0.2}}></div>
+              <div className="tb-divider" style={{width: '100%', height: '1px', margin: '4px 0 8px', opacity: 0.2}}></div>
 
-              <div style={{marginBottom: '12px'}}>
-                <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '8px'}}>Border Color</div>
-                <div style={{display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center'}}>
+              <div style={{marginBottom: '10px'}}>
+                <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '6px'}}>Border Color</div>
+                <div style={{display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center'}}>
                   {[...fixedBorders, ...recentBorders].map((color, i) => (
                     <button
                       key={'border'+i}
                       type="button"
                       style={{
-                        width: '22px',
-                        height: '22px',
+                        width: '20px',
+                        height: '20px',
                         borderRadius: '50%',
                         background: color === 'transparent' ? 'url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVQIW2NkYGD4z8DAwMgAI0AMDA4YAQc0D+oAAAAASUVORK5CYII=)' : color,
                         border: activeBorder === color ? '2px solid var(--color-accent)' : '1px solid rgba(0,0,0,0.12)',
@@ -2637,8 +2637,8 @@ const ModelEditor = () => {
                       title={color}
                     />
                   ))}
-                  <button type="button" style={{width: '22px', height: '22px', borderRadius: '50%', background: 'transparent', border: '1px dashed var(--color-border-subtle, #cbd5e1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', position: 'relative', cursor: 'pointer'}} title="Custom Color">
-                    <span style={{fontSize: '13px', lineHeight: 1}}>+</span>
+                  <button type="button" style={{width: '20px', height: '20px', borderRadius: '50%', background: 'transparent', border: '1px dashed var(--color-border-subtle, #cbd5e1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', position: 'relative', cursor: 'pointer'}} title="Custom Color">
+                    <span style={{fontSize: '12px', lineHeight: 1}}>+</span>
                     <input
                       type="color"
                       id="picker-border"
@@ -2652,39 +2652,35 @@ const ModelEditor = () => {
                 </div>
               </div>
 
-              <div className="tb-divider" style={{width: '100%', height: '1px', margin: '6px 0', opacity: 0.2}}></div>
+              <div className="tb-divider" style={{width: '100%', height: '1px', margin: '4px 0 8px', opacity: 0.2}}></div>
 
-              <div>
-                <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
-                  <span>Border Weight</span>
-                  <span style={{fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-accent)', fontWeight: 600}}>{activeBorderWeight}px</span>
-                </div>
-                <div style={{display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '4px'}}>
-                  {[0, 1, 1.5, 2, 3, 4].map(w => (
-                    <button
-                      key={w}
-                      type="button"
-                      onClick={() => {
-                        setActiveBorderWeight(w);
-                        document.dispatchEvent(new CustomEvent('border-weight-change', { detail: { weight: w } }));
-                      }}
-                      style={{
-                        height: '26px',
-                        padding: '0 2px',
-                        fontSize: '11px',
-                        fontFamily: 'var(--font-mono)',
-                        fontWeight: activeBorderWeight === w ? 600 : 500,
-                        background: activeBorderWeight === w ? 'var(--color-accent-subtle)' : 'transparent',
-                        border: activeBorderWeight === w ? '1.5px solid var(--color-accent)' : '1px solid var(--color-border-subtle, #e2e8f0)',
-                        color: activeBorderWeight === w ? 'var(--color-accent)' : 'var(--color-text-secondary)',
-                        borderRadius: '4px',
-                        cursor: 'pointer',
-                        transition: 'all 0.15s ease'
-                      }}
-                    >
-                      {w === 0 ? '0' : `${w}p`}
-                    </button>
-                  ))}
+              {/* Border Weight Stepper (- / +) */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)' }}>Border Weight</span>
+                <div style={{ display: 'flex', alignItems: 'center', background: 'var(--color-bg-base)', borderRadius: '6px', border: '1px solid var(--color-border-subtle, #e2e8f0)', padding: '2px' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const newWeight = Math.max(0, Math.round((activeBorderWeight - 0.5) * 10) / 10);
+                      setActiveBorderWeight(newWeight);
+                      document.dispatchEvent(new CustomEvent('border-weight-change', { detail: { weight: newWeight } }));
+                    }}
+                    style={{ width: '22px', height: '22px', border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', fontSize: '12px' }}
+                    title="Decrease Border Weight"
+                  >−</button>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', width: '32px', textAlign: 'center', fontWeight: 600, color: 'var(--color-text-primary)' }}>
+                    {activeBorderWeight}px
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const newWeight = Math.min(20, Math.round((activeBorderWeight + 0.5) * 10) / 10);
+                      setActiveBorderWeight(newWeight);
+                      document.dispatchEvent(new CustomEvent('border-weight-change', { detail: { weight: newWeight } }));
+                    }}
+                    style={{ width: '22px', height: '22px', border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', fontSize: '12px' }}
+                    title="Increase Border Weight"
+                  >+</button>
                 </div>
               </div>
             </div>
@@ -2705,10 +2701,10 @@ const ModelEditor = () => {
             <div
               className={`tb-dropdown-menu ${openDropdown === 'text' ? 'show' : ''}`}
               id="menu-text"
-              style={{ width: '250px', padding: '12px 14px', display: openDropdown === 'text' ? 'flex' : 'none', flexDirection: 'column' }}
+              style={{ width: '200px', padding: '10px 12px', display: openDropdown === 'text' ? 'flex' : 'none', flexDirection: 'column' }}
             >
-              <div style={{marginBottom: '12px'}}>
-                <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '6px'}}>Font Family</div>
+              <div style={{marginBottom: '10px'}}>
+                <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '5px'}}>Font Family</div>
                 <select
                   id="input-font-family"
                   style={{
@@ -2716,7 +2712,7 @@ const ModelEditor = () => {
                     background: 'var(--color-bg-base)',
                     border: '1px solid var(--color-border-subtle, #e2e8f0)',
                     borderRadius: '6px',
-                    padding: '5px 8px',
+                    padding: '4px 6px',
                     fontSize: '11px',
                     color: 'var(--color-text-primary)',
                     outline: 'none',
@@ -2730,32 +2726,32 @@ const ModelEditor = () => {
                 </select>
               </div>
 
-              <div className="tb-divider" style={{width: '100%', height: '1px', margin: '4px 0 10px', opacity: 0.2}}></div>
+              <div className="tb-divider" style={{width: '100%', height: '1px', margin: '4px 0 8px', opacity: 0.2}}></div>
               
-              <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '12px'}}>
+              <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', marginBottom: '10px'}}>
                 <div>
-                  <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '6px'}}>Size</div>
+                  <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '5px'}}>Size</div>
                   <div className="tb-font-size" style={{background: 'var(--color-bg-base)', borderRadius: '6px', border: '1px solid var(--color-border-subtle, #e2e8f0)', padding: '2px', display: 'flex', alignItems: 'center'}}>
-                    <button className="tb-font-btn" data-action="font-dec" style={{width: '22px', height: '22px', border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)'}}>−</button>
+                    <button className="tb-font-btn" data-action="font-dec" style={{width: '20px', height: '20px', border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)'}}>−</button>
                     <input type="number" className="tb-font-input" id="input-font-size" defaultValue={14} style={{display: 'none'}} />
-                    <span className="tb-font-size-label" style={{fontFamily: 'var(--font-mono)', fontSize: '11px', width: '30px', textAlign: 'center', fontWeight: 600, color: 'var(--color-text-primary)'}}>14px</span>
-                    <button className="tb-font-btn" data-action="font-inc" style={{width: '22px', height: '22px', border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)'}}>+</button>
+                    <span className="tb-font-size-label" style={{fontFamily: 'var(--font-mono)', fontSize: '11px', width: '28px', textAlign: 'center', fontWeight: 600, color: 'var(--color-text-primary)'}}>14px</span>
+                    <button className="tb-font-btn" data-action="font-inc" style={{width: '20px', height: '20px', border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)'}}>+</button>
                   </div>
                 </div>
                 <div>
-                  <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '6px'}}>Style</div>
+                  <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '5px'}}>Style</div>
                   <div style={{display: 'flex', background: 'var(--color-bg-base)', borderRadius: '6px', border: '1px solid var(--color-border-subtle, #e2e8f0)', padding: '2px', gap: '2px'}}>
-                    <button className="tb-font-btn" data-action="text-bold" style={{width: '24px', height: '22px', border: 'none', background: 'transparent', cursor: 'pointer', fontWeight: 700, fontSize: '11px', borderRadius: '4px'}} title="Bold">B</button>
-                    <button className="tb-font-btn" data-action="text-italic" style={{width: '24px', height: '22px', border: 'none', background: 'transparent', cursor: 'pointer', fontStyle: 'italic', fontSize: '11px', borderRadius: '4px'}} title="Italic">I</button>
-                    <button className="tb-font-btn" data-action="text-underline" style={{width: '24px', height: '22px', border: 'none', background: 'transparent', cursor: 'pointer', textDecoration: 'underline', fontSize: '11px', borderRadius: '4px'}} title="Underline">U</button>
+                    <button className="tb-font-btn" data-action="text-bold" style={{width: '22px', height: '20px', border: 'none', background: 'transparent', cursor: 'pointer', fontWeight: 700, fontSize: '11px', borderRadius: '4px'}} title="Bold">B</button>
+                    <button className="tb-font-btn" data-action="text-italic" style={{width: '22px', height: '20px', border: 'none', background: 'transparent', cursor: 'pointer', fontStyle: 'italic', fontSize: '11px', borderRadius: '4px'}} title="Italic">I</button>
+                    <button className="tb-font-btn" data-action="text-underline" style={{width: '22px', height: '20px', border: 'none', background: 'transparent', cursor: 'pointer', textDecoration: 'underline', fontSize: '11px', borderRadius: '4px'}} title="Underline">U</button>
                   </div>
                 </div>
               </div>
 
-              <div className="tb-divider" style={{width: '100%', height: '1px', margin: '4px 0 10px', opacity: 0.2}}></div>
+              <div className="tb-divider" style={{width: '100%', height: '1px', margin: '4px 0 8px', opacity: 0.2}}></div>
 
-              <div style={{marginBottom: '10px'}}>
-                <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '8px'}}>Text Color</div>
+              <div style={{marginBottom: '8px'}}>
+                <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '6px'}}>Text Color</div>
                 <div style={{display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center'}}>
                   {[...fixedTexts, ...recentTextColors].map((color, i) => (
                     <button
@@ -2789,7 +2785,7 @@ const ModelEditor = () => {
                 </div>
               </div>
 
-              <div id="row-text-inside" style={{borderTop: '1px solid var(--color-border-subtle, #e2e8f0)', paddingTop: '10px', marginTop: '2px', display: 'none'}}>
+              <div id="row-text-inside" style={{borderTop: '1px solid var(--color-border-subtle, #e2e8f0)', paddingTop: '8px', marginTop: '2px', display: 'none'}}>
                 <button
                   className="tb-font-btn"
                   data-action="text-inside"
@@ -2810,7 +2806,7 @@ const ModelEditor = () => {
                     fontWeight: 500,
                     transition: 'all 0.15s ease'
                   }}
-                  title="Toggle construct label position inside or below construct"
+                  title="Toggle text label position inside or outside"
                 >
                   <span className="material-symbols-outlined" style={{fontSize: '16px', color: 'var(--color-accent)'}}>vertical_align_center</span>
                   <span id="text-inside-label">Move Inside / Outside</span>

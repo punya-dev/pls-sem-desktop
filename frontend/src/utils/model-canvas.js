@@ -666,7 +666,9 @@ export function initModelCanvas() {
       } else if (node.isText) {
         pt.y = node.y;
       } else {
-        pt.y = node.y;
+        const isIndInside = node.textInside !== undefined ? node.textInside : true;
+        const h = node.height || 28;
+        pt.y = isIndInside ? node.y : (node.y + h / 2 + 14);
       }
       const screenPt = pt.matrixTransform(zoomLayer.getScreenCTM());
       screenCenterX = screenPt.x;
@@ -710,7 +712,8 @@ export function initModelCanvas() {
     } else if (node.isText) {
       input.style.color = node.color || 'var(--color-text-primary)';
     } else {
-      input.style.color = node.isMissingInDataset ? '#ef4444' : (node.color || 'var(--canvas-manifest-text)');
+      const isIndInside = node.textInside !== undefined ? node.textInside : true;
+      input.style.color = node.isMissingInDataset ? '#ef4444' : (node.color || (isIndInside ? 'var(--canvas-manifest-text)' : 'var(--color-text-primary)'));
     }
 
     const updateWidth = () => {
@@ -1229,7 +1232,19 @@ export function initModelCanvas() {
           window.dispatchEvent(new CustomEvent('canvas-changed'));
         } else if (action === 'text-inside') {
           nodes.filter(n => selectedIds.has(n.id) && !n.isText).forEach(n => {
-            n.labelInside = n.labelInside === undefined ? true : !n.labelInside;
+            if (n.isLatent) {
+              const metrics = getConstructMetrics(n);
+              const hasR2 = !!(metrics && metrics.r2 !== null && metrics.r2 !== undefined);
+              if (hasR2 && !n.textInside) {
+                // Disallow moving inside when R² is displayed inside construct
+                return;
+              }
+              n.textInside = !n.textInside;
+            } else {
+              // Indicator: default is inside (true)
+              const currentInside = n.textInside !== undefined ? n.textInside : true;
+              n.textInside = !currentInside;
+            }
           });
           render();
           pushHistory();
@@ -2987,12 +3002,18 @@ export function initModelCanvas() {
           g.appendChild(handle);
         }
         
+        const isIndInside = node.textInside !== undefined ? node.textInside : true;
         const indText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         indText.textContent = node.label;
         indText.setAttribute('x', '0');
-        indText.setAttribute('y', 4);
+        if (isIndInside) {
+          indText.setAttribute('y', 4);
+          indText.setAttribute('fill', node.isMissingInDataset ? '#ef4444' : (node.color || 'var(--canvas-manifest-text)'));
+        } else {
+          indText.setAttribute('y', h / 2 + 14);
+          indText.setAttribute('fill', node.isMissingInDataset ? '#ef4444' : (node.color || 'var(--color-text-primary)'));
+        }
         indText.setAttribute('text-anchor', 'middle');
-        indText.setAttribute('fill', node.isMissingInDataset ? '#ef4444' : (node.color || 'var(--canvas-manifest-text)'));
         indText.setAttribute('font-size', node.fontSize || '10');
         if (node.bold) indText.setAttribute('font-weight', 'bold');
         if (node.italic) indText.setAttribute('font-style', 'italic');
@@ -3283,10 +3304,42 @@ export function initModelCanvas() {
         if (inputFont) inputFont.value = selectedNode.fontSize || 14;
         
         if (rowTextInside) {
-          if (selectedNode.isLatent !== false && !selectedNode.isText) {
+          if (!selectedNode.isText) {
             rowTextInside.style.display = 'block';
+            let isInside = false;
+            let canMoveInside = true;
+            let disableReason = '';
+
+            if (selectedNode.isLatent) {
+              isInside = !!selectedNode.textInside;
+              const metrics = getConstructMetrics(selectedNode);
+              const hasR2 = !!(metrics && metrics.r2 !== null && metrics.r2 !== undefined);
+              if (hasR2 && !isInside) {
+                canMoveInside = false;
+                disableReason = 'Move inside disabled: R² result is displayed inside construct';
+              }
+            } else {
+              // Indicator: default is inside
+              isInside = selectedNode.textInside !== undefined ? selectedNode.textInside : true;
+            }
+
             if (textInsideLabel) {
-              textInsideLabel.textContent = selectedNode.labelInside ? 'Move Outside' : 'Move Inside';
+              textInsideLabel.textContent = isInside ? 'Move Outside' : 'Move Inside';
+            }
+
+            const btnTextInside = rowTextInside.querySelector('button[data-action="text-inside"]');
+            if (btnTextInside) {
+              if (!canMoveInside) {
+                btnTextInside.disabled = true;
+                btnTextInside.style.opacity = '0.35';
+                btnTextInside.style.cursor = 'not-allowed';
+                btnTextInside.title = disableReason;
+              } else {
+                btnTextInside.disabled = false;
+                btnTextInside.style.opacity = '1';
+                btnTextInside.style.cursor = 'pointer';
+                btnTextInside.title = isInside ? 'Move text label outside' : 'Move text label inside';
+              }
             }
           } else {
             rowTextInside.style.display = 'none';
@@ -4990,7 +5043,8 @@ export function initModelCanvas() {
         bold: !!node.bold,
         italic: !!node.italic,
         underline: !!node.underline,
-        labelInside: !!node.labelInside,
+        textInside: node.isLatent ? !!node.textInside : (node.textInside !== undefined ? node.textInside : true),
+        labelInside: node.isLatent ? !!node.textInside : (node.textInside !== undefined ? node.textInside : true),
         isText: !!node.isText,
         isLatent: !!node.isLatent
       };
