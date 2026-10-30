@@ -113,43 +113,81 @@ export function initModelCanvas() {
     }
   }
 
-  function loadCanvasSettings() {
+  function getCanvasSettingsFromStore() {
+    if (typeof window !== 'undefined' && window.__useStore) {
+      try {
+        return window.__useStore.getState()?.settings;
+      } catch (e) {}
+    }
     try {
-      const stored = localStorage.getItem('statsem-storage');
+      const stored = localStorage.getItem('cspls-storage') || localStorage.getItem('statsem-storage');
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (parsed?.state?.settings) {
-          if (parsed.state.settings.canvasGrid) currentGrid = parsed.state.settings.canvasGrid;
-          if (parsed.state.settings.canvasBgColor) currentBgColor = parsed.state.settings.canvasBgColor;
-          if (parsed.state.settings.canvasRecentBgColors) currentRecentBgColors = parsed.state.settings.canvasRecentBgColors;
-        }
+        if (parsed?.state?.settings) return parsed.state.settings;
       }
     } catch (e) {}
+    return null;
+  }
+
+  function loadCanvasSettings() {
+    const s = getCanvasSettingsFromStore();
+    if (s) {
+      if (s.canvasGrid) currentGrid = s.canvasGrid;
+      if (s.canvasBgColor !== undefined) currentBgColor = s.canvasBgColor;
+      if (Array.isArray(s.canvasRecentBgColors)) currentRecentBgColors = s.canvasRecentBgColors;
+    }
     applyGrid(currentGrid);
     applyBgColor(currentBgColor);
   }
 
   function saveCanvasSettings(updates) {
+    if (typeof window !== 'undefined' && window.__useStore) {
+      try {
+        window.__useStore.getState().updateSettings(updates);
+      } catch (e) {}
+    }
     try {
-      const stored = localStorage.getItem('statsem-storage');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (parsed?.state?.settings) {
-          parsed.state.settings = { ...parsed.state.settings, ...updates };
-          localStorage.setItem('statsem-storage', JSON.stringify(parsed));
+      ['cspls-storage', 'statsem-storage'].forEach(key => {
+        const stored = localStorage.getItem(key);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed?.state?.settings) {
+            parsed.state.settings = { ...parsed.state.settings, ...updates };
+            localStorage.setItem(key, JSON.stringify(parsed));
+          }
         }
-      }
+      });
     } catch (e) {}
   }
 
   loadCanvasSettings();
 
+  if (typeof window !== 'undefined' && window.__useStore) {
+    window.__useStore.subscribe((state, prevState) => {
+      if (state?.settings?.canvasGrid && state.settings.canvasGrid !== currentGrid) {
+        applyGrid(state.settings.canvasGrid);
+      }
+      if (state?.settings?.canvasBgColor !== undefined && state.settings.canvasBgColor !== currentBgColor) {
+        applyBgColor(state.settings.canvasBgColor);
+      }
+      if (Array.isArray(state?.settings?.canvasRecentBgColors)) {
+        currentRecentBgColors = state.settings.canvasRecentBgColors;
+      }
+    });
+  }
+
   window.addEventListener('canvas-grid-change', (e) => {
-    if (e.detail?.grid) applyGrid(e.detail.grid);
+    if (e.detail?.grid) {
+      applyGrid(e.detail.grid);
+      saveCanvasSettings({ canvasGrid: e.detail.grid });
+    }
   }, { signal });
 
   window.addEventListener('canvas-bg-change', (e) => {
-    if (e.detail?.color !== undefined) applyBgColor(e.detail.color);
+    if (e.detail?.color !== undefined) {
+      applyBgColor(e.detail.color);
+      saveCanvasSettings({ canvasBgColor: e.detail.color });
+    }
   }, { signal });
 
   // Ensure all arrowhead markers exist in SVG defs
@@ -642,8 +680,10 @@ export function initModelCanvas() {
     nodes.forEach(n => {
       delete n.fill;
       delete n.stroke;
+      delete n.strokeWidth;
       delete n.color;
       delete n.fontSize;
+      delete n.fontFamily;
       delete n.bold;
       delete n.italic;
       delete n.underline;
@@ -651,16 +691,42 @@ export function initModelCanvas() {
       delete n.width;
       delete n.height;
       delete n.textInside;
+      delete n.textAlign;
+      delete n.verticalAlign;
+      delete n.edgeColor;
+      delete n.edgeStrokeWidth;
+      delete n.edgeStrokeDasharray;
+      delete n.edgeArrowhead;
+      delete n.edgeCurved;
+      delete n.edgeWaypoints;
     });
     edges.forEach(e => {
+      delete e.color;
       delete e.waypoints;
       delete e.strokeWidth;
       delete e.strokeDasharray;
       delete e.arrowhead;
     });
+    moderatingEffects.forEach(m => {
+      delete m.color;
+      delete m.strokeWidth;
+      delete m.strokeDasharray;
+      delete m.arrowhead;
+    });
+
+    // Reset canvas background and grid to default
+    currentBgColor = '';
+    currentGrid = 'dots';
+    applyBgColor('');
+    applyGrid('dots');
+    saveCanvasSettings({ canvasBgColor: '', canvasGrid: 'dots' });
+    window.dispatchEvent(new CustomEvent('canvas-bg-change', { detail: { color: '' } }));
+    window.dispatchEvent(new CustomEvent('canvas-grid-change', { detail: { grid: 'dots' } }));
+
     render();
     pushHistory();
     window.dispatchEvent(new CustomEvent('canvas-changed'));
+    window.dispatchEvent(new CustomEvent('model-styles-reset'));
   }
 
   document.getElementById('hud-reset')?.addEventListener('click', function(e) {
@@ -4519,6 +4585,9 @@ export function initModelCanvas() {
     contextMenu.className = 'canvas-context-menu';
     document.body.appendChild(contextMenu);
   }
+  contextMenu.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+  });
 
   function hideContextMenu() {
     contextMenu.style.display = 'none';
@@ -4697,27 +4766,30 @@ export function initModelCanvas() {
     }
 
     // Custom Color "+" button
-    const plusBtn = document.createElement('button');
-    plusBtn.type = 'button';
-    plusBtn.title = 'Custom Canvas Color';
-    plusBtn.style.width = '22px';
-    plusBtn.style.height = '22px';
-    plusBtn.style.borderRadius = '50%';
-    plusBtn.style.background = 'transparent';
-    plusBtn.style.border = '1px dashed var(--color-border-subtle, #cbd5e1)';
-    plusBtn.style.display = 'flex';
-    plusBtn.style.alignItems = 'center';
-    plusBtn.style.justifyContent = 'center';
-    plusBtn.style.color = 'var(--color-text-secondary)';
-    plusBtn.style.position = 'relative';
-    plusBtn.style.cursor = 'pointer';
-    plusBtn.style.flexShrink = '0';
+    const plusLabel = document.createElement('label');
+    plusLabel.title = 'Custom Canvas Color';
+    plusLabel.style.width = '22px';
+    plusLabel.style.height = '22px';
+    plusLabel.style.borderRadius = '50%';
+    plusLabel.style.background = 'transparent';
+    plusLabel.style.border = '1px dashed var(--color-border-subtle, #cbd5e1)';
+    plusLabel.style.display = 'inline-flex';
+    plusLabel.style.alignItems = 'center';
+    plusLabel.style.justifyContent = 'center';
+    plusLabel.style.color = 'var(--color-text-secondary)';
+    plusLabel.style.position = 'relative';
+    plusLabel.style.cursor = 'pointer';
+    plusLabel.style.flexShrink = '0';
+    plusLabel.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+    });
 
     const plusSign = document.createElement('span');
     plusSign.style.fontSize = '14px';
     plusSign.style.lineHeight = '1';
+    plusSign.style.pointerEvents = 'none';
     plusSign.textContent = '+';
-    plusBtn.appendChild(plusSign);
+    plusLabel.appendChild(plusSign);
 
     const colorInput = document.createElement('input');
     colorInput.type = 'color';
@@ -4729,6 +4801,9 @@ export function initModelCanvas() {
     colorInput.style.height = '100%';
     colorInput.style.opacity = '0';
     colorInput.style.cursor = 'pointer';
+    colorInput.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+    });
 
     const onColorPick = (val) => {
       applyBgColor(val);
@@ -4740,14 +4815,16 @@ export function initModelCanvas() {
     };
 
     colorInput.addEventListener('input', (ev) => {
+      ev.stopPropagation();
       onColorPick(ev.target.value);
     });
     colorInput.addEventListener('change', (ev) => {
+      ev.stopPropagation();
       onColorPick(ev.target.value);
       hideContextMenu();
     });
-    plusBtn.appendChild(colorInput);
-    swatchRow.appendChild(plusBtn);
+    plusLabel.appendChild(colorInput);
+    swatchRow.appendChild(plusLabel);
 
     container.appendChild(swatchRow);
     return container;
@@ -4905,7 +4982,7 @@ export function initModelCanvas() {
         { divider: true },
         { custom: true, render: () => createCanvasBgCtxElement() },
         { divider: true },
-        { id: 'ctx-reset-styles', label: 'Reset Default Styles', icon: 'restart_alt', disabled: !hasCanvasElements, action: () => {
+        { id: 'ctx-reset-styles', label: 'Reset Default Styles', icon: 'restart_alt', disabled: !hasCanvasElements && !currentBgColor && currentGrid === 'dots', action: () => {
             if (window._customResetStylesHandler) {
               window._customResetStylesHandler();
             } else {

@@ -1737,9 +1737,20 @@ const ModelEditor = () => {
       }
     };
 
+    const handleModelStylesReset = () => {
+      setActiveFill('#ffffff');
+      setActiveBorder('#334155');
+      setActiveText('#0f172a');
+      setActiveArrowColor('#0f172a');
+      setActiveBorderWeight(1.5);
+      setEdgeLineStyle('solid');
+      setEdgeArrowhead('solid');
+    };
+
     window.addEventListener('moderation-selected', handleModSelected);
     window.addEventListener('selectionChange', handleSelectionChange);
     window.addEventListener('keydown', handleKeyDownMod);
+    window.addEventListener('model-styles-reset', handleModelStylesReset);
 
     return () => {
       clearTimeout(timer);
@@ -1749,6 +1760,7 @@ const ModelEditor = () => {
       window.removeEventListener('moderation-selected', handleModSelected);
       window.removeEventListener('selectionChange', handleSelectionChange);
       window.removeEventListener('keydown', handleKeyDownMod);
+      window.removeEventListener('model-styles-reset', handleModelStylesReset);
       setCanvasResults(null);
       loadModelCanvasState({ nodes: [], edges: [] });
     };
@@ -2409,6 +2421,7 @@ const ModelEditor = () => {
       {/* ─── Center Canvas Area ─── */}
       <main
         className="canvas-area"
+        style={{ backgroundColor: settings.canvasBgColor || undefined }}
         onDragEnter={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }}
         onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }}
         onDrop={handleCanvasDrop}
@@ -3350,8 +3363,8 @@ const ModelEditor = () => {
               <circle cx={5} cy={5} r={3.5} fill="var(--color-accent)" />
             </marker>
           </defs>
-          <rect id="bg-color-rect" width="100%" height="100%" fill="transparent" />
-          <rect id="bg-rect" width="100%" height="100%" fill="url(#dot-grid)" />
+          <rect id="bg-color-rect" width="100%" height="100%" fill={settings.canvasBgColor || 'transparent'} />
+          <rect id="bg-rect" width="100%" height="100%" fill={settings.canvasGrid === 'blank' ? 'transparent' : settings.canvasGrid === 'grid' ? 'url(#line-grid)' : 'url(#dot-grid)'} />
           <g id="zoom-layer">
             <g id="edges-layer" />
             <g id="nodes-layer" />

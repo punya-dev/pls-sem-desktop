@@ -1193,3 +1193,8 @@ export const useStore = create<AppState>()(
     }
   )
 );
+
+if (typeof window !== 'undefined') {
+  (window as any).__useStore = useStore;
+}
+
