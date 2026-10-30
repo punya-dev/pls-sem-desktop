@@ -118,41 +118,47 @@ export function initModelCanvas() {
     if (!defs.querySelector(`#${markerId}`)) {
       const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
       marker.setAttribute('id', markerId);
-      marker.setAttribute('markerWidth', '10');
-      marker.setAttribute('markerHeight', '10');
       marker.setAttribute('orient', 'auto');
       if (type === 'solid') {
-        marker.setAttribute('refX', '9');
-        marker.setAttribute('refY', '5');
+        marker.setAttribute('markerWidth', '9');
+        marker.setAttribute('markerHeight', '7');
+        marker.setAttribute('refX', '7.5');
+        marker.setAttribute('refY', '3.5');
         const p = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-        p.setAttribute('points', '0 1.5, 9 5, 0 8.5');
+        p.setAttribute('points', '1 1, 7.5 3.5, 1 6');
         p.setAttribute('fill', color);
         marker.appendChild(p);
       } else if (type === 'open') {
-        marker.setAttribute('refX', '8.5');
-        marker.setAttribute('refY', '5');
+        marker.setAttribute('markerWidth', '9');
+        marker.setAttribute('markerHeight', '7');
+        marker.setAttribute('refX', '7.5');
+        marker.setAttribute('refY', '3.5');
         const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        p.setAttribute('d', 'M 1 1.5 L 8.5 5 L 1 8.5');
+        p.setAttribute('d', 'M 1 0.8 L 7.5 3.5 L 1 6.2');
         p.setAttribute('fill', 'none');
         p.setAttribute('stroke', color);
-        p.setAttribute('stroke-width', '1.8');
+        p.setAttribute('stroke-width', '1.0');
         p.setAttribute('stroke-linecap', 'round');
         p.setAttribute('stroke-linejoin', 'round');
         marker.appendChild(p);
       } else if (type === 'diamond') {
-        marker.setAttribute('refX', '9');
-        marker.setAttribute('refY', '5');
+        marker.setAttribute('markerWidth', '9');
+        marker.setAttribute('markerHeight', '7');
+        marker.setAttribute('refX', '8');
+        marker.setAttribute('refY', '3.5');
         const p = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-        p.setAttribute('points', '1 5, 5 1.8, 9 5, 5 8.2');
+        p.setAttribute('points', '1 3.5, 4.5 1.2, 8 3.5, 4.5 5.8');
         p.setAttribute('fill', color);
         marker.appendChild(p);
       } else if (type === 'circle') {
-        marker.setAttribute('refX', '8.5');
-        marker.setAttribute('refY', '5');
+        marker.setAttribute('markerWidth', '8');
+        marker.setAttribute('markerHeight', '8');
+        marker.setAttribute('refX', '7');
+        marker.setAttribute('refY', '4');
         const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        c.setAttribute('cx', '5');
-        c.setAttribute('cy', '5');
-        c.setAttribute('r', '3.5');
+        c.setAttribute('cx', '4');
+        c.setAttribute('cy', '4');
+        c.setAttribute('r', '3');
         c.setAttribute('fill', color);
         marker.appendChild(c);
       }
@@ -1520,21 +1526,36 @@ export function initModelCanvas() {
           render();
           pushHistory();
           window.dispatchEvent(new CustomEvent('canvas-changed'));
+          document.dispatchEvent(new CustomEvent('selectionChange'));
+          window.dispatchEvent(new CustomEvent('selectionChange'));
         } else if (action === 'shape-rect') {
           nodes.filter(n => selectedIds.has(n.id) && !n.isText).forEach(n => n.shape = 'rect');
           render();
           pushHistory();
           window.dispatchEvent(new CustomEvent('canvas-changed'));
+          document.dispatchEvent(new CustomEvent('selectionChange'));
+          window.dispatchEvent(new CustomEvent('selectionChange'));
+        } else if (action === 'shape-rounded') {
+          nodes.filter(n => selectedIds.has(n.id) && !n.isText).forEach(n => n.shape = 'rounded');
+          render();
+          pushHistory();
+          window.dispatchEvent(new CustomEvent('canvas-changed'));
+          document.dispatchEvent(new CustomEvent('selectionChange'));
+          window.dispatchEvent(new CustomEvent('selectionChange'));
         } else if (action === 'shape-hex') {
           nodes.filter(n => selectedIds.has(n.id) && !n.isText).forEach(n => n.shape = 'hexagon');
           render();
           pushHistory();
           window.dispatchEvent(new CustomEvent('canvas-changed'));
+          document.dispatchEvent(new CustomEvent('selectionChange'));
+          window.dispatchEvent(new CustomEvent('selectionChange'));
         } else if (action === 'shape-oct') {
           nodes.filter(n => selectedIds.has(n.id) && !n.isText).forEach(n => n.shape = 'octagon');
           render();
           pushHistory();
           window.dispatchEvent(new CustomEvent('canvas-changed'));
+          document.dispatchEvent(new CustomEvent('selectionChange'));
+          window.dispatchEvent(new CustomEvent('selectionChange'));
         }
         
         else if (action === 'text-bold') {
@@ -1721,6 +1742,33 @@ export function initModelCanvas() {
       edges.filter(edge => selectedIds.has(edge.id)).forEach(edge => edge.arrowhead = arrowType);
       moderatingEffects.filter(m => selectedIds.has(m.id)).forEach(m => m.arrowhead = arrowType);
       nodes.filter(n => selectedIds.has(`edge_ind_${n.id}`)).forEach(n => n.edgeArrowhead = arrowType);
+      render();
+      pushHistory();
+      window.dispatchEvent(new CustomEvent('canvas-changed'));
+      document.dispatchEvent(new CustomEvent('selectionChange'));
+      window.dispatchEvent(new CustomEvent('selectionChange'));
+    }
+  }, { signal });
+
+  document.addEventListener('edge-stroke-width-change', (e) => {
+    const w = e.detail?.width;
+    if (w !== undefined) {
+      const numW = parseFloat(w) || 1.5;
+      edges.filter(edge => selectedIds.has(edge.id)).forEach(edge => edge.strokeWidth = numW);
+      moderatingEffects.filter(m => selectedIds.has(m.id)).forEach(m => m.strokeWidth = numW);
+      nodes.filter(n => selectedIds.has(`edge_ind_${n.id}`)).forEach(n => n.edgeStrokeWidth = numW);
+      render();
+      pushHistory();
+      window.dispatchEvent(new CustomEvent('canvas-changed'));
+      document.dispatchEvent(new CustomEvent('selectionChange'));
+      window.dispatchEvent(new CustomEvent('selectionChange'));
+    }
+  }, { signal });
+
+  document.addEventListener('node-shape-change', (e) => {
+    const shape = e.detail?.shape;
+    if (shape) {
+      nodes.filter(n => selectedIds.has(n.id) && !n.isText).forEach(n => n.shape = shape);
       render();
       pushHistory();
       window.dispatchEvent(new CustomEvent('canvas-changed'));
@@ -2056,7 +2104,14 @@ export function initModelCanvas() {
       el.setAttribute('y', -h/2 + insetW);
       el.setAttribute('width', Math.max(0, w - sw));
       el.setAttribute('height', Math.max(0, h - sw));
-      el.setAttribute('rx', node.isLatent ? '8' : '2');
+      el.setAttribute('rx', '0');
+    } else if (shape === 'rounded') {
+      el = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      el.setAttribute('x', -w/2 + insetW);
+      el.setAttribute('y', -h/2 + insetW);
+      el.setAttribute('width', Math.max(0, w - sw));
+      el.setAttribute('height', Math.max(0, h - sw));
+      el.setAttribute('rx', node.isLatent ? '12' : '6');
     } else if (shape === 'hexagon') {
       el = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
       const scaleX = w > sw ? (w - sw) / w : 0;
@@ -3805,10 +3860,10 @@ export function initModelCanvas() {
           if (containerColors) containerColors.style.display = 'block';
           if (containerText) containerText.style.display = 'block';
         } else {
-          // Indicator selected: extend toolbar with Align, Colors, Typography (hide shape)
+          // Indicator selected: extend toolbar with Align, Style/Shape, Colors, Typography
           if (containerAlign) containerAlign.style.display = 'block';
           if (containerTextboxAlign) containerTextboxAlign.style.display = 'none';
-          if (containerStyle) containerStyle.style.display = 'none';
+          if (containerStyle) containerStyle.style.display = 'block';
           if (containerColors) containerColors.style.display = 'block';
           if (containerText) containerText.style.display = 'block';
         }
@@ -4653,9 +4708,10 @@ export function initModelCanvas() {
       const dirX = isTarget ? dx : dx;
       const dirY = isTarget ? dy : dy;
       
-      if (node.isLatent !== false && shape === 'circle') {
-        const r = w / 2;
-        return { x: (dirX / distance) * r, y: (dirY / distance) * (h / 2) };
+      if (shape === 'circle') {
+        const rx = w / 2;
+        const ry = h / 2;
+        return { x: (dirX / distance) * rx, y: (dirY / distance) * ry };
       } else {
         const rx = w / 2;
         const ry = h / 2;
@@ -5833,6 +5889,7 @@ export function initModelCanvas() {
         textInside: node.isLatent ? !!node.textInside : (node.textInside !== undefined ? node.textInside : true),
         labelInside: node.isLatent ? !!node.textInside : (node.textInside !== undefined ? node.textInside : true),
         textPosition: node.textPosition || 'bottom',
+        shape: node.shape || (node.isLatent ? 'circle' : 'rect'),
         isText: !!node.isText,
         isLatent: !!node.isLatent
       };

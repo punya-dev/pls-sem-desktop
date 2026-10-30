@@ -297,6 +297,8 @@ const ModelEditor = () => {
   const [textboxValign, setTextboxValign] = useState<'top' | 'middle' | 'bottom'>('middle');
   const [edgeLineStyle, setEdgeLineStyle] = useState<'solid' | 'dashed' | 'dotted' | 'curved'>('solid');
   const [edgeArrowhead, setEdgeArrowhead] = useState<'solid' | 'open' | 'diamond' | 'circle'>('solid');
+  const [activeNodeShape, setActiveNodeShape] = useState<string>('circle');
+  const [edgeStrokeWidth, setEdgeStrokeWidth] = useState<number>(1.5);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
 
   const fixedArrowColors = ['#0f172a', '#334155', '#ffffff'];
@@ -367,6 +369,7 @@ const ModelEditor = () => {
           if (info.lineStyle) setEdgeLineStyle(info.lineStyle);
           if (info.arrowhead) setEdgeArrowhead(info.arrowhead);
           if (info.color) setActiveArrowColor(info.color);
+          if (info.strokeWidth !== undefined) setEdgeStrokeWidth(info.strokeWidth);
         }
       }
       if (typeof window !== 'undefined' && (window as any).getSelectedNodeInfo) {
@@ -374,6 +377,7 @@ const ModelEditor = () => {
         if (nInfo) {
           setSelectedNodeType(nInfo.isText ? 'text' : (nInfo.isLatent ? 'latent' : 'indicator'));
           if (nInfo.strokeWidth !== undefined) setActiveBorderWeight(nInfo.strokeWidth);
+          if (nInfo.shape) setActiveNodeShape(nInfo.shape);
           if (nInfo.textAlign) setTextboxAlign(nInfo.textAlign);
           if (nInfo.verticalAlign) setTextboxValign(nInfo.verticalAlign);
           if (nInfo.fill) setActiveFill(nInfo.fill);
@@ -2613,10 +2617,44 @@ const ModelEditor = () => {
               style={{ display: openDropdown === 'style' ? 'flex' : 'none' }}
               onClick={() => setOpenDropdown(null)}
             >
-              <div className="tb-dropdown-item" data-action="shape-circle"><span className="material-symbols-outlined">radio_button_unchecked</span> Circle</div>
-              <div className="tb-dropdown-item" data-action="shape-rect"><span className="material-symbols-outlined">crop_square</span> Rectangle</div>
-              <div className="tb-dropdown-item" data-action="shape-hex"><span className="material-symbols-outlined">hexagon</span> Hexagon</div>
-              <div className="tb-dropdown-item" data-action="shape-oct"><span className="material-symbols-outlined">stop_circle</span> Octagon</div>
+              {[
+                { id: 'circle', action: 'shape-circle', icon: 'radio_button_unchecked', label: 'Circle' },
+                { id: 'rect', action: 'shape-rect', icon: 'crop_square', label: 'Rectangle' },
+                { id: 'rounded', action: 'shape-rounded', icon: 'rectangle', label: 'Rounded Rect' },
+                { id: 'hexagon', action: 'shape-hex', icon: 'hexagon', label: 'Hexagon' },
+                { id: 'octagon', action: 'shape-oct', icon: 'stop_circle', label: 'Octagon' },
+              ].map(opt => (
+                <div
+                  key={opt.id}
+                  className={`tb-dropdown-item ${activeNodeShape === opt.id ? 'active-edge-option' : ''}`}
+                  data-action={opt.action}
+                  onClick={() => {
+                    setActiveNodeShape(opt.id);
+                    document.dispatchEvent(new CustomEvent('node-shape-change', { detail: { shape: opt.id } }));
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '6px 8px',
+                    height: '32px',
+                    borderRadius: '6px',
+                    marginBottom: '2px',
+                    background: activeNodeShape === opt.id ? 'var(--color-accent-subtle)' : 'transparent',
+                    border: activeNodeShape === opt.id ? '1px solid var(--color-accent)' : '1px solid transparent',
+                    color: activeNodeShape === opt.id ? 'var(--color-accent)' : 'var(--color-text-primary)',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>{opt.icon}</span>
+                    <span style={{ fontSize: '11px', fontWeight: 500 }}>{opt.label}</span>
+                  </div>
+                  {activeNodeShape === opt.id && (
+                    <span className="material-symbols-outlined" style={{ fontSize: '16px', color: 'var(--color-accent)' }}>check</span>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
           <div className="tb-dropdown-container" id="container-colors">
@@ -3106,6 +3144,38 @@ const ModelEditor = () => {
                   flexDirection: 'column'
                 }}
               >
+                <div style={{marginBottom: '10px'}}>
+                  <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '6px'}}>
+                    Line Weight
+                  </div>
+                  <div style={{display: 'flex', gap: '4px', alignItems: 'center'}}>
+                    {[1, 1.5, 2, 3, 4].map((w) => (
+                      <button
+                        key={w}
+                        type="button"
+                        style={{
+                          flex: 1,
+                          height: '24px',
+                          border: edgeStrokeWidth === w ? '1px solid var(--color-accent)' : '1px solid var(--color-border-subtle, #cbd5e1)',
+                          background: edgeStrokeWidth === w ? 'var(--color-accent-subtle)' : 'var(--color-bg-base)',
+                          color: edgeStrokeWidth === w ? 'var(--color-accent)' : 'var(--color-text-primary)',
+                          borderRadius: '4px',
+                          fontSize: '11px',
+                          fontWeight: edgeStrokeWidth === w ? 600 : 400,
+                          cursor: 'pointer',
+                          padding: 0
+                        }}
+                        onClick={() => {
+                          setEdgeStrokeWidth(w);
+                          document.dispatchEvent(new CustomEvent('edge-stroke-width-change', { detail: { width: w } }));
+                        }}
+                      >
+                        {w}px
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '6px'}}>
                   Arrow Color
                 </div>
