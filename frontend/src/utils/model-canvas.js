@@ -1615,6 +1615,7 @@ export function initModelCanvas() {
         } else if (action.startsWith('text-pos-')) {
           const pos = action.replace('text-pos-', '');
           nodes.filter(n => selectedIds.has(n.id) && !n.isText).forEach(n => {
+            n.textInside = false;
             n.textPosition = pos;
           });
           render();
@@ -5123,20 +5124,6 @@ export function initModelCanvas() {
         { divider: true },
         { id: 'ctx-new-latent', label: 'New Latent Variable', icon: 'add_circle', shortcut: 'O', action: () => createAndEditNewLatentNode(contextMenuMousePos?.x, contextMenuMousePos?.y) },
         { id: 'ctx-paste', label: 'Paste', icon: 'content_paste', shortcut: '⌘V', disabled: !hasClipboard, action: () => pasteClipboard() },
-        { divider: true },
-        { id: 'ctx-select-all', label: 'Select All', icon: 'select_all', shortcut: '⌘A', disabled: !hasSelectable, action: () => {
-            selectedIds.clear();
-            nodes.forEach(n => {
-              if (n.parentId) {
-                const parent = nodes.find(p => p.id === n.parentId);
-                if (parent && parent.indicatorsHidden) return;
-              }
-              selectedIds.add(n.id);
-            });
-            edges.forEach(ed => selectedIds.add(ed.id));
-            render();
-          }
-        },
         { id: 'ctx-clear-all', label: 'Clear All', icon: 'delete_sweep', danger: true, disabled: !hasCanvasElements, action: () => {
             if (window._customClearCanvasHandler) {
               window._customClearCanvasHandler();
@@ -5195,6 +5182,38 @@ export function initModelCanvas() {
             window.dispatchEvent(new CustomEvent('canvas-changed'));
           }
         },
+        { id: 'ctx-name-top', label: 'Move Name Top', icon: 'align_vertical_top', action: () => {
+            targetNode.textInside = false;
+            targetNode.textPosition = 'top';
+            render();
+            pushHistory();
+            window.dispatchEvent(new CustomEvent('canvas-changed'));
+          }
+        },
+        { id: 'ctx-name-bottom', label: 'Move Name Bottom', icon: 'align_vertical_bottom', action: () => {
+            targetNode.textInside = false;
+            targetNode.textPosition = 'bottom';
+            render();
+            pushHistory();
+            window.dispatchEvent(new CustomEvent('canvas-changed'));
+          }
+        },
+        { id: 'ctx-name-left', label: 'Move Name Left', icon: 'align_horizontal_left', action: () => {
+            targetNode.textInside = false;
+            targetNode.textPosition = 'left';
+            render();
+            pushHistory();
+            window.dispatchEvent(new CustomEvent('canvas-changed'));
+          }
+        },
+        { id: 'ctx-name-right', label: 'Move Name Right', icon: 'align_horizontal_right', action: () => {
+            targetNode.textInside = false;
+            targetNode.textPosition = 'right';
+            render();
+            pushHistory();
+            window.dispatchEvent(new CustomEvent('canvas-changed'));
+          }
+        },
         { divider: true },
         { id: 'ctx-mode', label: isReflective ? 'Make Formative' : 'Make Reflexive', icon: 'swap_horiz', action: () => {
             targetNode.type = isReflective ? 'formative' : 'reflective';
@@ -5236,6 +5255,38 @@ export function initModelCanvas() {
         { id: 'ctx-rename', label: 'Rename', icon: 'edit', action: () => startInlineNodeRename(targetNode) },
         { id: 'ctx-text-inside', label: isIndInside ? 'Move Name Outside' : 'Move Name Inside', icon: isIndInside ? 'open_in_new' : 'vertical_align_center', action: () => {
             targetNode.textInside = !isIndInside;
+            render();
+            pushHistory();
+            window.dispatchEvent(new CustomEvent('canvas-changed'));
+          }
+        },
+        { id: 'ctx-name-top', label: 'Move Name Top', icon: 'align_vertical_top', action: () => {
+            targetNode.textInside = false;
+            targetNode.textPosition = 'top';
+            render();
+            pushHistory();
+            window.dispatchEvent(new CustomEvent('canvas-changed'));
+          }
+        },
+        { id: 'ctx-name-bottom', label: 'Move Name Bottom', icon: 'align_vertical_bottom', action: () => {
+            targetNode.textInside = false;
+            targetNode.textPosition = 'bottom';
+            render();
+            pushHistory();
+            window.dispatchEvent(new CustomEvent('canvas-changed'));
+          }
+        },
+        { id: 'ctx-name-left', label: 'Move Name Left', icon: 'align_horizontal_left', action: () => {
+            targetNode.textInside = false;
+            targetNode.textPosition = 'left';
+            render();
+            pushHistory();
+            window.dispatchEvent(new CustomEvent('canvas-changed'));
+          }
+        },
+        { id: 'ctx-name-right', label: 'Move Name Right', icon: 'align_horizontal_right', action: () => {
+            targetNode.textInside = false;
+            targetNode.textPosition = 'right';
             render();
             pushHistory();
             window.dispatchEvent(new CustomEvent('canvas-changed'));

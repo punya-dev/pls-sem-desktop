@@ -2229,22 +2229,6 @@ export const SnapshotView: React.FC = () => {
                     </div>
                     <div className="canvas-ctx-divider" />
 
-                    {/* 1. Select All */}
-                    <div
-                      className="canvas-ctx-item"
-                      title="Select all nodes and edges"
-                      onClick={() => {
-                        setContextMenuPos(null);
-                        setSelectedIds(new Set(layoutNodes.map(n => n.id)));
-                        setToastMsg('All elements selected');
-                        setTimeout(() => setToastMsg(null), 1500);
-                      }}
-                    >
-                      <span className="material-symbols-outlined" style={{ fontSize: 16 }}>select_all</span>
-                      <span style={{ flex: 1 }}>Select All</span>
-                      <span style={{ fontSize: '11px', color: 'var(--color-text-hint)' }}>⌘A</span>
-                    </div>
-
                     {/* Move Name Inside / Outside */}
                     <div
                       className="canvas-ctx-item"
@@ -2261,6 +2245,58 @@ export const SnapshotView: React.FC = () => {
                         {targetNode.textInside ? 'open_in_new' : 'vertical_align_center'}
                       </span>
                       <span style={{ flex: 1 }}>{targetNode.textInside ? 'Move Name Outside' : 'Move Name Inside'}</span>
+                    </div>
+
+                    <div
+                      className="canvas-ctx-item"
+                      onClick={() => {
+                        setContextMenuPos(null);
+                        setLayoutNodes(prev => prev.map(n => n.id === targetNode.id ? { ...n, textInside: false, textPosition: 'top' } : n));
+                        setToastMsg('Name positioned top');
+                        setTimeout(() => setToastMsg(null), 2000);
+                      }}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: 16 }}>align_vertical_top</span>
+                      <span style={{ flex: 1 }}>Move Name Top</span>
+                    </div>
+
+                    <div
+                      className="canvas-ctx-item"
+                      onClick={() => {
+                        setContextMenuPos(null);
+                        setLayoutNodes(prev => prev.map(n => n.id === targetNode.id ? { ...n, textInside: false, textPosition: 'bottom' } : n));
+                        setToastMsg('Name positioned bottom');
+                        setTimeout(() => setToastMsg(null), 2000);
+                      }}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: 16 }}>align_vertical_bottom</span>
+                      <span style={{ flex: 1 }}>Move Name Bottom</span>
+                    </div>
+
+                    <div
+                      className="canvas-ctx-item"
+                      onClick={() => {
+                        setContextMenuPos(null);
+                        setLayoutNodes(prev => prev.map(n => n.id === targetNode.id ? { ...n, textInside: false, textPosition: 'left' } : n));
+                        setToastMsg('Name positioned left');
+                        setTimeout(() => setToastMsg(null), 2000);
+                      }}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: 16 }}>align_horizontal_left</span>
+                      <span style={{ flex: 1 }}>Move Name Left</span>
+                    </div>
+
+                    <div
+                      className="canvas-ctx-item"
+                      onClick={() => {
+                        setContextMenuPos(null);
+                        setLayoutNodes(prev => prev.map(n => n.id === targetNode.id ? { ...n, textInside: false, textPosition: 'right' } : n));
+                        setToastMsg('Name positioned right');
+                        setTimeout(() => setToastMsg(null), 2000);
+                      }}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: 16 }}>align_horizontal_right</span>
+                      <span style={{ flex: 1 }}>Move Name Right</span>
                     </div>
 
                     <div className="canvas-ctx-divider" />
@@ -2407,6 +2443,58 @@ export const SnapshotView: React.FC = () => {
                         {isIndInside ? 'open_in_new' : 'vertical_align_center'}
                       </span>
                       <span style={{ flex: 1 }}>{isIndInside ? 'Move Name Outside' : 'Move Name Inside'}</span>
+                    </div>
+
+                    <div
+                      className="canvas-ctx-item"
+                      onClick={() => {
+                        setContextMenuPos(null);
+                        setLayoutNodes(prev => prev.map(n => n.id === targetNode.id ? { ...n, textInside: false, textPosition: 'top' } : n));
+                        setToastMsg('Name positioned top');
+                        setTimeout(() => setToastMsg(null), 2000);
+                      }}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: 16 }}>align_vertical_top</span>
+                      <span style={{ flex: 1 }}>Move Name Top</span>
+                    </div>
+
+                    <div
+                      className="canvas-ctx-item"
+                      onClick={() => {
+                        setContextMenuPos(null);
+                        setLayoutNodes(prev => prev.map(n => n.id === targetNode.id ? { ...n, textInside: false, textPosition: 'bottom' } : n));
+                        setToastMsg('Name positioned bottom');
+                        setTimeout(() => setToastMsg(null), 2000);
+                      }}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: 16 }}>align_vertical_bottom</span>
+                      <span style={{ flex: 1 }}>Move Name Bottom</span>
+                    </div>
+
+                    <div
+                      className="canvas-ctx-item"
+                      onClick={() => {
+                        setContextMenuPos(null);
+                        setLayoutNodes(prev => prev.map(n => n.id === targetNode.id ? { ...n, textInside: false, textPosition: 'left' } : n));
+                        setToastMsg('Name positioned left');
+                        setTimeout(() => setToastMsg(null), 2000);
+                      }}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: 16 }}>align_horizontal_left</span>
+                      <span style={{ flex: 1 }}>Move Name Left</span>
+                    </div>
+
+                    <div
+                      className="canvas-ctx-item"
+                      onClick={() => {
+                        setContextMenuPos(null);
+                        setLayoutNodes(prev => prev.map(n => n.id === targetNode.id ? { ...n, textInside: false, textPosition: 'right' } : n));
+                        setToastMsg('Name positioned right');
+                        setTimeout(() => setToastMsg(null), 2000);
+                      }}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: 16 }}>align_horizontal_right</span>
+                      <span style={{ flex: 1 }}>Move Name Right</span>
                     </div>
 
                     <div className="canvas-ctx-divider" />
