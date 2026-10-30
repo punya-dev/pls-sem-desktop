@@ -16,8 +16,10 @@ import {
   FileText,
   Code,
   FileCheck,
-  LayoutGrid
+  LayoutGrid,
+  RotateCcw
 } from 'lucide-react';
+import { getCanvasGridColors } from '../utils/model-canvas';
 import '../model-canvas.css';
 import '../results.css';
 
@@ -87,7 +89,7 @@ const TableHeaderToggle: React.FC<TableHeaderToggleProps> = ({ label, mode, onTo
 );
 
 export const SnapshotView: React.FC = () => {
-  const { tabs, activeTabId, studies, workspaces, models, addModel, openTab } = useStore();
+  const { tabs, activeTabId, studies, workspaces, models, addModel, openTab, settings, theme } = useStore();
   const activeTab = tabs.find(t => t.id === activeTabId);
 
   const activeStudy = studies.find(s => s.id === activeTab?.studyId) ||
@@ -119,9 +121,23 @@ export const SnapshotView: React.FC = () => {
   const [zoomLevel, setZoomLevel] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
+  const [isSpacePressed, setIsSpacePressed] = useState(false);
+  const [isSnapping, setIsSnapping] = useState(true);
+  const [canvasBgColor, setCanvasBgColor] = useState<string>(settings?.canvasBgColor || '');
+  const [canvasGrid, setCanvasGrid] = useState<string>(settings?.canvasGrid || 'dots');
+  const [hudConfirm, setHudConfirm] = useState<'reset' | null>(null);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [contextMenuPos, setContextMenuPos] = useState<{ x: number; y: number } | null>(null);
+
+  const originalLayoutNodesRef = useRef<any[]>([]);
   const panStartRef = useRef({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+
+  // Dynamic grid colors matching background contrast
+  const gridColors = useMemo(() => {
+    return getCanvasGridColors(canvasBgColor);
+  }, [canvasBgColor, theme, settings?.theme]);
 
   // Dragging and interactive layout nodes
   const [layoutNodes, setLayoutNodes] = useState<any[]>([]);
@@ -189,12 +205,110 @@ export const SnapshotView: React.FC = () => {
   // Initialize layoutNodes and auto-center diagram view when diagram layout is loaded
   useEffect(() => {
     if (layout?.nodes && layout.nodes.length > 0) {
-      setLayoutNodes(JSON.parse(JSON.stringify(layout.nodes)));
+      const cloned = JSON.parse(JSON.stringify(layout.nodes));
+      originalLayoutNodesRef.current = JSON.parse(JSON.stringify(layout.nodes));
+      setLayoutNodes(cloned);
       setTimeout(() => {
-        centerDiagram(layout.nodes);
+        centerDiagram(cloned);
       }, 50);
     }
   }, [layout]);
+
+  // Touchpad two-finger move across to pan, and pinch to zoom (matching Model Editor)
+  useEffect(() => {
+    if (currentView !== 'diagram') return;
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+
+      if (e.ctrlKey || e.metaKey) {
+        // Pinch to zoom (trackpad pinch gesture or Ctrl/Cmd + wheel)
+        const zoomIntensity = 0.008;
+        const zoomFactor = Math.exp(-e.deltaY * zoomIntensity);
+
+        const rect = container.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        setZoomLevel(prevK => {
+          const newK = Math.max(0.1, Math.min(3, prevK * zoomFactor));
+          const ratio = newK / prevK;
+          setPanOffset(prevPan => ({
+            x: mouseX - (mouseX - prevPan.x) * ratio,
+            y: mouseY - (mouseY - prevPan.y) * ratio,
+          }));
+          return newK;
+        });
+      } else {
+        // Moving two fingers on trackpad or scrolling mouse wheel -> pan canvas
+        setPanOffset(prev => ({
+          x: prev.x - e.deltaX,
+          y: prev.y - e.deltaY,
+        }));
+      }
+    };
+
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    return () => {
+      container.removeEventListener('wheel', handleWheel);
+    };
+  }, [currentView]);
+
+  // Spacebar pan & global click to close popovers/menus
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !e.repeat) {
+        const isInput = e.target && (
+          (e.target as HTMLElement).tagName === 'INPUT' ||
+          (e.target as HTMLElement).tagName === 'TEXTAREA' ||
+          (e.target as HTMLElement).isContentEditable
+        );
+        if (!isInput) {
+          setIsSpacePressed(true);
+        }
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        setIsSpacePressed(false);
+      }
+    };
+
+    const handleGlobalClick = () => {
+      setContextMenuPos(null);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('click', handleGlobalClick);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('click', handleGlobalClick);
+    };
+  }, []);
+
+  // Revert to Default layout & styles
+  const handleRevertToDefault = () => {
+    const base = originalLayoutNodesRef.current.length > 0
+      ? originalLayoutNodesRef.current
+      : (layout?.nodes || []);
+    if (base.length > 0) {
+      const restored = JSON.parse(JSON.stringify(base));
+      setLayoutNodes(restored);
+      setZoomLevel(1);
+      centerDiagram(restored);
+    }
+    setCanvasBgColor('');
+    setCanvasGrid('dots');
+    setIsSnapping(true);
+    setHudConfirm(null);
+    setToastMsg('Canvas reverted to default layout and styles');
+    setTimeout(() => setToastMsg(null), 2500);
+  };
 
   const handleNodeMouseDown = (e: React.MouseEvent, nodeId: string) => {
     e.stopPropagation();
@@ -215,11 +329,11 @@ export const SnapshotView: React.FC = () => {
       const initialPos = initialNodesPosRef.current.get(draggingNodeId);
       if (!initialPos) return;
 
-      // Snap to 10px grid
+      // Snap to 10px grid if snapping is active
       const rawNewX = initialPos.x + dx;
       const rawNewY = initialPos.y + dy;
-      const snappedX = Math.round(rawNewX / 10) * 10;
-      const snappedY = Math.round(rawNewY / 10) * 10;
+      const snappedX = isSnapping ? Math.round(rawNewX / 10) * 10 : rawNewX;
+      const snappedY = isSnapping ? Math.round(rawNewY / 10) * 10 : rawNewY;
       const actualDx = snappedX - initialPos.x;
       const actualDy = snappedY - initialPos.y;
 
@@ -346,7 +460,8 @@ export const SnapshotView: React.FC = () => {
         const context = canvas.getContext('2d');
         if (!context) return;
         context.scale(scale, scale);
-        context.fillStyle = '#ffffff';
+        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+        context.fillStyle = canvasBgColor || (isDark ? '#0f172a' : '#ffffff');
         context.fillRect(0, 0, width, height);
         context.drawImage(image, 0, 0);
 
@@ -1747,10 +1862,10 @@ export const SnapshotView: React.FC = () => {
               position: 'relative',
               backgroundColor: 'var(--color-bg-base)',
               overflow: 'hidden',
-              cursor: isPanning ? 'grabbing' : (draggingNodeId ? 'move' : 'grab')
+              cursor: isPanning ? 'grabbing' : (isSpacePressed ? 'grab' : (draggingNodeId ? 'move' : 'default'))
             }}
             onMouseDown={(e) => {
-              if (e.button === 0 && !draggingNodeId) {
+              if ((e.button === 0 || e.button === 1 || isSpacePressed) && !draggingNodeId) {
                 setIsPanning(true);
                 panStartRef.current = { x: e.clientX - panOffset.x, y: e.clientY - panOffset.y };
               }
@@ -1758,10 +1873,9 @@ export const SnapshotView: React.FC = () => {
             onMouseMove={handleCanvasMouseMove}
             onMouseUp={handleCanvasMouseUp}
             onMouseLeave={handleCanvasMouseUp}
-            onWheel={(e) => {
+            onContextMenu={(e) => {
               e.preventDefault();
-              const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
-              setZoomLevel(prev => Math.max(0.2, Math.min(3, prev * zoomFactor)));
+              setContextMenuPos({ x: e.clientX, y: e.clientY });
             }}
           >
             {/* Diagram HUD Floating Bar docked on bottom left */}
@@ -1783,8 +1897,8 @@ export const SnapshotView: React.FC = () => {
               <div className="hud-zoom">
                 <div
                   className="hud-zoom__btn"
-                  onClick={() => setZoomLevel(z => Math.max(0.2, z - 0.1))}
-                  title="Zoom Out"
+                  onClick={() => setZoomLevel(z => Math.max(0.1, z - 0.1))}
+                  title="Zoom Out (−)"
                 >
                   −
                 </div>
@@ -1794,46 +1908,367 @@ export const SnapshotView: React.FC = () => {
                     setZoomLevel(1);
                     centerDiagram(layoutNodes.length > 0 ? layoutNodes : (layout?.nodes || []));
                   }}
-                  title="Reset Zoom"
+                  title="Reset Zoom to 100%"
                 >
                   {Math.round(zoomLevel * 100)}%
                 </div>
                 <div
                   className="hud-zoom__btn"
                   onClick={() => setZoomLevel(z => Math.min(3, z + 0.1))}
-                  title="Zoom In"
+                  title="Zoom In (+)"
                 >
                   +
                 </div>
               </div>
+
               <div
                 className="hud-btn"
                 onClick={() => {
                   setZoomLevel(1);
                   centerDiagram(layoutNodes.length > 0 ? layoutNodes : (layout?.nodes || []));
                 }}
-                title="Fit to Center"
+                title="Fit to Center (Reset Pan & Zoom)"
               >
                 <Maximize2 size={13} />
                 <span>Fit</span>
               </div>
+
+              <div className="hud-divider" />
+
+              <div
+                className={`hud-icon-btn ${isSnapping ? 'active' : ''}`}
+                onClick={() => setIsSnapping(s => !s)}
+                title={isSnapping ? "Disable Snap to Grid" : "Enable Snap to Grid (10px)"}
+              >
+                <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 14, height: 14 }}>
+                  <circle cx="4" cy="4" r="2" />
+                  <circle cx="12" cy="4" r="2" />
+                  <circle cx="20" cy="4" r="2" />
+                  <circle cx="4" cy="12" r="2" />
+                  <circle cx="12" cy="12" r="2" />
+                  <circle cx="20" cy="12" r="2" />
+                  <circle cx="4" cy="20" r="2" />
+                  <circle cx="12" cy="20" r="2" />
+                  <circle cx="20" cy="20" r="2" />
+                </svg>
+              </div>
+
+              <div className="hud-divider" />
+
               <div
                 className="hud-btn"
                 onClick={handleAutoAlign}
-                title="Auto-Align Layout"
+                title="Auto-Align Layout (Hierarchical Arrangement)"
               >
                 <LayoutGrid size={13} />
                 <span>Auto Align</span>
               </div>
+
               <div
                 className="hud-btn"
                 onClick={handleDownloadPNG}
-                title="Download PNG"
+                title="Download Diagram as High-Resolution PNG"
               >
                 <Download size={13} />
                 <span>Download PNG</span>
               </div>
+
+              <div className="hud-divider" />
+
+              <div
+                className="hud-btn"
+                id="hud-reset"
+                title="Reset to Default Layout & Styles"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setHudConfirm(c => c === 'reset' ? null : 'reset');
+                }}
+                style={{ color: 'var(--color-text-secondary)', padding: '0 6px', position: 'relative' }}
+              >
+                <RotateCcw size={14} />
+              </div>
+
+              {/* Popover confirmation matching canvas-hud pill dimensions & aesthetic */}
+              {hudConfirm === 'reset' && (
+                <div
+                  className="canvas-hud-confirm-popover"
+                  style={{
+                    position: 'absolute',
+                    bottom: 'calc(100% + 8px)',
+                    left: 0,
+                    right: 0,
+                    height: '38px',
+                    backgroundColor: 'var(--color-bg-elevated)',
+                    backdropFilter: 'blur(12px)',
+                    border: '1px solid var(--color-border-default)',
+                    boxShadow: 'var(--shadow-float)',
+                    borderRadius: 'var(--radius-xl)',
+                    padding: '4px 10px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    boxSizing: 'border-box',
+                    whiteSpace: 'nowrap',
+                    zIndex: 100,
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <span style={{ color: 'var(--color-text-primary)', fontWeight: 500, fontSize: '12px' }}>
+                    Revert to default layout &amp; styles?
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setHudConfirm(null)}
+                      title="Keep current changes"
+                      style={{
+                        height: '24px',
+                        padding: '0 8px',
+                        borderRadius: 'var(--radius-md, 6px)',
+                        backgroundColor: 'transparent',
+                        color: 'var(--color-text-secondary)',
+                        border: 'none',
+                        fontSize: '11px',
+                        fontWeight: 500,
+                        cursor: 'pointer',
+                        transition: 'all var(--transition-fast)',
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRevertToDefault}
+                      title="Confirm revert back to initial snapshot layout"
+                      style={{
+                        height: '24px',
+                        padding: '0 10px',
+                        borderRadius: 'var(--radius-md, 6px)',
+                        backgroundColor: 'var(--color-accent)',
+                        color: '#ffffff',
+                        border: 'none',
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        boxShadow: '0 1px 3px rgba(107, 78, 230, 0.3)',
+                        transition: 'all var(--transition-fast)',
+                      }}
+                    >
+                      Revert
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
+
+            {/* Canvas Context Menu on Right Click */}
+            {contextMenuPos && (
+              <div
+                className="canvas-ctx-menu"
+                style={{
+                  display: 'block',
+                  position: 'fixed',
+                  left: Math.min(contextMenuPos.x, window.innerWidth - 220),
+                  top: Math.min(contextMenuPos.y, window.innerHeight - 280),
+                  zIndex: 10000,
+                  backgroundColor: 'var(--color-bg-elevated)',
+                  backdropFilter: 'blur(12px)',
+                  border: '1px solid var(--color-border-default)',
+                  borderRadius: 'var(--radius-md, 8px)',
+                  boxShadow: 'var(--shadow-float, 0 8px 24px rgba(15, 23, 42, 0.12))',
+                  padding: '4px',
+                  minWidth: '200px',
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div
+                  className="canvas-ctx-item"
+                  title="Fit diagram to center"
+                  onClick={() => {
+                    setContextMenuPos(null);
+                    setZoomLevel(1);
+                    centerDiagram(layoutNodes.length > 0 ? layoutNodes : (layout?.nodes || []));
+                  }}
+                >
+                  <Maximize2 size={15} style={{ color: 'var(--color-text-secondary)' }} />
+                  <span style={{ flex: 1 }}>Fit Screen</span>
+                </div>
+                <div
+                  className="canvas-ctx-item"
+                  title="Export diagram as high-resolution image"
+                  onClick={() => {
+                    setContextMenuPos(null);
+                    handleDownloadPNG();
+                  }}
+                >
+                  <Download size={15} style={{ color: 'var(--color-text-secondary)' }} />
+                  <span style={{ flex: 1 }}>Export as Image</span>
+                </div>
+
+                <div className="canvas-ctx-divider" />
+
+                <div
+                  className="canvas-ctx-item"
+                  title={isSnapping ? "Disable 10px grid snapping" : "Enable 10px grid snapping"}
+                  onClick={() => {
+                    setContextMenuPos(null);
+                    setIsSnapping(s => !s);
+                  }}
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: 16 }}>
+                    {isSnapping ? 'grid_off' : 'grid_on'}
+                  </span>
+                  <span style={{ flex: 1 }}>{isSnapping ? 'Disable Snap to Grid' : 'Enable Snap to Grid'}</span>
+                </div>
+
+                <div className="canvas-ctx-divider" />
+
+                {/* Grid Pattern Options */}
+                <div style={{ padding: '4px 8px' }}>
+                  <div style={{ fontSize: '10px', fontWeight: 600, color: 'var(--color-text-hint)', textTransform: 'uppercase', marginBottom: '4px' }}>
+                    Grid Pattern
+                  </div>
+                  <div style={{ display: 'flex', gap: '4px' }}>
+                    {[
+                      { id: 'dots', label: 'Dots', title: 'Dots Pattern Grid' },
+                      { id: 'lines', label: 'Lines', title: 'Lines Pattern Grid' },
+                      { id: 'none', label: 'None', title: 'Blank Canvas (No Grid)' },
+                    ].map(opt => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        title={opt.title}
+                        onClick={() => setCanvasGrid(opt.id)}
+                        style={{
+                          flex: 1,
+                          height: '22px',
+                          border: canvasGrid === opt.id ? '1px solid var(--color-accent)' : '1px solid var(--color-border-subtle)',
+                          background: canvasGrid === opt.id ? 'var(--color-accent-subtle)' : 'var(--color-bg-base)',
+                          color: canvasGrid === opt.id ? 'var(--color-accent)' : 'var(--color-text-primary)',
+                          borderRadius: '4px',
+                          fontSize: '11px',
+                          fontWeight: canvasGrid === opt.id ? 600 : 400,
+                          cursor: 'pointer',
+                          padding: 0,
+                        }}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="canvas-ctx-divider" />
+
+                {/* Canvas Background Color Options */}
+                <div style={{ padding: '4px 8px' }}>
+                  <div style={{ fontSize: '10px', fontWeight: 600, color: 'var(--color-text-hint)', textTransform: 'uppercase', marginBottom: '4px' }}>
+                    Background Color
+                  </div>
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                    {[
+                      { id: '', bg: theme === 'dark' ? '#0f172a' : '#ffffff', title: 'Default Canvas Background' },
+                      { id: theme === 'dark' ? '#1e293b' : '#f8fafc', bg: theme === 'dark' ? '#1e293b' : '#f8fafc', title: 'Soft Contrast Background' },
+                    ].map(opt => (
+                      <button
+                        key={opt.title}
+                        type="button"
+                        title={opt.title}
+                        onClick={() => setCanvasBgColor(opt.id)}
+                        style={{
+                          width: '20px',
+                          height: '20px',
+                          borderRadius: '50%',
+                          background: opt.bg,
+                          border: canvasBgColor.toLowerCase() === opt.id.toLowerCase() ? '2px solid var(--color-accent)' : '1px solid rgba(0,0,0,0.2)',
+                          boxShadow: canvasBgColor.toLowerCase() === opt.id.toLowerCase() ? '0 0 0 2px var(--color-accent-subtle)' : 'none',
+                          cursor: 'pointer',
+                          flexShrink: 0,
+                        }}
+                      />
+                    ))}
+                    {/* Custom color picker */}
+                    <label
+                      title="Custom Background Color"
+                      style={{
+                        width: '20px',
+                        height: '20px',
+                        borderRadius: '50%',
+                        background: 'transparent',
+                        border: '1px dashed var(--color-border-subtle)',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: 'var(--color-text-secondary)',
+                        position: 'relative',
+                        cursor: 'pointer',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <span style={{ fontSize: '12px', lineHeight: 1 }}>+</span>
+                      <input
+                        type="color"
+                        title="Custom Canvas Color"
+                        value={canvasBgColor || (theme === 'dark' ? '#0f172a' : '#ffffff')}
+                        onChange={(e) => setCanvasBgColor(e.target.value)}
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          width: '100%',
+                          height: '100%',
+                          opacity: 0,
+                          cursor: 'pointer',
+                        }}
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="canvas-ctx-divider" />
+
+                <div
+                  className="canvas-ctx-item"
+                  title="Revert canvas layout and styles to default"
+                  onClick={() => {
+                    setContextMenuPos(null);
+                    handleRevertToDefault();
+                  }}
+                >
+                  <RotateCcw size={15} style={{ color: 'var(--color-text-secondary)' }} />
+                  <span style={{ flex: 1 }}>Revert to Default</span>
+                </div>
+              </div>
+            )}
+
+            {/* Floating Toast Notification */}
+            {toastMsg && (
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: '72px',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  backgroundColor: 'var(--color-bg-elevated)',
+                  color: 'var(--color-text-primary)',
+                  border: '1px solid var(--color-border-default)',
+                  borderRadius: 'var(--radius-xl, 20px)',
+                  boxShadow: 'var(--shadow-float, 0 8px 24px rgba(15, 23, 42, 0.12))',
+                  padding: '8px 16px',
+                  fontSize: '12px',
+                  fontWeight: 500,
+                  zIndex: 100,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  pointerEvents: 'none',
+                  backdropFilter: 'blur(12px)',
+                }}
+              >
+                <RotateCcw size={14} style={{ color: 'var(--color-accent)' }} />
+                <span>{toastMsg}</span>
+              </div>
+            )}
 
             {/* Interactive SVG Renderer */}
             {(() => {
@@ -1847,13 +2282,17 @@ export const SnapshotView: React.FC = () => {
                 >
                   <defs>
                     <pattern id="dot-grid-snap" width={20} height={20} patternUnits="userSpaceOnUse">
-                      <circle cx={2} cy={2} r={1} fill="var(--canvas-dot-color, rgba(100, 116, 139, 0.25))" />
+                      <circle cx={2} cy={2} r={1.2} fill={gridColors.dot} />
+                    </pattern>
+                    <pattern id="line-grid-snap" width={20} height={20} patternUnits="userSpaceOnUse">
+                      <path d="M 20 0 L 0 0 0 20" fill="none" stroke={gridColors.line} strokeWidth="1" />
                     </pattern>
                     <marker id="snap-arrowhead" markerWidth={10} markerHeight={7} refX={9} refY="3.5" orient="auto">
                       <polygon points="0 0, 10 3.5, 0 7" fill="var(--canvas-edge-stroke, #64748b)" />
                     </marker>
                   </defs>
-                  <rect width="100%" height="100%" fill="url(#dot-grid-snap)" />
+                  <rect width="100%" height="100%" fill={canvasBgColor || 'transparent'} />
+                  <rect width="100%" height="100%" fill={canvasGrid === 'none' ? 'transparent' : canvasGrid === 'lines' ? 'url(#line-grid-snap)' : 'url(#dot-grid-snap)'} />
 
                   <g transform={`translate(${panOffset.x}, ${panOffset.y}) scale(${zoomLevel})`}>
                     {/* 1. Measurement Indicator Lines (Parent Latent to Indicator) */}
@@ -1867,6 +2306,7 @@ export const SnapshotView: React.FC = () => {
                       const y2 = isFormative ? parentNode.y : indNode.y;
                       return (
                         <g key={`ind-link-${indNode.id}`}>
+                          <title>{isFormative ? `${indNode.label} → ${parentNode.label} (Formative weight)` : `${parentNode.label} → ${indNode.label} (Reflective loading)`}</title>
                           <line
                             x1={x1}
                             y1={y1}
@@ -1899,6 +2339,7 @@ export const SnapshotView: React.FC = () => {
 
                       return (
                         <g key={edge.id || `${edge.sourceId}-${edge.targetId}`}>
+                          <title>{srcNode.label} → {tgtNode.label}{beta !== undefined ? ` (Path Coefficient β = ${fmt(beta, 3)})` : ''}</title>
                           <line
                             x1={x1}
                             y1={y1}
@@ -1910,6 +2351,7 @@ export const SnapshotView: React.FC = () => {
                           />
                           {beta !== undefined && (
                             <g transform={`translate(${midX}, ${midY - 8})`}>
+                              <title>Path Coefficient: β({srcNode.label} → {tgtNode.label}) = {fmt(beta, 3)}</title>
                               <rect
                                 x="-22"
                                 y="-10"
@@ -1950,6 +2392,7 @@ export const SnapshotView: React.FC = () => {
                             onMouseDown={(e) => handleNodeMouseDown(e, node.id)}
                             style={{ cursor: 'move', pointerEvents: 'all' }}
                           >
+                            <title>Text Note: {node.label || node.text}</title>
                             <text
                               fontSize={node.fontSize || 13}
                               fill="var(--color-text-primary)"
@@ -1969,6 +2412,7 @@ export const SnapshotView: React.FC = () => {
                             onMouseDown={(e) => handleNodeMouseDown(e, node.id)}
                             style={{ cursor: 'move', pointerEvents: 'all' }}
                           >
+                            <title>{node.label} ({node.type === 'formative' ? 'Formative' : 'Reflective'} Construct{r2 !== undefined ? `, R² = ${fmt(r2, 3)}` : ''})</title>
                             <circle
                               r={node.r || 36}
                               fill={node.fill || "var(--canvas-latent-fill, #334155)"}
@@ -2002,6 +2446,7 @@ export const SnapshotView: React.FC = () => {
                       }
 
                       // Indicator (Manifest variable)
+                      const parentNode = displayNodes.find((n: any) => n.id === node.parentId);
                       return (
                         <g
                           key={node.id}
@@ -2009,6 +2454,7 @@ export const SnapshotView: React.FC = () => {
                           onMouseDown={(e) => handleNodeMouseDown(e, node.id)}
                           style={{ cursor: 'move', pointerEvents: 'all' }}
                         >
+                          <title>{node.label} (Indicator of {parentNode?.label || 'construct'})</title>
                           <rect
                             width="70"
                             height="28"
