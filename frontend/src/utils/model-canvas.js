@@ -1749,28 +1749,7 @@ export function initModelCanvas() {
   }
 
   function showConnectTooltip(x, y, text) {
-    let tip = document.getElementById('canvas-connect-tooltip');
-    if (!tip) {
-      tip = document.createElement('div');
-      tip.id = 'canvas-connect-tooltip';
-      tip.style.position = 'fixed';
-      tip.style.padding = '4px 8px';
-      tip.style.borderRadius = '4px';
-      tip.style.fontSize = '12px';
-      tip.style.fontFamily = 'var(--font-sans, sans-serif)';
-      tip.style.pointerEvents = 'none';
-      tip.style.zIndex = '99999';
-      tip.style.transition = 'opacity 0.1s ease';
-      tip.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
-      document.body.appendChild(tip);
-    }
-    tip.textContent = text;
-    tip.style.background = '#ef4444';
-    tip.style.color = '#ffffff';
-    tip.style.left = `${x + 14}px`;
-    tip.style.top = `${y + 14}px`;
-    tip.style.display = 'block';
-    tip.style.opacity = '1';
+    // Disabled: red warning line is used instead of text tooltips
   }
 
   function hideConnectTooltip() {
@@ -2018,7 +1997,7 @@ export function initModelCanvas() {
       }
 
       path.style.stroke = selectedIds.has(edge.id) ? 'var(--color-accent)' : 'var(--color-text-primary)';
-      path.style.strokeWidth = selectedIds.has(edge.id) ? (edge.strokeWidth ? parseInt(edge.strokeWidth)+1 : '3') : (edge.strokeWidth || '2');
+      path.style.strokeWidth = edge.strokeWidth || '2';
       if (edge.strokeDasharray) {
         path.style.strokeDasharray = edge.strokeDasharray;
       } else {
@@ -2260,7 +2239,7 @@ export function initModelCanvas() {
       dashLine.setAttribute('d', `M ${startX} ${startY} L ${mx} ${my}`);
       dashLine.setAttribute('class', isSelected ? 'moderation-line selected' : 'moderation-line');
       dashLine.style.stroke = isSelected ? 'var(--color-accent, #6B4EE6)' : 'rgba(107, 78, 230, 0.75)';
-      dashLine.style.strokeWidth = isSelected ? '2.5' : '1.5';
+      dashLine.style.strokeWidth = '1.5';
       dashLine.style.strokeDasharray = '4 4';
       dashLine.style.fill = 'none';
       dashLine.style.cursor = 'pointer';
@@ -2271,7 +2250,7 @@ export function initModelCanvas() {
       const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
       dot.setAttribute('cx', mx);
       dot.setAttribute('cy', my);
-      dot.setAttribute('r', isSelected ? '5' : '4');
+      dot.setAttribute('r', '4');
       dot.setAttribute('fill', isSelected ? 'var(--color-accent, #6B4EE6)' : '#6B4EE6');
       dot.setAttribute('stroke', '#ffffff');
       dot.setAttribute('stroke-width', '1.5');
@@ -2298,19 +2277,13 @@ export function initModelCanvas() {
           if (!e.shiftKey) clearSelection();
           selectedIds.add(mod.id);
           render();
-          try {
-            window.dispatchEvent(new CustomEvent('selectionChange', {
-              detail: { type: 'moderation', moderation: mod }
-            }));
-            window.dispatchEvent(new CustomEvent('moderation-selected', {
-              detail: { moderation: mod }
-            }));
-          } catch (err) {}
         }
       };
 
       hitPath.addEventListener('click', handleModClick);
       dot.addEventListener('click', handleModClick);
+      hitPath.addEventListener('contextmenu', (e) => showContextMenu(e, mod.id));
+      dot.addEventListener('contextmenu', (e) => showContextMenu(e, mod.id));
       edgesLayer.appendChild(hitPath);
 
       // 4. Moderation path coefficient badge (Fix 1c)
@@ -2818,7 +2791,7 @@ export function initModelCanvas() {
             const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
             path.setAttribute('d', d);
             path.setAttribute('stroke', isIndEdgeSelected ? 'var(--color-accent, #6B4EE6)' : 'var(--canvas-edge-stroke)');
-            path.setAttribute('stroke-width', isIndEdgeSelected ? '2.5' : '1.5');
+            path.setAttribute('stroke-width', '1.5');
             path.setAttribute('marker-end', isIndEdgeSelected ? 'url(#arrow-solid-selected)' : 'url(#arrow-solid)');
             path.style.fill = 'none';
             edgesLayer.appendChild(path);
@@ -3439,9 +3412,14 @@ export function initModelCanvas() {
       pt.y = e.clientY;
       const svgPt = pt.matrixTransform(zoomLayer.getScreenCTM().inverse());
       
-      // Resolution order: (1) construct under cursor wins
+      // Resolution order: (1) construct or indicator under cursor
       const targetNode = nodes.find(n => {
         if (n.id === connectStartNode.id) return false;
+        if (n.isLatent === false) {
+          const halfW = (n.width || 64) / 2;
+          const halfH = (n.height || 24) / 2;
+          return Math.abs(n.x - svgPt.x) <= halfW + 8 && Math.abs(n.y - svgPt.y) <= halfH + 8;
+        }
         const dx = n.x - svgPt.x;
         const dy = n.y - svgPt.y;
         return Math.sqrt(dx*dx + dy*dy) <= Math.max(NODE_R, (n.width ? n.width/2 : 40));
@@ -3450,20 +3428,28 @@ export function initModelCanvas() {
       if (targetNode) {
         guidesLayer.innerHTML = '';
         hideConnectTooltip();
-        svg.style.cursor = 'crosshair';
         tempLine.setAttribute('x2', targetNode.x);
         tempLine.setAttribute('y2', targetNode.y);
-        tempLine.setAttribute('stroke-dasharray', '');
         tempLine.setAttribute('stroke-width', '2');
 
-        const isIllegal = targetNode.isText === true || connectStartNode.isText === true || edges.some(edge => 
-          (edge.sourceId === connectStartNode.id && edge.targetId === targetNode.id) ||
-          (edge.sourceId === targetNode.id && edge.targetId === connectStartNode.id)
+        const isIllegal = (
+          targetNode.isText === true || 
+          connectStartNode.isText === true ||
+          targetNode.isLatent === false ||
+          connectStartNode.isLatent === false ||
+          edges.some(edge => 
+            (edge.sourceId === connectStartNode.id && edge.targetId === targetNode.id) ||
+            (edge.sourceId === targetNode.id && edge.targetId === connectStartNode.id)
+          )
         );
         if (isIllegal) {
           tempLine.setAttribute('stroke', '#ef4444');
+          tempLine.setAttribute('stroke-dasharray', '4 4');
+          svg.style.cursor = 'not-allowed';
         } else {
           tempLine.setAttribute('stroke', 'var(--color-accent, #6B4EE6)');
+          tempLine.setAttribute('stroke-dasharray', '');
+          svg.style.cursor = 'crosshair';
         }
       } else if (connectStartNode.isLatent !== false && !connectStartNode.isText) {
         // (2) Path under cursor -> moderation preview
@@ -3489,7 +3475,7 @@ export function initModelCanvas() {
             tempLine.setAttribute('stroke-dasharray', '4 4');
             tempLine.setAttribute('stroke-width', '2');
             svg.style.cursor = 'not-allowed';
-            showConnectTooltip(e.clientX, e.clientY, invalidReason);
+            hideConnectTooltip();
           } else {
             // Valid path: snap preview to midpoint, accent dashed line, midpoint handle, copy cursor
             hideConnectTooltip();
@@ -3497,7 +3483,7 @@ export function initModelCanvas() {
             tempLine.setAttribute('y2', midY);
             tempLine.setAttribute('stroke', 'var(--color-accent, #6B4EE6)');
             tempLine.setAttribute('stroke-dasharray', '4 4');
-            tempLine.setAttribute('stroke-width', '2.5');
+            tempLine.setAttribute('stroke-width', '2');
             svg.style.cursor = 'copy';
 
             guidesLayer.innerHTML = '';
@@ -3569,9 +3555,14 @@ export function initModelCanvas() {
       pt.y = e.clientY;
       const svgPt = pt.matrixTransform(zoomLayer.getScreenCTM().inverse());
       
-      // Resolution order: (1) construct under cursor wins
+      // Resolution order: (1) construct or indicator under cursor
       const targetNode = nodes.find(n => {
         if (n.id === connectStartNode.id) return false;
+        if (n.isLatent === false) {
+          const halfW = (n.width || 64) / 2;
+          const halfH = (n.height || 24) / 2;
+          return Math.abs(n.x - svgPt.x) <= halfW + 8 && Math.abs(n.y - svgPt.y) <= halfH + 8;
+        }
         const dx = n.x - svgPt.x;
         const dy = n.y - svgPt.y;
         return Math.sqrt(dx*dx + dy*dy) <= Math.max(NODE_R, (n.width ? n.width/2 : 40));
@@ -3580,16 +3571,14 @@ export function initModelCanvas() {
       if (targetNode && !targetNode.isText && !connectStartNode.isText) {
         let sId = connectStartNode.id;
         let tId = targetNode.id;
-        
-        // Auto-flip if drawing from Independent to Latent (arrows must point FROM Latent TO Independent)
-        if (targetNode.isLatent !== false && connectStartNode.isLatent === false) {
-          sId = targetNode.id;
-          tId = connectStartNode.id;
-        }
 
-        const isIllegal = edges.some(edge => 
-          (edge.sourceId === sId && edge.targetId === tId) ||
-          (edge.sourceId === tId && edge.targetId === sId)
+        const isIllegal = (
+          targetNode.isLatent === false ||
+          connectStartNode.isLatent === false ||
+          edges.some(edge => 
+            (edge.sourceId === sId && edge.targetId === tId) ||
+            (edge.sourceId === tId && edge.targetId === sId)
+          )
         );
         
         if (!isIllegal) {
@@ -3867,7 +3856,7 @@ export function initModelCanvas() {
       render();
     }
 
-    const isEdge = edges.some(edge => edge.id === id);
+    const isEdge = edges.some(edge => edge.id === id) || moderatingEffects.some(m => m.id === id);
     const isIndEdge = id && String(id).startsWith('edge_ind_');
     const targetNode = nodes.find(n => n.id === id);
     const isLatent = !isEdge && !isIndEdge && targetNode && targetNode.isLatent !== false && !targetNode.isText;
