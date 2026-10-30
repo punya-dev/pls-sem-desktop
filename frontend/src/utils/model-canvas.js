@@ -549,6 +549,7 @@ export function initModelCanvas() {
   });
 
   function clearModelCanvas() {
+    hideLatentHoverPopup(true);
     nodes.length = 0;
     edges.length = 0;
     selectedIds.clear();
@@ -1900,7 +1901,10 @@ export function initModelCanvas() {
     return null;
   }
 
+  let activeHoverNodeId = null;
+
   function showLatentHoverPopup(node, metrics) {
+    activeHoverNodeId = node.id;
     let popupEl = document.getElementById('canvas-latent-popup');
     if (!popupEl) {
       popupEl = document.createElement('div');
@@ -1978,15 +1982,20 @@ export function initModelCanvas() {
     });
   }
 
-  function hideLatentHoverPopup() {
+  function hideLatentHoverPopup(immediate = false) {
+    activeHoverNodeId = null;
     const popupEl = document.getElementById('canvas-latent-popup');
     if (!popupEl) return;
     popupEl.classList.remove('visible');
-    setTimeout(() => {
-      if (!popupEl.classList.contains('visible')) {
-        popupEl.style.display = 'none';
-      }
-    }, 160);
+    if (immediate) {
+      popupEl.style.display = 'none';
+    } else {
+      setTimeout(() => {
+        if (!popupEl.classList.contains('visible')) {
+          popupEl.style.display = 'none';
+        }
+      }, 160);
+    }
   }
 
   function distToSegment(px, py, x1, y1, x2, y2) {
@@ -2198,6 +2207,9 @@ export function initModelCanvas() {
   }
 
   function render() {
+    if ((activeHoverNodeId && !nodes.some(n => n.id === activeHoverNodeId)) || !activeResults) {
+      hideLatentHoverPopup(true);
+    }
     nodesLayer.innerHTML = '';
     edgesLayer.innerHTML = '';
     
@@ -4095,6 +4107,7 @@ export function initModelCanvas() {
   }
 
   function clearSelection() {
+    hideLatentHoverPopup(true);
     selectedIds.clear();
     render();
     try {
@@ -4655,6 +4668,7 @@ export function initModelCanvas() {
   }
 
   function deleteSelected() {
+    hideLatentHoverPopup(true);
     if (selectedIds.size === 0) return;
 
     // Reset bent indicator arrows if selected
