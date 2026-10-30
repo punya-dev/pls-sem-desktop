@@ -266,17 +266,17 @@ const ModelEditor = () => {
     }
   }, []);
 
-  const fixedFills = ['transparent', '#ffffff'];
-  const fixedBorders = ['transparent', '#0f172a'];
-  const fixedTexts = ['#0f172a', '#ffffff'];
+  const fixedFills = ['transparent', '#334155', '#ffffff'];
+  const fixedBorders = ['transparent', '#1e293b', '#ffffff'];
+  const fixedTexts = ['#0f172a', '#334155', '#ffffff'];
 
-  const [recentFills, setRecentFills] = useState<string[]>(['#fef08a']);
-  const [recentBorders, setRecentBorders] = useState<string[]>(['#ca8a04']);
-  const [recentTextColors, setRecentTextColors] = useState<string[]>(['#6B4EE6']);
+  const [recentFills, setRecentFills] = useState<string[]>([]);
+  const [recentBorders, setRecentBorders] = useState<string[]>([]);
+  const [recentTextColors, setRecentTextColors] = useState<string[]>([]);
   
-  const [activeFill, setActiveFill] = useState<string>('#ffffff');
-  const [activeBorder, setActiveBorder] = useState<string>('#cbd5e1');
-  const [activeText, setActiveText] = useState<string>('#0f172a');
+  const [activeFill, setActiveFill] = useState<string>('#334155');
+  const [activeBorder, setActiveBorder] = useState<string>('#1e293b');
+  const [activeText, setActiveText] = useState<string>('#ffffff');
 
   const [activeBorderWeight, setActiveBorderWeight] = useState<number>(1.5);
   const [textboxAlign, setTextboxAlign] = useState<'left' | 'center' | 'right' | 'justify'>('center');
@@ -288,8 +288,8 @@ const ModelEditor = () => {
 
   const handleFillColorSelect = (color: string) => {
     setActiveFill(color);
-    if (!fixedFills.includes(color)) {
-      setRecentFills(prev => [color, ...prev.filter(c => c !== color)].slice(0, 3));
+    if (!fixedFills.some(f => f.toLowerCase() === color.toLowerCase())) {
+      setRecentFills(prev => [color, ...prev.filter(c => c.toLowerCase() !== color.toLowerCase())].slice(0, 3));
     }
     document.dispatchEvent(new CustomEvent('color-picker-input', { detail: { id: 'picker-fill', color } }));
     document.dispatchEvent(new CustomEvent('color-picker-closed', { detail: { id: 'picker-fill', color } }));
@@ -297,8 +297,8 @@ const ModelEditor = () => {
 
   const handleBorderColorSelect = (color: string) => {
     setActiveBorder(color);
-    if (!fixedBorders.includes(color)) {
-      setRecentBorders(prev => [color, ...prev.filter(c => c !== color)].slice(0, 3));
+    if (!fixedBorders.some(b => b.toLowerCase() === color.toLowerCase())) {
+      setRecentBorders(prev => [color, ...prev.filter(c => c.toLowerCase() !== color.toLowerCase())].slice(0, 3));
     }
     document.dispatchEvent(new CustomEvent('color-picker-input', { detail: { id: 'picker-border', color } }));
     document.dispatchEvent(new CustomEvent('color-picker-closed', { detail: { id: 'picker-border', color } }));
@@ -306,8 +306,8 @@ const ModelEditor = () => {
 
   const handleTextColorSelect = (color: string) => {
     setActiveText(color);
-    if (!fixedTexts.includes(color)) {
-      setRecentTextColors(prev => [color, ...prev.filter(c => c !== color)].slice(0, 3));
+    if (!fixedTexts.some(t => t.toLowerCase() === color.toLowerCase())) {
+      setRecentTextColors(prev => [color, ...prev.filter(c => c.toLowerCase() !== color.toLowerCase())].slice(0, 3));
     }
     document.dispatchEvent(new CustomEvent('color-picker-input', { detail: { id: 'picker-text', color } }));
     document.dispatchEvent(new CustomEvent('color-picker-closed', { detail: { id: 'picker-text', color } }));
@@ -339,11 +339,33 @@ const ModelEditor = () => {
           if (nInfo.strokeWidth !== undefined) setActiveBorderWeight(nInfo.strokeWidth);
           if (nInfo.textAlign) setTextboxAlign(nInfo.textAlign);
           if (nInfo.verticalAlign) setTextboxValign(nInfo.verticalAlign);
+          if (nInfo.fill) {
+            setActiveFill(nInfo.fill);
+            if (!fixedFills.some(f => f.toLowerCase() === nInfo.fill.toLowerCase())) {
+              setRecentFills(prev => [nInfo.fill, ...prev.filter(c => c.toLowerCase() !== nInfo.fill.toLowerCase())].slice(0, 3));
+            }
+          }
+          if (nInfo.stroke) {
+            setActiveBorder(nInfo.stroke);
+            if (!fixedBorders.some(b => b.toLowerCase() === nInfo.stroke.toLowerCase())) {
+              setRecentBorders(prev => [nInfo.stroke, ...prev.filter(c => c.toLowerCase() !== nInfo.stroke.toLowerCase())].slice(0, 3));
+            }
+          }
+          if (nInfo.color) {
+            setActiveText(nInfo.color);
+            if (!fixedTexts.some(t => t.toLowerCase() === nInfo.color.toLowerCase())) {
+              setRecentTextColors(prev => [nInfo.color, ...prev.filter(c => c.toLowerCase() !== nInfo.color.toLowerCase())].slice(0, 3));
+            }
+          }
         }
       }
     };
     window.addEventListener('selectionChange', handleSelectionChange);
-    return () => window.removeEventListener('selectionChange', handleSelectionChange);
+    document.addEventListener('selectionChange', handleSelectionChange);
+    return () => {
+      window.removeEventListener('selectionChange', handleSelectionChange);
+      document.removeEventListener('selectionChange', handleSelectionChange);
+    };
   }, []);
 
   const [autoSaveStatus, setAutoSaveStatus] = useState<'saved' | 'saving' | 'error' | null>('saved');
@@ -2592,8 +2614,8 @@ const ModelEditor = () => {
                         height: '20px',
                         borderRadius: '50%',
                         background: color === 'transparent' ? 'url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVQIW2NkYGD4z8DAwMgAI0AMDA4YAQc0D+oAAAAASUVORK5CYII=)' : color,
-                        border: activeFill === color ? '2px solid var(--color-accent)' : '1px solid rgba(0,0,0,0.12)',
-                        boxShadow: activeFill === color ? '0 0 0 2px var(--color-accent-subtle)' : 'none',
+                        border: activeFill?.toLowerCase() === color.toLowerCase() ? '2px solid var(--color-accent)' : '1px solid rgba(0,0,0,0.12)',
+                        boxShadow: activeFill?.toLowerCase() === color.toLowerCase() ? '0 0 0 2px var(--color-accent-subtle)' : 'none',
                         cursor: 'pointer'
                       }}
                       onClick={() => handleFillColorSelect(color)}
@@ -2629,8 +2651,8 @@ const ModelEditor = () => {
                         height: '20px',
                         borderRadius: '50%',
                         background: color === 'transparent' ? 'url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVQIW2NkYGD4z8DAwMgAI0AMDA4YAQc0D+oAAAAASUVORK5CYII=)' : color,
-                        border: activeBorder === color ? '2px solid var(--color-accent)' : '1px solid rgba(0,0,0,0.12)',
-                        boxShadow: activeBorder === color ? '0 0 0 2px var(--color-accent-subtle)' : 'none',
+                        border: activeBorder?.toLowerCase() === color.toLowerCase() ? '2px solid var(--color-accent)' : '1px solid rgba(0,0,0,0.12)',
+                        boxShadow: activeBorder?.toLowerCase() === color.toLowerCase() ? '0 0 0 2px var(--color-accent-subtle)' : 'none',
                         cursor: 'pointer'
                       }}
                       onClick={() => handleBorderColorSelect(color)}
@@ -2762,9 +2784,9 @@ const ModelEditor = () => {
                         height: '20px',
                         borderRadius: '50%',
                         background: color === 'transparent' ? 'url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVQIW2NkYGD4z8DAwMgAI0AMDA4YAQc0D+oAAAAASUVORK5CYII=)' : color,
-                        border: activeText === color ? '2px solid var(--color-accent)' : '1px solid rgba(0,0,0,0.12)',
+                        border: activeText?.toLowerCase() === color.toLowerCase() ? '2px solid var(--color-accent)' : '1px solid rgba(0,0,0,0.12)',
                         cursor: 'pointer',
-                        boxShadow: activeText === color ? '0 0 0 2px var(--color-accent-subtle)' : 'none'
+                        boxShadow: activeText?.toLowerCase() === color.toLowerCase() ? '0 0 0 2px var(--color-accent-subtle)' : 'none'
                       }}
                       onClick={() => handleTextColorSelect(color)}
                       title={color}

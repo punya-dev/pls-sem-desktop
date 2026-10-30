@@ -1625,36 +1625,43 @@ export function initModelCanvas() {
       fill = node.fill || defaultFill;
       stroke = node.stroke || defaultStroke;
     }
-    let strokeW = node.strokeWidth !== undefined ? String(node.strokeWidth) : '1.5';
+    let strokeW = node.strokeWidth !== undefined ? String(node.strokeWidth) : (node.isText ? '0' : '1.5');
+    let sw = parseFloat(strokeW) || 0;
+    // To ensure the border expands strictly inwards (so it never overlaps arrowheads or outer boundary):
+    let insetW = Math.max(0, sw / 2);
     let el;
     
     if (shape === 'rect') {
       el = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-      el.setAttribute('x', -w/2);
-      el.setAttribute('y', -h/2);
-      el.setAttribute('width', w);
-      el.setAttribute('height', h);
+      el.setAttribute('x', -w/2 + insetW);
+      el.setAttribute('y', -h/2 + insetW);
+      el.setAttribute('width', Math.max(0, w - sw));
+      el.setAttribute('height', Math.max(0, h - sw));
       el.setAttribute('rx', node.isLatent ? '8' : '2');
     } else if (shape === 'hexagon') {
       el = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+      const scaleX = w > sw ? (w - sw) / w : 0;
+      const scaleY = h > sw ? (h - sw) / h : 0;
       const points = [
-        [0, -h/2], [w/2, -h/4], [w/2, h/4],
-        [0, h/2], [-w/2, h/4], [-w/2, -h/4]
+        [0, (-h/2) * scaleY], [(w/2) * scaleX, (-h/4) * scaleY], [(w/2) * scaleX, (h/4) * scaleY],
+        [0, (h/2) * scaleY], [(-w/2) * scaleX, (h/4) * scaleY], [(-w/2) * scaleX, (-h/4) * scaleY]
       ].map(p => p.join(',')).join(' ');
       el.setAttribute('points', points);
     } else if (shape === 'octagon') {
       el = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-      const aW = w/2 * 0.414;
-      const aH = h/2 * 0.414;
+      const scaleX = w > sw ? (w - sw) / w : 0;
+      const scaleY = h > sw ? (h - sw) / h : 0;
+      const aW = (w/2 * 0.414) * scaleX;
+      const aH = (h/2 * 0.414) * scaleY;
       const points = [
-        [-aW, -h/2], [aW, -h/2], [w/2, -aH], [w/2, aH],
-        [aW, h/2], [-aW, h/2], [-w/2, aH], [-w/2, -aH]
+        [-aW, (-h/2) * scaleY], [aW, (-h/2) * scaleY], [(w/2) * scaleX, -aH], [(w/2) * scaleX, aH],
+        [aW, (h/2) * scaleY], [-aW, (h/2) * scaleY], [(-w/2) * scaleX, aH], [(-w/2) * scaleX, -aH]
       ].map(p => p.join(',')).join(' ');
       el.setAttribute('points', points);
     } else { // circle or ellipse
       el = document.createElementNS('http://www.w3.org/2000/svg', 'ellipse');
-      el.setAttribute('rx', w/2);
-      el.setAttribute('ry', h/2);
+      el.setAttribute('rx', Math.max(0, w/2 - insetW));
+      el.setAttribute('ry', Math.max(0, h/2 - insetW));
     }
     
     el.setAttribute('fill', fill);
@@ -3375,6 +3382,7 @@ export function initModelCanvas() {
           window.syncColorPickers(pickerFill?.value, pickerBorder?.value, pickerText?.value);
         }
         document.dispatchEvent(new CustomEvent('selectionChange'));
+        window.dispatchEvent(new CustomEvent('selectionChange'));
       } else if (selectedEdge) {
         if (formattingDivider) formattingDivider.style.display = 'block';
         if (nodeFormattingTools) nodeFormattingTools.style.display = 'none';
@@ -3417,6 +3425,7 @@ export function initModelCanvas() {
           activeArrowBtn.style.color = 'var(--color-accent, #4f46e5)';
         }
         document.dispatchEvent(new CustomEvent('selectionChange'));
+        window.dispatchEvent(new CustomEvent('selectionChange'));
       }
     } else if (selectedIds.size > 1) {
       const selectedNodes = nodes.filter(n => selectedIds.has(n.id));
@@ -5031,13 +5040,22 @@ export function initModelCanvas() {
     const selId = Array.from(selectedIds)[0];
     const node = nodes.find(n => n.id === selId);
     if (node) {
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      let defFill = node.isText ? 'transparent' : (node.isLatent ? (isDark ? '#ffffff' : '#334155') : (isDark ? '#451a03' : '#fef08a'));
+      let defStroke = node.isText ? 'transparent' : (node.isLatent ? (isDark ? '#ffffff' : '#1e293b') : (isDark ? '#b45309' : '#ca8a04'));
+      let defColor = node.isText ? (isDark ? '#ffffff' : '#0f172a') : (node.isLatent ? (isDark ? '#0f172a' : '#ffffff') : (isDark ? '#fef08a' : '#422006'));
+
+      const fill = node.fill !== undefined ? node.fill : defFill;
+      const stroke = node.stroke !== undefined ? node.stroke : defStroke;
+      const color = node.color !== undefined ? node.color : defColor;
+
       return {
-        strokeWidth: node.strokeWidth !== undefined ? node.strokeWidth : 1.5,
+        strokeWidth: node.strokeWidth !== undefined ? node.strokeWidth : (node.isText ? 0 : 1.5),
         textAlign: node.textAlign || 'center',
         verticalAlign: node.verticalAlign || 'middle',
-        fill: node.fill,
-        stroke: node.stroke,
-        color: node.color,
+        fill: fill,
+        stroke: stroke,
+        color: color,
         fontSize: node.fontSize || 14,
         fontFamily: node.fontFamily || 'Inter',
         bold: !!node.bold,
