@@ -855,16 +855,8 @@ export function initModelCanvas() {
         try {
           window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Connect mode active: Drag from a construct to the middle of a path to add moderation.' } }));
         } catch (err) {}
-      } else if (title.includes('Latent variable')) {
-        // Prompt for name and plop in center
-        setMode('select');
-        updateToolbarUI(document.querySelector('.tb-btn[title*="Select"]'));
-        
-        const name = prompt('Enter Latent Variable Name:');
-        if (name && name.trim()) {
-          const pt = getSvgCenter();
-          addNode(name.trim(), pt.x, pt.y);
-        }
+      } else if (title.includes('Latent variable') || this.id === 'btn-add-latent') {
+        createAndEditNewLatentNode();
       } else if (title.includes('Text Note') || this.getAttribute('data-action') === 'add-text-note') {
         const text = prompt('Enter text note:');
         if (text && text.trim()) {
@@ -4707,6 +4699,30 @@ export function canvasRedo() {
   }
 }
 
+export function fitToScreen() {
+  if (typeof window !== 'undefined' && window.fitToScreen) {
+    window.fitToScreen();
+  }
+}
+
+export function exportCanvasAsImage() {
+  if (typeof window !== 'undefined' && window.exportCanvasAsImage) {
+    window.exportCanvasAsImage();
+  }
+}
+
+export function createAndEditNewLatentNode(x, y) {
+  if (typeof window !== 'undefined' && window.createAndEditNewLatentNode) {
+    return window.createAndEditNewLatentNode(x, y);
+  }
+}
+
+export function selectCanvasNodesByVarNames(varNames) {
+  if (typeof window !== 'undefined' && window.selectCanvasNodesByVarNames) {
+    window.selectCanvasNodesByVarNames(varNames);
+  }
+}
+
 export function getModeratingEffects() {
   if (typeof window !== 'undefined' && window.getModeratingEffects) {
     return window.getModeratingEffects();
@@ -4731,6 +4747,12 @@ export function getSelectedModeratingEffect() {
     return window.getSelectedModeratingEffect();
   }
   return null;
+}
+
+if (import.meta.hot) {
+  import.meta.hot.accept(() => {
+    window.location.reload();
+  });
 }
 
 
