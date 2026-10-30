@@ -58,7 +58,9 @@ export function initModelCanvas() {
   // State
   let nodes = [];
   let edges = [];
-  let mode = 'select'; // select, connect
+  let moderatingEffects = [];
+  let pendingModeratorNode = null;
+  let mode = 'select'; // select, connect, moderation, erase
   let transform = { x: 0, y: 0, k: 1 };
   let selectedIds = new Set();
   
@@ -71,7 +73,8 @@ export function initModelCanvas() {
     if (isUndoRedo) return;
     const state = {
       nodes: JSON.parse(JSON.stringify(nodes)),
-      edges: JSON.parse(JSON.stringify(edges))
+      edges: JSON.parse(JSON.stringify(edges)),
+      moderatingEffects: JSON.parse(JSON.stringify(moderatingEffects))
     };
     if (historyIndex < history.length - 1) {
       history = history.slice(0, historyIndex + 1);
@@ -268,6 +271,28 @@ export function initModelCanvas() {
       guidesLayer.appendChild(marqueeEl);
       render();
     } else if (e.target === svg || e.target === bgRect) {
+      if (mode === 'moderation') {
+        const pt = svg.createSVGPoint();
+        pt.x = e.clientX;
+        pt.y = e.clientY;
+        const svgPt = pt.matrixTransform(zoomLayer.getScreenCTM().inverse());
+        let hitEdge = null;
+        for (const edge of edges) {
+          const sNode = nodes.find(n => n.id === edge.sourceId);
+          const tNode = nodes.find(n => n.id === edge.targetId);
+          if (!sNode || !tNode || sNode.isLatent === false || tNode.isLatent === false || sNode.isText || tNode.isText) continue;
+          const coords = getEdgeCoordinates(sNode, tNode, edge);
+          const dist = distToSegment(svgPt.x, svgPt.y, coords.x1, coords.y1, coords.x2, coords.y2);
+          if (dist <= 12) {
+            hitEdge = edge;
+            break;
+          }
+        }
+        if (hitEdge) {
+          handleModerationOnEdge(hitEdge);
+          return;
+        }
+      }
       clearSelection();
     }
   });
@@ -551,6 +576,7 @@ export function initModelCanvas() {
       historyIndex--;
       nodes = JSON.parse(JSON.stringify(history[historyIndex].nodes));
       edges = JSON.parse(JSON.stringify(history[historyIndex].edges));
+      moderatingEffects = JSON.parse(JSON.stringify(history[historyIndex].moderatingEffects || []));
       selectedIds.clear();
       render();
       isUndoRedo = false;
@@ -563,6 +589,7 @@ export function initModelCanvas() {
       historyIndex++;
       nodes = JSON.parse(JSON.stringify(history[historyIndex].nodes));
       edges = JSON.parse(JSON.stringify(history[historyIndex].edges));
+      moderatingEffects = JSON.parse(JSON.stringify(history[historyIndex].moderatingEffects || []));
       selectedIds.clear();
       render();
       isUndoRedo = false;
@@ -822,8 +849,22 @@ export function initModelCanvas() {
       } else if (title.includes('Erase')) {
         setMode('erase');
         updateToolbarUI(this);
-      } else if (title.includes('Latent variable') || this.id === 'btn-add-latent') {
-        createAndEditNewLatentNode();
+      } else if (title.includes('Moderation Effect')) {
+        setMode('connect');
+        updateToolbarUI(document.querySelector('.canvas-toolbar .tb-btn[title*="Path Connector"]') || this);
+        try {
+          window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Connect mode active: Drag from a construct to the middle of a path to add moderation.' } }));
+        } catch (err) {}
+      } else if (title.includes('Latent variable')) {
+        // Prompt for name and plop in center
+        setMode('select');
+        updateToolbarUI(document.querySelector('.tb-btn[title*="Select"]'));
+        
+        const name = prompt('Enter Latent Variable Name:');
+        if (name && name.trim()) {
+          const pt = getSvgCenter();
+          addNode(name.trim(), pt.x, pt.y);
+        }
       } else if (title.includes('Text Note') || this.getAttribute('data-action') === 'add-text-note') {
         const text = prompt('Enter text note:');
         if (text && text.trim()) {
@@ -1141,13 +1182,17 @@ export function initModelCanvas() {
 
   function setMode(newMode) {
     mode = newMode;
-    if (mode === 'connect') {
+    if (mode !== 'moderation') {
+      pendingModeratorNode = null;
+    }
+    if (mode === 'connect' || mode === 'moderation') {
       svg.style.cursor = 'crosshair';
     } else if (mode === 'erase') {
       svg.style.cursor = 'crosshair';
     } else {
       svg.style.cursor = 'default';
     }
+    render();
   }
 
   function getSvgCenter() {
@@ -1483,6 +1528,110 @@ export function initModelCanvas() {
     return null;
   }
 
+  function getModerationDetails(mod) {
+    if (!activeResults || !mod) return null;
+    const modNode = nodes.find(n => n.id === mod.moderator);
+    const sNode = nodes.find(n => n.id === mod.source);
+    const tNode = nodes.find(n => n.id === mod.target);
+    if (!modNode || !sNode || !tNode) return null;
+
+    const mKey = findConstructKey(modNode) || modNode.id;
+    const sKey = findConstructKey(sNode) || sNode.id;
+    const tKey = findConstructKey(tNode) || tNode.id;
+
+    const mName = modNode.label || mKey;
+    const sName = sNode.label || sKey;
+    const tName = tNode.label || tKey;
+
+    // Possible terms for interaction LV (moderator x predictor)
+    const termCandidates = [
+      `${mName} x ${sName}`,
+      `${mKey} x ${sKey}`,
+      `${mName.toUpperCase()} x ${sName.toUpperCase()}`,
+      `${mKey.toUpperCase()} x ${sKey.toUpperCase()}`,
+      `${mName}_x_${sName}`,
+      `${mKey}_x_${sKey}`,
+      `${sName} x ${mName}`,
+      `${sKey} x ${mKey}`
+    ];
+
+    const targetCandidates = [
+      tKey,
+      tName,
+      tNode.id,
+      tName.toUpperCase(),
+      tKey.toUpperCase()
+    ].filter(Boolean);
+
+    let beta = null;
+    let termUsed = `${mName} x ${sName}`;
+
+    // 1. Check activeResults.paths or activeResults.structural?.paths
+    const pathsList = activeResults.paths || activeResults.structural?.paths;
+    if (Array.isArray(pathsList)) {
+      for (const p of pathsList) {
+        if (targetCandidates.some(t => t === p.to) && termCandidates.some(tc => tc.toLowerCase() === (p.from || '').toLowerCase())) {
+          beta = Number(p.beta ?? p.original ?? p.path_coefficient);
+          termUsed = p.from;
+          break;
+        }
+      }
+    }
+
+    // 2. Check activeResults.structural?.path_coefficients[target][source]
+    if (beta === null && activeResults.structural?.path_coefficients) {
+      const paths = activeResults.structural.path_coefficients;
+      for (const t of targetCandidates) {
+        if (paths[t]) {
+          for (const tc of termCandidates) {
+            if (paths[t][tc] !== undefined) {
+              beta = Number(paths[t][tc]);
+              termUsed = tc;
+              break;
+            }
+          }
+          if (beta !== null) break;
+          for (const srcKey of Object.keys(paths[t])) {
+            if (termCandidates.some(tc => tc.toLowerCase() === srcKey.toLowerCase())) {
+              beta = Number(paths[t][srcKey]);
+              termUsed = srcKey;
+              break;
+            }
+          }
+          if (beta !== null) break;
+        }
+      }
+    }
+
+    if (beta === null) return null;
+
+    // Look for bootstrap significance if available
+    let tStat = null;
+    let pVal = null;
+    const bootPaths = activeResults.bootstrap?.path_coefficients ||
+                      activeResults.significance?.path_coefficients ||
+                      activeResults.bootstrap_significance?.path_coefficients;
+    if (Array.isArray(bootPaths)) {
+      for (const bp of bootPaths) {
+        const pStr = bp.path || `${bp.from} -> ${bp.to}`;
+        if (termCandidates.some(tc => pStr.toLowerCase().includes(tc.toLowerCase())) &&
+            targetCandidates.some(t => pStr.toLowerCase().includes(t.toLowerCase()))) {
+          tStat = bp.t_statistic ?? bp.t_stat ?? bp.t;
+          pVal = bp.p_value ?? bp.p ?? bp.pval;
+          break;
+        }
+      }
+    }
+
+    return {
+      beta,
+      term: termUsed,
+      target: tName,
+      t: tStat !== null && tStat !== undefined ? Number(tStat) : null,
+      p: pVal !== null && pVal !== undefined ? Number(pVal) : null
+    };
+  }
+
   function getOuterLoading(parentNode, indicatorNode) {
     if (!activeResults?.measurement?.outer_loadings || !parentNode || !indicatorNode) return null;
     const loadings = activeResults.measurement.outer_loadings;
@@ -1598,6 +1747,235 @@ export function initModelCanvas() {
     }, 160);
   }
 
+  function distToSegment(px, py, x1, y1, x2, y2) {
+    const l2 = (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1);
+    if (l2 === 0) return Math.hypot(px - x1, py - y1);
+    let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(px - (x1 + t * (x2 - x1)), py - (y1 + t * (y2 - y1)));
+  }
+
+  function showConnectTooltip(x, y, text) {
+    let tip = document.getElementById('canvas-connect-tooltip');
+    if (!tip) {
+      tip = document.createElement('div');
+      tip.id = 'canvas-connect-tooltip';
+      tip.style.position = 'fixed';
+      tip.style.padding = '4px 8px';
+      tip.style.borderRadius = '4px';
+      tip.style.fontSize = '12px';
+      tip.style.fontFamily = 'var(--font-sans, sans-serif)';
+      tip.style.pointerEvents = 'none';
+      tip.style.zIndex = '99999';
+      tip.style.transition = 'opacity 0.1s ease';
+      tip.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
+      document.body.appendChild(tip);
+    }
+    tip.textContent = text;
+    tip.style.background = '#ef4444';
+    tip.style.color = '#ffffff';
+    tip.style.left = `${x + 14}px`;
+    tip.style.top = `${y + 14}px`;
+    tip.style.display = 'block';
+    tip.style.opacity = '1';
+  }
+
+  function hideConnectTooltip() {
+    const tip = document.getElementById('canvas-connect-tooltip');
+    if (tip) {
+      tip.style.display = 'none';
+      tip.style.opacity = '0';
+    }
+  }
+
+  function wouldCreateCycle(sourceId, targetId, currentEdges) {
+    if (sourceId === targetId) return true;
+    const visited = new Set();
+    const queue = [targetId];
+
+    while (queue.length > 0) {
+      const curr = queue.shift();
+      if (curr === sourceId) return true;
+      if (visited.has(curr)) continue;
+      visited.add(curr);
+
+      for (const edge of currentEdges) {
+        if (edge.sourceId === curr) {
+          const nextTarget = edge.targetId;
+          const targetNode = nodes.find(n => n.id === nextTarget);
+          if (targetNode && targetNode.isLatent !== false && !targetNode.isText) {
+            if (!visited.has(nextTarget)) {
+              queue.push(nextTarget);
+            }
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  function getEdgeMidpointAndPoints(sNode, tNode, edge) {
+    const { x1, y1, x2, y2 } = getEdgeCoordinates(sNode, tNode, edge);
+    let midX = (x1 + x2) / 2;
+    let midY = (y1 + y2) / 2;
+    let segments = [];
+
+    if (edge.waypoints && edge.waypoints.length > 0) {
+      const pts = [{ x: x1, y: y1 }, ...edge.waypoints, { x: x2, y: y2 }];
+      for (let i = 0; i < pts.length - 1; i++) {
+        segments.push([pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y]);
+      }
+      let totalLen = 0;
+      const lens = [];
+      for (let i = 0; i < pts.length - 1; i++) {
+        const segLen = Math.hypot(pts[i + 1].x - pts[i].x, pts[i + 1].y - pts[i].y);
+        lens.push(segLen);
+        totalLen += segLen;
+      }
+      const targetHalf = totalLen / 2;
+      let acc = 0;
+      for (let i = 0; i < lens.length; i++) {
+        if (acc + lens[i] >= targetHalf) {
+          const rem = targetHalf - acc;
+          const ratio = lens[i] > 0 ? rem / lens[i] : 0;
+          midX = pts[i].x + ratio * (pts[i + 1].x - pts[i].x);
+          midY = pts[i].y + ratio * (pts[i + 1].y - pts[i].y);
+          break;
+        }
+        acc += lens[i];
+      }
+    } else if (edge.curved) {
+      const mx = (x1 + x2) / 2;
+      const my = (y1 + y2) / 2;
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const len = Math.sqrt(dx * dx + dy * dy) || 1;
+      const cx = mx + (-dy / len) * 40;
+      const cy = my + (dx / len) * 40;
+
+      const samplePts = [];
+      const steps = 10;
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        const invT = 1 - t;
+        const px = invT * invT * x1 + 2 * invT * t * cx + t * t * x2;
+        const py = invT * invT * y1 + 2 * invT * t * cy + t * t * y2;
+        samplePts.push({ x: px, y: py });
+      }
+      for (let i = 0; i < samplePts.length - 1; i++) {
+        segments.push([samplePts[i].x, samplePts[i].y, samplePts[i + 1].x, samplePts[i + 1].y]);
+      }
+      midX = 0.25 * x1 + 0.5 * cx + 0.25 * x2;
+      midY = 0.25 * y1 + 0.5 * cy + 0.25 * y2;
+    } else {
+      segments.push([x1, y1, x2, y2]);
+      midX = (x1 + x2) / 2;
+      midY = (y1 + y2) / 2;
+    }
+
+    return { midX, midY, segments };
+  }
+
+  function findPathTargetUnderPoint(svgPt) {
+    let best = null;
+    let minDistance = Infinity;
+
+    for (const edge of edges) {
+      const sNode = nodes.find(n => n.id === edge.sourceId);
+      const tNode = nodes.find(n => n.id === edge.targetId);
+      if (!sNode || !tNode) continue;
+      // Must be structural path between latent constructs
+      if (sNode.isLatent === false || tNode.isLatent === false || sNode.isText || tNode.isText) continue;
+
+      const { midX, midY, segments } = getEdgeMidpointAndPoints(sNode, tNode, edge);
+
+      // Check distance to any segment of this edge
+      let distToEdge = Infinity;
+      for (const [x1, y1, x2, y2] of segments) {
+        const d = distToSegment(svgPt.x, svgPt.y, x1, y1, x2, y2);
+        if (d < distToEdge) distToEdge = d;
+      }
+
+      const distToMid = Math.hypot(svgPt.x - midX, svgPt.y - midY);
+
+      // Snap zone: within 16px of midpoint
+      const inSnapZone = distToMid <= 16;
+      // Near edge: within 12px of edge line
+      const nearEdge = distToEdge <= 12;
+
+      if (inSnapZone || nearEdge) {
+        // Priority: snap zone gets strong preference (effective distance reduced by 50px)
+        const effectiveDist = inSnapZone ? distToMid - 50 : distToEdge;
+        if (effectiveDist < minDistance) {
+          minDistance = effectiveDist;
+          best = { edge, sNode, tNode, midX, midY, inSnapZone, distToEdge, distToMid };
+        }
+      }
+    }
+    return best;
+  }
+
+  function handleModerationOnEdge(edge) {
+    if (!pendingModeratorNode) {
+      try {
+        window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Click a moderator construct first, then click a path.' } }));
+      } catch (err) {}
+      return false;
+    }
+    const sNode = nodes.find(n => n.id === edge.sourceId);
+    const tNode = nodes.find(n => n.id === edge.targetId);
+    if (!sNode || !tNode || sNode.isLatent === false || tNode.isLatent === false || sNode.isText || tNode.isText) {
+      try {
+        window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Moderation requires a structural path between latent constructs.' } }));
+      } catch (err) {}
+      return false;
+    }
+    if (pendingModeratorNode.id === sNode.id || pendingModeratorNode.id === tNode.id) {
+      try {
+        window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Moderator cannot be the predictor or outcome of the path.' } }));
+      } catch (err) {}
+      return false;
+    }
+    const exists = moderatingEffects.some(m => m.moderator === pendingModeratorNode.id && m.source === sNode.id && m.target === tNode.id);
+    if (exists) {
+      try {
+        window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'This moderation effect already exists.' } }));
+      } catch (err) {}
+      return false;
+    }
+    if (wouldCreateCycle(pendingModeratorNode.id, tNode.id, edges)) {
+      try {
+        window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Cannot add moderation: would create a circular dependency.' } }));
+      } catch (err) {}
+      return false;
+    }
+
+    // Auto-add direct edge if not present
+    if (!edges.some(e => e.sourceId === pendingModeratorNode.id && e.targetId === tNode.id)) {
+      edges.push({
+        id: generateId(),
+        sourceId: pendingModeratorNode.id,
+        targetId: tNode.id
+      });
+    }
+
+    const newMod = {
+      id: generateId(),
+      moderator: pendingModeratorNode.id,
+      source: sNode.id,
+      target: tNode.id,
+      method: 'two_stage',
+      standardize: true
+    };
+    moderatingEffects.push(newMod);
+    render();
+    pushHistory();
+    try {
+      window.dispatchEvent(new CustomEvent('toast', { detail: { message: `Added moderation: ${pendingModeratorNode.label} on ${sNode.label} → ${tNode.label}` } }));
+    } catch (err) {}
+    return true;
+  }
+
   function render() {
     nodesLayer.innerHTML = '';
     edgesLayer.innerHTML = '';
@@ -1673,6 +2051,10 @@ export function initModelCanvas() {
           deleteSelected();
           return;
         }
+        if (mode === 'moderation') {
+          handleModerationOnEdge(edge);
+          return;
+        }
         if (mode === 'select') {
           if (!e.shiftKey) clearSelection();
           selectedIds.add(edge.id);
@@ -1685,36 +2067,76 @@ export function initModelCanvas() {
       // Structural path coefficient badge (between latent variables)
       const coef = getPathCoefficient(source, target);
       if (coef !== null && coef !== undefined) {
+        const isModerated = moderatingEffects.some(m => m.source === edge.sourceId && m.target === edge.targetId);
         let midX = (x1 + x2) / 2;
         let midY = (y1 + y2) / 2;
 
-        if (edge.waypoints && edge.waypoints.length > 0) {
-          const numJoints = edge.waypoints.length;
-          if (numJoints % 2 === 1) {
-            // Odd number of joints (e.g. 1 joint): exact middle joint
-            const midIdx = Math.floor(numJoints / 2);
-            midX = edge.waypoints[midIdx].x;
-            midY = edge.waypoints[midIdx].y;
+        if (isModerated) {
+          // Fix 1c: Position at 35% from source along path so the landing dot at 50% does not cover it
+          const t = 0.35;
+          if (edge.waypoints && edge.waypoints.length > 0) {
+            const pts = [{ x: x1, y: y1 }, ...edge.waypoints, { x: x2, y: y2 }];
+            let totalLen = 0;
+            const lens = [];
+            for (let i = 0; i < pts.length - 1; i++) {
+              const segLen = Math.hypot(pts[i + 1].x - pts[i].x, pts[i + 1].y - pts[i].y);
+              lens.push(segLen);
+              totalLen += segLen;
+            }
+            const targetDist = totalLen * t;
+            let acc = 0;
+            for (let i = 0; i < lens.length; i++) {
+              if (acc + lens[i] >= targetDist) {
+                const rem = targetDist - acc;
+                const ratio = lens[i] > 0 ? rem / lens[i] : 0;
+                midX = pts[i].x + ratio * (pts[i + 1].x - pts[i].x);
+                midY = pts[i].y + ratio * (pts[i + 1].y - pts[i].y);
+                break;
+              }
+              acc += lens[i];
+            }
+          } else if (edge.curved) {
+            const mx = (x1 + x2) / 2;
+            const my = (y1 + y2) / 2;
+            const dx = x2 - x1;
+            const dy = y2 - y1;
+            const len = Math.sqrt(dx * dx + dy * dy) || 1;
+            const cx = mx + (-dy / len) * 40;
+            const cy = my + (dx / len) * 40;
+            const invT = 1 - t;
+            midX = invT * invT * x1 + 2 * invT * t * cx + t * t * x2;
+            midY = invT * invT * y1 + 2 * invT * t * cy + t * t * y2;
           } else {
-            // Even number of joints: midpoint between the two middle joints
-            const idx1 = numJoints / 2 - 1;
-            const idx2 = numJoints / 2;
-            midX = (edge.waypoints[idx1].x + edge.waypoints[idx2].x) / 2;
-            midY = (edge.waypoints[idx1].y + edge.waypoints[idx2].y) / 2;
+            midX = x1 + t * (x2 - x1);
+            midY = y1 + t * (y2 - y1);
           }
-        } else if (edge.curved) {
-          const mx = (x1 + x2) / 2;
-          const my = (y1 + y2) / 2;
-          const dx = x2 - x1;
-          const dy = y2 - y1;
-          const len = Math.sqrt(dx * dx + dy * dy) || 1;
-          const cx = mx + (-dy / len) * 40;
-          const cy = my + (dx / len) * 40;
-          midX = 0.25 * x1 + 0.5 * cx + 0.25 * x2;
-          midY = 0.25 * y1 + 0.5 * cy + 0.25 * y2;
         } else {
-          midX = (x1 + x2) / 2;
-          midY = (y1 + y2) / 2;
+          if (edge.waypoints && edge.waypoints.length > 0) {
+            const numJoints = edge.waypoints.length;
+            if (numJoints % 2 === 1) {
+              const midIdx = Math.floor(numJoints / 2);
+              midX = edge.waypoints[midIdx].x;
+              midY = edge.waypoints[midIdx].y;
+            } else {
+              const idx1 = numJoints / 2 - 1;
+              const idx2 = numJoints / 2;
+              midX = (edge.waypoints[idx1].x + edge.waypoints[idx2].x) / 2;
+              midY = (edge.waypoints[idx1].y + edge.waypoints[idx2].y) / 2;
+            }
+          } else if (edge.curved) {
+            const mx = (x1 + x2) / 2;
+            const my = (y1 + y2) / 2;
+            const dx = x2 - x1;
+            const dy = y2 - y1;
+            const len = Math.sqrt(dx * dx + dy * dy) || 1;
+            const cx = mx + (-dy / len) * 40;
+            const cy = my + (dx / len) * 40;
+            midX = 0.25 * x1 + 0.5 * cx + 0.25 * x2;
+            midY = 0.25 * y1 + 0.5 * cy + 0.25 * y2;
+          } else {
+            midX = (x1 + x2) / 2;
+            midY = (y1 + y2) / 2;
+          }
         }
 
         const badgeG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -1795,6 +2217,166 @@ export function initModelCanvas() {
       }
     });
 
+    // Render Moderating Effects (SmartPLS 4 style dashed lines ending at midpoint of target path with dot)
+    const pathModMap = new Map();
+    moderatingEffects.forEach(mod => {
+      const key = `${mod.source}->${mod.target}`;
+      if (!pathModMap.has(key)) pathModMap.set(key, []);
+      pathModMap.get(key).push(mod);
+    });
+
+    moderatingEffects.forEach(mod => {
+      const modNode = nodes.find(n => n.id === mod.moderator);
+      const sNode = nodes.find(n => n.id === mod.source);
+      const tNode = nodes.find(n => n.id === mod.target);
+      const targetEdge = edges.find(e => e.sourceId === mod.source && e.targetId === mod.target);
+      if (!modNode || !sNode || !tNode || !targetEdge) return;
+
+      const { x1, y1, x2, y2 } = getEdgeCoordinates(sNode, tNode, targetEdge);
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const len = Math.sqrt(dx * dx + dy * dy) || 1;
+      const ux = dx / len;
+      const uy = dy / len;
+
+      let mx = (x1 + x2) / 2;
+      let my = (y1 + y2) / 2;
+
+      // If multiple moderations on the same path, offset landing points along path segment by 16px steps
+      const modsOnPath = pathModMap.get(`${mod.source}->${mod.target}`) || [mod];
+      const modIndex = modsOnPath.findIndex(m => m.id === mod.id);
+      const totalMods = modsOnPath.length;
+      if (totalMods > 1) {
+        const offset = (modIndex - (totalMods - 1) / 2) * 16;
+        mx += offset * ux;
+        my += offset * uy;
+      }
+
+      // Compute starting point on moderator construct boundary towards landing point (mx, my)
+      const mdx = mx - modNode.x;
+      const mdy = my - modNode.y;
+      const mlen = Math.sqrt(mdx * mdx + mdy * mdy) || 1;
+      const modR = (modNode.width ? modNode.width / 2 : NODE_R);
+      const startX = modNode.x + (mdx / mlen) * modR;
+      const startY = modNode.y + (mdy / mlen) * modR;
+
+      const isSelected = selectedIds.has(mod.id);
+
+      // 1. Dashed line from moderator to midpoint
+      const dashLine = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      dashLine.setAttribute('d', `M ${startX} ${startY} L ${mx} ${my}`);
+      dashLine.setAttribute('class', isSelected ? 'moderation-line selected' : 'moderation-line');
+      dashLine.style.stroke = isSelected ? 'var(--color-accent, #6B4EE6)' : 'rgba(107, 78, 230, 0.75)';
+      dashLine.style.strokeWidth = isSelected ? '2.5' : '1.5';
+      dashLine.style.strokeDasharray = '4 4';
+      dashLine.style.fill = 'none';
+      dashLine.style.cursor = 'pointer';
+      dashLine.setAttribute('marker-end', isSelected ? 'url(#arrow-open-selected)' : 'url(#arrow-open)');
+      edgesLayer.appendChild(dashLine);
+
+      // 2. Midpoint Dot (small circle where dashed line lands on the path)
+      const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      dot.setAttribute('cx', mx);
+      dot.setAttribute('cy', my);
+      dot.setAttribute('r', isSelected ? '5' : '4');
+      dot.setAttribute('fill', isSelected ? 'var(--color-accent, #6B4EE6)' : '#6B4EE6');
+      dot.setAttribute('stroke', '#ffffff');
+      dot.setAttribute('stroke-width', '1.5');
+      dot.style.cursor = 'pointer';
+      edgesLayer.appendChild(dot);
+
+      // 3. Invisible wide clickable hit-target for moderation line and dot
+      const hitPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      hitPath.setAttribute('d', `M ${startX} ${startY} L ${mx} ${my}`);
+      hitPath.style.stroke = 'rgba(0,0,0,0.001)';
+      hitPath.style.strokeWidth = '16';
+      hitPath.style.fill = 'none';
+      hitPath.style.cursor = 'pointer';
+
+      const handleModClick = (e) => {
+        e.stopPropagation();
+        if (mode === 'erase') {
+          selectedIds.clear();
+          selectedIds.add(mod.id);
+          deleteSelected();
+          return;
+        }
+        if (mode === 'select') {
+          if (!e.shiftKey) clearSelection();
+          selectedIds.add(mod.id);
+          render();
+          try {
+            window.dispatchEvent(new CustomEvent('selectionChange', {
+              detail: { type: 'moderation', moderation: mod }
+            }));
+            window.dispatchEvent(new CustomEvent('moderation-selected', {
+              detail: { moderation: mod }
+            }));
+          } catch (err) {}
+        }
+      };
+
+      hitPath.addEventListener('click', handleModClick);
+      dot.addEventListener('click', handleModClick);
+      edgesLayer.appendChild(hitPath);
+
+      // 4. Moderation path coefficient badge (Fix 1c)
+      const modDetails = getModerationDetails(mod);
+      if (modDetails && modDetails.beta !== null && modDetails.beta !== undefined) {
+        const badgeX = (startX + mx) / 2;
+        const badgeY = (startY + my) / 2;
+
+        const badgeG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        badgeG.setAttribute('class', 'edge-result-badge moderation-badge');
+        badgeG.setAttribute('transform', `translate(${badgeX}, ${badgeY})`);
+        badgeG.setAttribute('pointer-events', 'auto');
+        badgeG.style.cursor = 'pointer';
+
+        const textVal = modDetails.beta.toFixed(3);
+        const pillW = Math.max(34, textVal.length * 7.5 + 10);
+        const pillH = 18;
+
+        const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        bg.setAttribute('x', -pillW / 2);
+        bg.setAttribute('y', -pillH / 2);
+        bg.setAttribute('width', pillW);
+        bg.setAttribute('height', pillH);
+        bg.setAttribute('rx', '4');
+        bg.setAttribute('fill', 'var(--canvas-badge-bg)');
+        bg.style.fill = 'var(--canvas-badge-bg)';
+        bg.setAttribute('stroke', isSelected ? 'var(--color-accent)' : 'rgba(107, 78, 230, 0.7)');
+        bg.style.stroke = isSelected ? 'var(--color-accent)' : 'rgba(107, 78, 230, 0.7)';
+        bg.setAttribute('stroke-width', isSelected ? '1.5' : '1');
+        badgeG.appendChild(bg);
+
+        const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        txt.setAttribute('text-anchor', 'middle');
+        txt.setAttribute('dominant-baseline', 'central');
+        txt.setAttribute('font-size', '10.5');
+        txt.setAttribute('font-family', 'var(--font-mono, monospace)');
+        txt.setAttribute('font-weight', '600');
+        txt.setAttribute('fill', 'var(--canvas-badge-text)');
+        txt.style.fill = 'var(--canvas-badge-text)';
+        txt.textContent = textVal;
+        badgeG.appendChild(txt);
+
+        let tooltipText = `${modDetails.term} → ${modDetails.target}: β = ${modDetails.beta.toFixed(3)}`;
+        if (modDetails.t !== null) tooltipText += `, t = ${modDetails.t.toFixed(3)}`;
+        if (modDetails.p !== null) tooltipText += `, p = ${modDetails.p.toFixed(3)}`;
+
+        const titleEl = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+        titleEl.textContent = tooltipText;
+        badgeG.appendChild(titleEl);
+
+        const lineTitle = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+        lineTitle.textContent = tooltipText;
+        hitPath.appendChild(lineTitle);
+
+        badgeG.addEventListener('click', handleModClick);
+        edgesLayer.appendChild(badgeG);
+      }
+    });
+
     // Nodes
     nodes.forEach(node => {
       const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -1808,6 +2390,17 @@ export function initModelCanvas() {
         let w = node.width || NODE_R * 2;
         let h = node.height || NODE_R * 2;
         g.appendChild(createNodeShape(node, NODE_R * 2, NODE_R * 2, 'var(--canvas-latent-fill)', 'var(--canvas-latent-stroke)', isSelected));
+
+        // Visual indicator for pending moderator construct
+        if (pendingModeratorNode && pendingModeratorNode.id === node.id) {
+          const modRing = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          modRing.setAttribute('r', (NODE_R + 6));
+          modRing.setAttribute('fill', 'none');
+          modRing.setAttribute('stroke', 'var(--color-accent, #6B4EE6)');
+          modRing.setAttribute('stroke-width', '2.5');
+          modRing.setAttribute('stroke-dasharray', '4 4');
+          g.appendChild(modRing);
+        }
         
         // Selection box (Dotted shape)
         if (isSelected) {
@@ -2598,6 +3191,17 @@ export function initModelCanvas() {
       return;
     }
 
+    if (mode === 'moderation') {
+      if (node.isLatent !== false && !node.isText) {
+        pendingModeratorNode = node;
+        render();
+        try {
+          window.dispatchEvent(new CustomEvent('toast', { detail: { message: `Moderator "${node.label}" selected. Now click an existing structural path.` } }));
+        } catch (err) {}
+      }
+      return;
+    }
+
     if (mode === 'select') {
       if (!e.shiftKey && !selectedIds.has(node.id)) {
         clearSelection();
@@ -2848,29 +3452,97 @@ export function initModelCanvas() {
       pt.y = e.clientY;
       const svgPt = pt.matrixTransform(zoomLayer.getScreenCTM().inverse());
       
-      tempLine.setAttribute('x2', svgPt.x);
-      tempLine.setAttribute('y2', svgPt.y);
-
-      // Illegal connection detection
+      // Resolution order: (1) construct under cursor wins
       const targetNode = nodes.find(n => {
         if (n.id === connectStartNode.id) return false;
         const dx = n.x - svgPt.x;
         const dy = n.y - svgPt.y;
-        return Math.sqrt(dx*dx + dy*dy) <= Math.max(NODE_R, 40);
+        return Math.sqrt(dx*dx + dy*dy) <= Math.max(NODE_R, (n.width ? n.width/2 : 40));
       });
 
       if (targetNode) {
-        const isIllegal = targetNode.isLatent === false || targetNode.isText === true || edges.some(edge => 
+        guidesLayer.innerHTML = '';
+        hideConnectTooltip();
+        svg.style.cursor = 'crosshair';
+        tempLine.setAttribute('x2', targetNode.x);
+        tempLine.setAttribute('y2', targetNode.y);
+        tempLine.setAttribute('stroke-dasharray', '');
+        tempLine.setAttribute('stroke-width', '2');
+
+        const isIllegal = targetNode.isText === true || connectStartNode.isText === true || edges.some(edge => 
           (edge.sourceId === connectStartNode.id && edge.targetId === targetNode.id) ||
           (edge.sourceId === targetNode.id && edge.targetId === connectStartNode.id)
         );
         if (isIllegal) {
           tempLine.setAttribute('stroke', '#ef4444');
         } else {
+          tempLine.setAttribute('stroke', 'var(--color-accent, #6B4EE6)');
+        }
+      } else if (connectStartNode.isLatent !== false && !connectStartNode.isText) {
+        // (2) Path under cursor -> moderation preview
+        const pathTarget = findPathTargetUnderPoint(svgPt);
+        if (pathTarget) {
+          const { edge, sNode, tNode, midX, midY } = pathTarget;
+          const modId = connectStartNode.id;
+
+          let invalidReason = null;
+          if (modId === sNode.id || modId === tNode.id) {
+            invalidReason = 'Moderator cannot be predictor or outcome of the path';
+          } else if (moderatingEffects.some(m => m.moderator === modId && m.source === sNode.id && m.target === tNode.id)) {
+            invalidReason = 'This moderation effect already exists';
+          } else if (wouldCreateCycle(modId, tNode.id, edges)) {
+            invalidReason = 'Cannot add moderation: would create a circular dependency';
+          }
+
+          if (invalidReason) {
+            guidesLayer.innerHTML = '';
+            tempLine.setAttribute('x2', svgPt.x);
+            tempLine.setAttribute('y2', svgPt.y);
+            tempLine.setAttribute('stroke', '#ef4444');
+            tempLine.setAttribute('stroke-dasharray', '4 4');
+            tempLine.setAttribute('stroke-width', '2');
+            svg.style.cursor = 'not-allowed';
+            showConnectTooltip(e.clientX, e.clientY, invalidReason);
+          } else {
+            // Valid path: snap preview to midpoint, accent dashed line, midpoint handle, copy cursor
+            hideConnectTooltip();
+            tempLine.setAttribute('x2', midX);
+            tempLine.setAttribute('y2', midY);
+            tempLine.setAttribute('stroke', 'var(--color-accent, #6B4EE6)');
+            tempLine.setAttribute('stroke-dasharray', '4 4');
+            tempLine.setAttribute('stroke-width', '2.5');
+            svg.style.cursor = 'copy';
+
+            guidesLayer.innerHTML = '';
+            const snapCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            snapCircle.setAttribute('cx', midX);
+            snapCircle.setAttribute('cy', midY);
+            snapCircle.setAttribute('r', '6');
+            snapCircle.setAttribute('fill', 'var(--color-accent, #6B4EE6)');
+            snapCircle.setAttribute('stroke', '#ffffff');
+            snapCircle.setAttribute('stroke-width', '2');
+            snapCircle.style.pointerEvents = 'none';
+            guidesLayer.appendChild(snapCircle);
+          }
+        } else {
+          guidesLayer.innerHTML = '';
+          hideConnectTooltip();
+          tempLine.setAttribute('x2', svgPt.x);
+          tempLine.setAttribute('y2', svgPt.y);
           tempLine.setAttribute('stroke', 'var(--color-text-primary)');
+          tempLine.setAttribute('stroke-dasharray', '5 5');
+          tempLine.setAttribute('stroke-width', '2');
+          svg.style.cursor = 'crosshair';
         }
       } else {
+        guidesLayer.innerHTML = '';
+        hideConnectTooltip();
+        tempLine.setAttribute('x2', svgPt.x);
+        tempLine.setAttribute('y2', svgPt.y);
         tempLine.setAttribute('stroke', 'var(--color-text-primary)');
+        tempLine.setAttribute('stroke-dasharray', '5 5');
+        tempLine.setAttribute('stroke-width', '2');
+        svg.style.cursor = 'crosshair';
       }
     }
   });
@@ -2900,17 +3572,22 @@ export function initModelCanvas() {
     }
     
     if (tempConnecting) {
+      guidesLayer.innerHTML = '';
+      hideConnectTooltip();
+      svg.style.cursor = '';
+
       // Find what we dropped on
       const pt = svg.createSVGPoint();
       pt.x = e.clientX;
       pt.y = e.clientY;
       const svgPt = pt.matrixTransform(zoomLayer.getScreenCTM().inverse());
       
+      // Resolution order: (1) construct under cursor wins
       const targetNode = nodes.find(n => {
         if (n.id === connectStartNode.id) return false;
         const dx = n.x - svgPt.x;
         const dy = n.y - svgPt.y;
-        return Math.sqrt(dx*dx + dy*dy) <= NODE_R;
+        return Math.sqrt(dx*dx + dy*dy) <= Math.max(NODE_R, (n.width ? n.width/2 : 40));
       });
       
       if (targetNode && !targetNode.isText && !connectStartNode.isText) {
@@ -2937,6 +3614,56 @@ export function initModelCanvas() {
           render();
           pushHistory();
         }
+      } else if (connectStartNode.isLatent !== false && !connectStartNode.isText) {
+        // (2) Drop on existing path line -> moderation!
+        const pathTarget = findPathTargetUnderPoint(svgPt);
+        if (pathTarget) {
+          const { edge, sNode, tNode } = pathTarget;
+          const modId = connectStartNode.id;
+
+          if (modId === sNode.id || modId === tNode.id) {
+            try {
+              window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Moderator cannot be the predictor or outcome of the path.' } }));
+            } catch (err) {}
+          } else if (moderatingEffects.some(m => m.moderator === modId && m.source === sNode.id && m.target === tNode.id)) {
+            try {
+              window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'This moderation effect already exists.' } }));
+            } catch (err) {}
+          } else if (wouldCreateCycle(modId, tNode.id, edges)) {
+            try {
+              window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Cannot add moderation: would create a circular dependency (feedback loop).' } }));
+            } catch (err) {}
+          } else {
+            // Valid moderation!
+            // 1. Auto-add direct edge from moderator to outcome if it does not exist
+            if (!edges.some(e => e.sourceId === modId && e.targetId === tNode.id)) {
+              edges.push({
+                id: generateId(),
+                sourceId: modId,
+                targetId: tNode.id
+              });
+            }
+
+            // 2. Add moderating effect
+            const newMod = {
+              id: generateId(),
+              moderator: modId,
+              source: sNode.id,
+              target: tNode.id,
+              method: 'two_stage',
+              standardize: true
+            };
+            moderatingEffects.push(newMod);
+
+            // Single undoable action
+            render();
+            pushHistory();
+
+            try {
+              window.dispatchEvent(new CustomEvent('toast', { detail: { message: `Added moderation: ${connectStartNode.label} on ${sNode.label} → ${tNode.label}` } }));
+            } catch (err) {}
+          }
+        }
       }
       
       tempConnecting = false;
@@ -2962,6 +3689,10 @@ export function initModelCanvas() {
   function clearSelection() {
     selectedIds.clear();
     render();
+    try {
+      window.dispatchEvent(new CustomEvent('selectionChange', { detail: { type: null } }));
+      window.dispatchEvent(new CustomEvent('moderation-selected', { detail: { moderation: null } }));
+    } catch (err) {}
   }
 
   // --- Geometry Helpers ---
@@ -3545,6 +4276,39 @@ export function initModelCanvas() {
     
     nodes = nodes.filter(n => !nodesToDelete.has(n.id));
     edges = edges.filter(e => !selectedIds.has(e.id) && !nodesToDelete.has(e.sourceId) && !nodesToDelete.has(e.targetId));
+
+    // Handle moderating effects deletion & cascade deletion
+    const initialModCount = moderatingEffects.length;
+    let explicitModDeleted = false;
+    let cascadeModDeleted = false;
+
+    moderatingEffects = moderatingEffects.filter(m => {
+      if (selectedIds.has(m.id)) {
+        explicitModDeleted = true;
+        return false;
+      }
+      if (nodesToDelete.has(m.moderator) || nodesToDelete.has(m.source) || nodesToDelete.has(m.target)) {
+        cascadeModDeleted = true;
+        return false;
+      }
+      const pathEdgeStillExists = edges.some(e => e.sourceId === m.source && e.targetId === m.target);
+      if (!pathEdgeStillExists) {
+        cascadeModDeleted = true;
+        return false;
+      }
+      return true;
+    });
+
+    if (cascadeModDeleted) {
+      try {
+        window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Moderation effect removed (cascade)' } }));
+      } catch (e) {}
+    } else if (explicitModDeleted) {
+      try {
+        window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Moderation effect deleted' } }));
+      } catch (e) {}
+    }
+
     selectedIds.clear();
     
     if (nodes.length === 0) {
@@ -3568,6 +4332,14 @@ export function initModelCanvas() {
     );
     if (isInput) return;
 
+    if (e.key === 'Escape') {
+      pendingModeratorNode = null;
+      setMode('select');
+      updateToolbarUI(document.querySelector('.canvas-toolbar .tb-btn[title*="Select"]'));
+      render();
+      return;
+    }
+
     if (e.key === 'Delete' || e.key === 'Backspace') {
       e.preventDefault();
       e.stopPropagation();
@@ -3584,6 +4356,12 @@ export function initModelCanvas() {
       } else if (e.key.toLowerCase() === 'p') {
         setMode('connect');
         updateToolbarUI(document.querySelector('.canvas-toolbar .tb-btn[title*="Path Connector"]'));
+      } else if (e.key.toLowerCase() === 'm') {
+        setMode('connect');
+        updateToolbarUI(document.querySelector('.canvas-toolbar .tb-btn[title*="Path Connector"]'));
+        try {
+          window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Connect mode active: Drag from a construct to the middle of a path to add moderation.' } }));
+        } catch (err) {}
       } else if (e.key.toLowerCase() === 'e') {
         setMode('erase');
         updateToolbarUI(document.querySelector('.canvas-toolbar .tb-btn[title*="Erase"]'));
@@ -3703,10 +4481,20 @@ export function initModelCanvas() {
         to: e.targetId
       }));
 
+    const moderating_effects = moderatingEffects.map(m => ({
+      id: m.id,
+      moderator: m.moderator,
+      source: m.source,
+      target: m.target,
+      method: m.method || 'two_stage',
+      standardize: m.standardize !== false
+    }));
+
     return {
       constructs,
       indicators,
-      paths
+      paths,
+      moderating_effects
     };
   }
 
@@ -3714,6 +4502,7 @@ export function initModelCanvas() {
     return {
       nodes: JSON.parse(JSON.stringify(nodes)),
       edges: JSON.parse(JSON.stringify(edges)),
+      moderatingEffects: JSON.parse(JSON.stringify(moderatingEffects)),
       transform: { ...transform }
     };
   }
@@ -3725,6 +4514,13 @@ export function initModelCanvas() {
     }
     if (state.edges && Array.isArray(state.edges)) {
       edges = JSON.parse(JSON.stringify(state.edges));
+    }
+    if (state.moderatingEffects && Array.isArray(state.moderatingEffects)) {
+      moderatingEffects = JSON.parse(JSON.stringify(state.moderatingEffects));
+    } else if (state.moderating_effects && Array.isArray(state.moderating_effects)) {
+      moderatingEffects = JSON.parse(JSON.stringify(state.moderating_effects));
+    } else {
+      moderatingEffects = [];
     }
     if (state.transform) {
       transform = { ...state.transform };
@@ -3749,6 +4545,41 @@ export function initModelCanvas() {
     }
   }
 
+  function getModeratingEffects() {
+    return JSON.parse(JSON.stringify(moderatingEffects));
+  }
+  function setModeratingEffects(list) {
+    moderatingEffects = JSON.parse(JSON.stringify(list || []));
+    render();
+    pushHistory();
+  }
+  function updateModeratingEffect(id, patch) {
+    const mod = moderatingEffects.find(m => m.id === id);
+    if (mod) {
+      Object.assign(mod, patch);
+      render();
+      pushHistory();
+    }
+  }
+  function deleteModeratingEffect(id) {
+    moderatingEffects = moderatingEffects.filter(m => m.id !== id);
+    selectedIds.delete(id);
+    render();
+    pushHistory();
+  }
+  function getSelectedModeratingEffect() {
+    for (const id of selectedIds) {
+      const mod = moderatingEffects.find(m => m.id === id);
+      if (mod) return JSON.parse(JSON.stringify(mod));
+    }
+    return null;
+  }
+
+  window.getModeratingEffects = getModeratingEffects;
+  window.setModeratingEffects = setModeratingEffects;
+  window.updateModeratingEffect = updateModeratingEffect;
+  window.deleteModeratingEffect = deleteModeratingEffect;
+  window.getSelectedModeratingEffect = getSelectedModeratingEffect;
   window.exportModelSpec = exportModelSpec;
   window.getModelCanvasState = getModelCanvasState;
   window.loadModelCanvasState = loadModelCanvasState;
@@ -3876,34 +4707,30 @@ export function canvasRedo() {
   }
 }
 
-export function fitToScreen() {
-  if (typeof window !== 'undefined' && window.fitToScreen) {
-    window.fitToScreen();
+export function getModeratingEffects() {
+  if (typeof window !== 'undefined' && window.getModeratingEffects) {
+    return window.getModeratingEffects();
+  }
+  return [];
+}
+
+export function updateModeratingEffect(id, patch) {
+  if (typeof window !== 'undefined' && window.updateModeratingEffect) {
+    window.updateModeratingEffect(id, patch);
   }
 }
 
-export function exportCanvasAsImage() {
-  if (typeof window !== 'undefined' && window.exportCanvasAsImage) {
-    window.exportCanvasAsImage();
+export function deleteModeratingEffect(id) {
+  if (typeof window !== 'undefined' && window.deleteModeratingEffect) {
+    window.deleteModeratingEffect(id);
   }
 }
 
-export function createAndEditNewLatentNode(x, y) {
-  if (typeof window !== 'undefined' && window.createAndEditNewLatentNode) {
-    return window.createAndEditNewLatentNode(x, y);
+export function getSelectedModeratingEffect() {
+  if (typeof window !== 'undefined' && window.getSelectedModeratingEffect) {
+    return window.getSelectedModeratingEffect();
   }
-}
-
-export function selectCanvasNodesByVarNames(varNames) {
-  if (typeof window !== 'undefined' && window.selectCanvasNodesByVarNames) {
-    window.selectCanvasNodesByVarNames(varNames);
-  }
-}
-
-if (import.meta.hot) {
-  import.meta.hot.accept(() => {
-    window.location.reload();
-  });
+  return null;
 }
 
 

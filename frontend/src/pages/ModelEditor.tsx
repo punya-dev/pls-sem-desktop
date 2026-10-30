@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore, getStudyDatasets } from '../store';
-import { initModelCanvas, exportModelSpec, getModelCanvasState, loadModelCanvasState, setCanvasResults, renderModelCanvas, clearModelCanvas, resetModelStyles, setCanvasDatasetColumns } from '../utils/model-canvas';
+import { initModelCanvas, exportModelSpec, getModelCanvasState, loadModelCanvasState, setCanvasResults, renderModelCanvas, clearModelCanvas, resetModelStyles, setCanvasDatasetColumns, updateModeratingEffect, deleteModeratingEffect, getSelectedModeratingEffect } from '../utils/model-canvas';
 import { BootstrapModal } from '../components/BootstrapModal';
 import { AnalysisModal } from '../components/AnalysisModal';
 import { AdvancedResultPanels } from '../components/AdvancedResultPanels';
@@ -203,6 +203,39 @@ const ModelEditor = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const calcDropdownRef = useRef<HTMLDivElement>(null);
   const autoSaveTimerRef = useRef<any>(null);
+  const [isRulesDrawerOpen, setIsRulesDrawerOpen] = useState(false);
+  const [isGlossaryModalOpen, setIsGlossaryModalOpen] = useState(false);
+  const [selectedModeration, setSelectedModeration] = useState<any | null>(null);
+
+  const moderationHelper = useMemo(() => {
+    if (!selectedModeration) return null;
+    let canvasNodes: any[] = [];
+    try {
+      const state = getModelCanvasState();
+      canvasNodes = state?.nodes || [];
+    } catch (e) {}
+
+    const modNode = canvasNodes.find((n: any) => n.id === selectedModeration.moderator);
+    const predNode = canvasNodes.find((n: any) => n.id === selectedModeration.source);
+    const outNode = canvasNodes.find((n: any) => n.id === selectedModeration.target);
+
+    const modLabel = modNode?.label || selectedModeration.moderator;
+    const predLabel = predNode?.label || selectedModeration.source;
+    const outLabel = outNode?.label || selectedModeration.target;
+
+    const isModSingleItem = (modNode?.indicators?.length ?? 1) === 1;
+    const isPredMultiItem = (predNode?.indicators?.length ?? 1) > 1;
+    const showWarning = isModSingleItem && isPredMultiItem && (selectedModeration.method === 'orthogonalizing' || selectedModeration.method === 'product_indicator');
+
+    return {
+      modLabel,
+      predLabel,
+      outLabel,
+      isModSingleItem,
+      isPredMultiItem,
+      showWarning
+    };
+  }, [selectedModeration]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -1144,15 +1177,101 @@ const ModelEditor = () => {
     return { constructNameMap: cMap, indicatorNameMap: iMap };
   }, [plsResults]);
 
-  const getConstructName = (cid: string): string => constructNameMap[cid] || cid;
+  const getConstructName = (cid: string): string => {
+    if (!cid) return '';
+    if (constructNameMap[cid]) return constructNameMap[cid];
+    if (cid.includes(' x ')) {
+      const parts = cid.split(' x ');
+      const mName = constructNameMap[parts[0]] || parts[0];
+      const pName = constructNameMap[parts[1]] || parts[1];
+      return `${mName} x ${pName}`;
+    }
+    return cid;
+  };
   const getIndicatorName = (iid: string): string => indicatorNameMap[iid] || iid;
+
+  const isInteractionConstruct = (cid: string): boolean => {
+    if (!cid) return false;
+    if (cid.includes(' x ')) return true;
+    if (Array.isArray(plsResults?.latent_variables)) {
+      const lv = plsResults.latent_variables.find((v: any) => v.id === cid || v.name === cid);
+      if (lv?.is_interaction) return true;
+    }
+    return false;
+  };
+
+  const renderConstructLabel = (cid: string, customName?: string) => {
+    const isInt = isInteractionConstruct(cid);
+    const label = customName || getConstructName(cid);
+    return (
+      <div className="construct-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+        <div className="construct-dot" style={{ background: isInt ? '#ec4899' : (constructPalette[cid] || '#6366f1') }} />
+        <span className="construct-name">{label}</span>
+        {isInt && (
+          <span
+            className="interaction-badge"
+            style={{
+              fontSize: '10px',
+              fontWeight: 600,
+              padding: '1px 5px',
+              borderRadius: '4px',
+              background: 'rgba(236, 72, 153, 0.12)',
+              color: '#db2777',
+              border: '1px solid rgba(236, 72, 153, 0.25)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.04em',
+              lineHeight: 1.3,
+            }}
+          >
+            interaction
+          </span>
+        )}
+      </div>
+    );
+  };
 
   const resultConstructs: string[] = useMemo(() => {
     if (!plsResults) return [];
-    const fromLoadings = Object.keys(plsResults.measurement?.outer_loadings || {});
-    if (fromLoadings.length > 0) return fromLoadings;
-    return Object.keys(plsResults.reliability_and_validity?.ave || {});
+    const set = new Set<string>();
+
+    if (Array.isArray(plsResults.latent_variables)) {
+      plsResults.latent_variables.forEach((lv: any) => {
+        if (lv?.id) set.add(String(lv.id));
+      });
+    }
+
+    if (plsResults.structural?.path_coefficients) {
+      Object.entries(plsResults.structural.path_coefficients).forEach(([tgt, sources]: [string, any]) => {
+        set.add(tgt);
+        if (sources && typeof sources === 'object') {
+          Object.keys(sources).forEach(s => set.add(s));
+        }
+      });
+    }
+
+    Object.keys(plsResults.measurement?.outer_loadings || {}).forEach(c => set.add(c));
+    Object.keys(plsResults.measurement?.outer_weights || {}).forEach(c => set.add(c));
+    Object.keys(plsResults.construct_scores || {}).forEach(c => set.add(c));
+    Object.keys(plsResults.structural?.r_squared || {}).forEach(c => set.add(c));
+    Object.keys(plsResults.reliability_and_validity?.ave || {}).forEach(c => set.add(c));
+
+    const ordered: string[] = [];
+    if (Array.isArray(plsResults.latent_variables)) {
+      plsResults.latent_variables.forEach((lv: any) => {
+        const id = lv?.id ? String(lv.id) : '';
+        if (id && set.has(id)) {
+          ordered.push(id);
+          set.delete(id);
+        }
+      });
+    }
+    Array.from(set).sort().forEach(c => ordered.push(c));
+    return ordered;
   }, [plsResults]);
+
+  const targetConstructs: string[] = useMemo(() => {
+    return resultConstructs.filter(c => !isInteractionConstruct(c));
+  }, [resultConstructs]);
 
   const constructPalette: Record<string, string> = useMemo(() => {
     const colors = ['#6366f1', '#0ea5e9', '#f59e0b', '#10b981', '#a855f7', '#f43f5e', '#14b8a6', '#ec4899', '#8b5cf6'];
@@ -1490,11 +1609,32 @@ const ModelEditor = () => {
     document.addEventListener('color-picker-closed', handleColorPickerClosed);
     window.addEventListener('canvas-changed', handleCanvasChanged);
 
+    const handleModSelected = (e: any) => {
+      setSelectedModeration(e.detail?.moderation || null);
+    };
+    const handleSelectionChange = (e: any) => {
+      if (e.detail?.type !== 'moderation') {
+        setSelectedModeration(null);
+      }
+    };
+    const handleKeyDownMod = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setSelectedModeration(null);
+      }
+    };
+
+    window.addEventListener('moderation-selected', handleModSelected);
+    window.addEventListener('selectionChange', handleSelectionChange);
+    window.addEventListener('keydown', handleKeyDownMod);
+
     return () => {
       clearTimeout(timer);
       if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
       document.removeEventListener('color-picker-closed', handleColorPickerClosed);
       window.removeEventListener('canvas-changed', handleCanvasChanged);
+      window.removeEventListener('moderation-selected', handleModSelected);
+      window.removeEventListener('selectionChange', handleSelectionChange);
+      window.removeEventListener('keydown', handleKeyDownMod);
       setCanvasResults(null);
       loadModelCanvasState({ nodes: [], edges: [] });
     };
@@ -2163,7 +2303,7 @@ const ModelEditor = () => {
         <div className="canvas-toolbar">
           {/* Group 1: Select, Connect, Erase, Auto-Align */}
           <div className="tb-btn active" title="Select (V)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" /><path d="M13 13l6 6" /></svg></div>
-          <div className="tb-btn" title="Path Connector (P)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><line x1={5} y1={12} x2={19} y2={12} /><polyline points="12 5 19 12 12 19" /></svg></div>
+          <div className="tb-btn" title="Connect (P) - Connect constructs or drag to the middle of a path for moderation"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><line x1={5} y1={12} x2={19} y2={12} /><polyline points="12 5 19 12 12 19" /></svg></div>
           <div className="tb-btn" title="Erase Element (E)" id="btn-erase">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 16, height: 16 }}>
               <line x1={18} y1={6} x2={6} y2={18} strokeLinecap="round" strokeLinejoin="round" />
@@ -2182,16 +2322,8 @@ const ModelEditor = () => {
           <div className="tb-divider" />
 
           {/* Group 2: Latent, Moderation, Quadratic, Gaussian, Text */}
-          <div
-            className="tb-btn"
-            id="btn-add-latent"
-            title="Latent variable (O)"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <circle cx={12} cy={12} r={8} />
-            </svg>
-          </div>
-          <div className="tb-btn" title="Moderation Effect (M)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx={12} cy={12} r={10} /><line x1={12} y1={8} x2={12} y2={16} /><line x1={8} y1={12} x2={16} y2={12} /></svg></div>
+          <div className="tb-btn" title="Latent variable (O)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx={12} cy={12} r={8} /></svg></div>
+          <div className="tb-btn" title="Moderation Effect (M)" style={{ display: 'none' }}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx={12} cy={12} r={10} /><line x1={12} y1={8} x2={12} y2={16} /><line x1={8} y1={12} x2={16} y2={12} /></svg></div>
           <div className="tb-btn" title="Quadratic Effect (Q)"><span className="tb-btn--text">x²</span></div>
           <div className="tb-btn" title="Gaussian Copula"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M4 22h14a2 2 0 0 0 2-2V7.5L14.5 2H6a2 2 0 0 0-2 2v4" /><polyline points="14 2 14 8 20 8" /><path d="M2 15h10" /><path d="M6 11l-4 4 4 4" /></svg></div>
           <div className="tb-btn" title="Text Note (T)" data-action="add-text-note"><span className="tb-btn--text">T</span></div>
@@ -2627,6 +2759,156 @@ const ModelEditor = () => {
           </g>
         </svg>
         <div className="canvas-empty-hint" id="canvas-empty-hint">Drag variables from the left panel to create constructs</div>
+
+        {/* Floating Moderation Settings Inspector */}
+        {selectedModeration && moderationHelper && (
+          <div
+            style={{
+              position: 'absolute',
+              top: '68px',
+              right: '20px',
+              width: '320px',
+              backgroundColor: 'var(--color-bg-base, #ffffff)',
+              border: '1px solid var(--color-border-subtle, #e2e8f0)',
+              borderRadius: '12px',
+              boxShadow: '0 12px 28px rgba(0, 0, 0, 0.16), 0 4px 8px rgba(0, 0, 0, 0.06)',
+              zIndex: 90,
+              padding: '16px',
+              fontSize: '13px',
+              backdropFilter: 'blur(8px)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', borderBottom: '1px solid var(--color-border-subtle, #e2e8f0)', paddingBottom: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
+                <span style={{ display: 'inline-flex', padding: '4px', borderRadius: '6px', backgroundColor: 'var(--color-accent-subtle, #ede9fe)', color: 'var(--color-accent, #6B4EE6)' }}>
+                  <GitCompare size={16} />
+                </span>
+                <span>Moderating Effect</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedModeration(null)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: 'var(--color-text-tertiary)',
+                  padding: '2px 4px',
+                  borderRadius: '4px',
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '14px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ color: 'var(--color-text-secondary)', fontSize: '12px' }}>Moderator:</span>
+                <span style={{ fontWeight: 600, color: 'var(--color-accent, #6B4EE6)', backgroundColor: 'var(--color-accent-subtle, #ede9fe)', padding: '2px 8px', borderRadius: '4px' }}>
+                  {moderationHelper.modLabel}
+                </span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ color: 'var(--color-text-secondary)', fontSize: '12px' }}>Target Path:</span>
+                <span style={{ fontWeight: 600, color: 'var(--color-text-primary)', backgroundColor: 'var(--color-bg-subtle, #f1f5f9)', padding: '2px 8px', borderRadius: '4px' }}>
+                  {moderationHelper.predLabel} &rarr; {moderationHelper.outLabel}
+                </span>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '12px' }}>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--color-text-primary)', marginBottom: '5px' }}>
+                Interaction Approach:
+              </label>
+              <select
+                value={selectedModeration.method || 'two_stage'}
+                onChange={(e) => {
+                  const newMethod = e.target.value;
+                  updateModeratingEffect(selectedModeration.id, { method: newMethod });
+                  setSelectedModeration((prev: any) => ({ ...prev, method: newMethod }));
+                }}
+                style={{
+                  width: '100%',
+                  padding: '6px 10px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--color-border-subtle, #cbd5e1)',
+                  backgroundColor: 'var(--color-bg-base, #fff)',
+                  color: 'var(--color-text-primary)',
+                  fontSize: '12px',
+                }}
+              >
+                <option value="two_stage">Two-stage (Default / Robust)</option>
+                <option value="product_indicator">Product indicator (Reflective)</option>
+                <option value="orthogonalizing">Orthogonalizing (Zero collinearity)</option>
+              </select>
+            </div>
+
+            <div style={{ marginBottom: '12px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '12px', color: 'var(--color-text-secondary)' }}>
+                <input
+                  type="checkbox"
+                  checked={selectedModeration.standardize !== false}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    updateModeratingEffect(selectedModeration.id, { standardize: checked });
+                    setSelectedModeration((prev: any) => ({ ...prev, standardize: checked }));
+                  }}
+                  style={{ accentColor: 'var(--color-accent, #6B4EE6)' }}
+                />
+                <span>Standardize indicators before products</span>
+              </label>
+            </div>
+
+            {moderationHelper.showWarning && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '8px',
+                  padding: '8px 10px',
+                  borderRadius: '6px',
+                  backgroundColor: '#fffbeb',
+                  border: '1px solid #fde68a',
+                  color: '#b45309',
+                  fontSize: '11px',
+                  lineHeight: '1.4',
+                  marginBottom: '12px',
+                }}
+              >
+                <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: '2px' }} />
+                <span>
+                  Combining a single-item moderator with product indicator or orthogonalizing on a multi-item predictor can introduce measurement asymmetry. Two-stage approach is recommended.
+                </span>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: '8px', borderTop: '1px solid var(--color-border-subtle, #e2e8f0)' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  deleteModeratingEffect(selectedModeration.id);
+                  setSelectedModeration(null);
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '5px 10px',
+                  borderRadius: '6px',
+                  border: '1px solid #fecaca',
+                  backgroundColor: '#fff1f2',
+                  color: '#e11d48',
+                  fontSize: '12px',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                }}
+              >
+                <Trash2 size={13} />
+                <span>Delete Moderation</span>
+              </button>
+            </div>
+          </div>
+        )}
       </main>
     </div>{/* /app-body */}
   </div>{/* /view-model */}
@@ -3184,7 +3466,7 @@ const ModelEditor = () => {
                           onToggle={(m) => setTableMode('path_coefficients', m)}
                         />
                       </th>
-                      {resultConstructs.map(c => (
+                      {targetConstructs.map(c => (
                         <th key={c}>{getConstructName(c)}</th>
                       ))}
                     </tr>
@@ -3193,12 +3475,9 @@ const ModelEditor = () => {
                     {resultConstructs.map(sourceC => (
                       <tr key={sourceC}>
                         <td>
-                          <div className="construct-label">
-                            <div className="construct-dot" style={{ background: constructPalette[sourceC] || '#6366f1' }} />
-                            <span className="construct-name">{getConstructName(sourceC)}</span>
-                          </div>
+                          {renderConstructLabel(sourceC)}
                         </td>
-                        {resultConstructs.map(targetC => {
+                        {targetConstructs.map(targetC => {
                           const val = plsResults.structural?.path_coefficients?.[targetC]?.[sourceC];
                           if (val !== undefined && val !== null) {
                             return (
@@ -3238,16 +3517,10 @@ const ModelEditor = () => {
                         return (
                           <tr key={`${pred}->${target}`}>
                             <td>
-                              <div className="construct-label">
-                                <div className="construct-dot" style={{ background: constructPalette[pred] || '#6366f1' }} />
-                                <span className="construct-name">{getConstructName(pred)}</span>
-                              </div>
+                              {renderConstructLabel(pred)}
                             </td>
                             <td>
-                              <div className="construct-label">
-                                <div className="construct-dot" style={{ background: constructPalette[target] || '#0ea5e9' }} />
-                                <span className="construct-name">{getConstructName(target)}</span>
-                              </div>
+                              {renderConstructLabel(target)}
                             </td>
                             <td className="cell-sig">
                               <div className="cell-value">{fmt(val, 4)}</div>
@@ -3273,7 +3546,7 @@ const ModelEditor = () => {
                           onToggle={(m) => setTableMode('total_indirect_effects', m)}
                         />
                       </th>
-                      {resultConstructs.map(c => (
+                      {targetConstructs.map(c => (
                         <th key={c}>{getConstructName(c)}</th>
                       ))}
                     </tr>
@@ -3282,12 +3555,9 @@ const ModelEditor = () => {
                     {resultConstructs.map(sourceC => (
                       <tr key={sourceC}>
                         <td>
-                          <div className="construct-label">
-                            <div className="construct-dot" style={{ background: constructPalette[sourceC] || '#6366f1' }} />
-                            <span className="construct-name">{getConstructName(sourceC)}</span>
-                          </div>
+                          {renderConstructLabel(sourceC)}
                         </td>
-                        {resultConstructs.map(targetC => {
+                        {targetConstructs.map(targetC => {
                           if (sourceC === targetC) return <td key={targetC} className="cell-empty">—</td>;
                           const eff = (plsResults.structural?.effects || []).find((e: any) => e.from === sourceC && e.to === targetC);
                           if (eff && eff.indirect !== undefined && eff.indirect !== null) {
@@ -3322,16 +3592,10 @@ const ModelEditor = () => {
                     {(plsResults.structural?.effects || []).map((eff: any, idx: number) => (
                       <tr key={idx}>
                         <td>
-                          <div className="construct-label">
-                            <div className="construct-dot" style={{ background: constructPalette[eff.from] || '#6366f1' }} />
-                            <span className="construct-name">{getConstructName(eff.from)}</span>
-                          </div>
+                          {renderConstructLabel(eff.from)}
                         </td>
                         <td>
-                          <div className="construct-label">
-                            <div className="construct-dot" style={{ background: constructPalette[eff.to] || '#0ea5e9' }} />
-                            <span className="construct-name">{getConstructName(eff.to)}</span>
-                          </div>
+                          {renderConstructLabel(eff.to)}
                         </td>
                         <td className="cell-sig">
                           <div className="cell-value">{fmt(eff.indirect, 4)}</div>
@@ -3353,7 +3617,7 @@ const ModelEditor = () => {
                           onToggle={(m) => setTableMode('total_effects', m)}
                         />
                       </th>
-                      {resultConstructs.map(c => (
+                      {targetConstructs.map(c => (
                         <th key={c}>{getConstructName(c)}</th>
                       ))}
                     </tr>
@@ -3362,12 +3626,9 @@ const ModelEditor = () => {
                     {resultConstructs.map(sourceC => (
                       <tr key={sourceC}>
                         <td>
-                          <div className="construct-label">
-                            <div className="construct-dot" style={{ background: constructPalette[sourceC] || '#6366f1' }} />
-                            <span className="construct-name">{getConstructName(sourceC)}</span>
-                          </div>
+                          {renderConstructLabel(sourceC)}
                         </td>
-                        {resultConstructs.map(targetC => {
+                        {targetConstructs.map(targetC => {
                           if (sourceC === targetC) return <td key={targetC} className="cell-empty">—</td>;
                           const eff = (plsResults.structural?.effects || []).find((e: any) => e.from === sourceC && e.to === targetC);
                           if (eff && eff.total !== undefined && eff.total !== null) {
@@ -3404,16 +3665,10 @@ const ModelEditor = () => {
                     {(plsResults.structural?.effects || []).map((eff: any, idx: number) => (
                       <tr key={idx}>
                         <td>
-                          <div className="construct-label">
-                            <div className="construct-dot" style={{ background: constructPalette[eff.from] || '#6366f1' }} />
-                            <span className="construct-name">{getConstructName(eff.from)}</span>
-                          </div>
+                          {renderConstructLabel(eff.from)}
                         </td>
                         <td>
-                          <div className="construct-label">
-                            <div className="construct-dot" style={{ background: constructPalette[eff.to] || '#0ea5e9' }} />
-                            <span className="construct-name">{getConstructName(eff.to)}</span>
-                          </div>
+                          {renderConstructLabel(eff.to)}
                         </td>
                         <td>{fmt(eff.direct, 4)}</td>
                         <td>{fmt(eff.indirect, 4)}</td>
@@ -3652,7 +3907,7 @@ const ModelEditor = () => {
                           onToggle={(m) => setTableMode('f_squared', m)}
                         />
                       </th>
-                      {resultConstructs.map(c => (
+                      {targetConstructs.map(c => (
                         <th key={c}>{getConstructName(c)}</th>
                       ))}
                     </tr>
@@ -3661,12 +3916,9 @@ const ModelEditor = () => {
                     {resultConstructs.map(pred => (
                       <tr key={pred}>
                         <td>
-                          <div className="construct-label">
-                            <div className="construct-dot" style={{ background: constructPalette[pred] || '#6366f1' }} />
-                            <span className="construct-name">{getConstructName(pred)}</span>
-                          </div>
+                          {renderConstructLabel(pred)}
                         </td>
-                        {resultConstructs.map(tgt => {
+                        {targetConstructs.map(tgt => {
                           const val = plsResults.structural?.f_squared?.[tgt]?.[pred];
                           if (val !== undefined && val !== null) {
                             const f2 = Number(val);
@@ -3707,16 +3959,10 @@ const ModelEditor = () => {
                         return (
                           <tr key={`${pred}->${target}`}>
                             <td>
-                              <div className="construct-label">
-                                <div className="construct-dot" style={{ background: constructPalette[pred] || '#6366f1' }} />
-                                <span className="construct-name">{getConstructName(pred)}</span>
-                              </div>
+                              {renderConstructLabel(pred)}
                             </td>
                             <td>
-                              <div className="construct-label">
-                                <div className="construct-dot" style={{ background: constructPalette[target] || '#0ea5e9' }} />
-                                <span className="construct-name">{getConstructName(target)}</span>
-                              </div>
+                              {renderConstructLabel(target)}
                             </td>
                             <td className="cell-sig">
                               <div className="cell-value">{fmt(f2, 4)}</div>
@@ -3958,8 +4204,8 @@ const ModelEditor = () => {
                           const ok = vif < 3.3;
                           return (
                             <tr key={`${pred}->${target}`}>
-                              <td><strong>{getConstructName(target)}</strong></td>
-                              <td>{getConstructName(pred)}</td>
+                              <td>{renderConstructLabel(target)}</td>
+                              <td>{renderConstructLabel(pred)}</td>
                               <td className={ok ? 'cell-sig' : 'cell-ns'}>{fmt(vif, 4)}</td>
                               <td>
                                 <span style={{
@@ -3995,7 +4241,7 @@ const ModelEditor = () => {
                       {Object.entries(plsResults.measurement?.outer_vif || {}).flatMap(([cid, vifs]: [string, any]) =>
                         Object.entries(vifs || {}).map(([iid, val]: [string, any]) => (
                           <tr key={`${cid}-${iid}`}>
-                            <td>{getConstructName(cid)}</td>
+                            <td>{renderConstructLabel(cid)}</td>
                             <td><strong>{getIndicatorName(iid)}</strong></td>
                             <td>{fmt(val, 4)}</td>
                           </tr>
@@ -4010,7 +4256,29 @@ const ModelEditor = () => {
                 <thead>
                   <tr>
                     <th>Observation #</th>
-                    {resultConstructs.map(c => <th key={c}>{getConstructName(c)}</th>)}
+                    {resultConstructs.map(c => (
+                      <th key={c}>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                          <span>{getConstructName(c)}</span>
+                          {isInteractionConstruct(c) && (
+                            <span
+                              className="interaction-badge"
+                              style={{
+                                fontSize: '9px',
+                                fontWeight: 600,
+                                padding: '1px 4px',
+                                borderRadius: '3px',
+                                background: 'rgba(236, 72, 153, 0.12)',
+                                color: '#db2777',
+                                textTransform: 'uppercase',
+                              }}
+                            >
+                              interaction
+                            </span>
+                          )}
+                        </div>
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
@@ -4078,9 +4346,9 @@ const ModelEditor = () => {
                           <tr key={idx}>
                             <td>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <span className="construct-name">{p.from_name || getConstructName(p.from)}</span>
+                                {renderConstructLabel(p.from, p.from_name)}
                                 <span style={{ color: '#94a3b8' }}>→</span>
-                                <span className="construct-name">{p.to_name || getConstructName(p.to)}</span>
+                                {renderConstructLabel(p.to, p.to_name)}
                               </div>
                             </td>
                             <td className={cellSigClass}>

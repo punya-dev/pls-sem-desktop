@@ -2,7 +2,7 @@ from typing import List, Optional, Dict, Set, Any
 from pydantic import BaseModel, Field
 import numpy as np
 
-from model_spec import ModelSpec
+from model_spec import ModelSpec, Path
 from core.issues import Issue, IssueTarget
 from core.thresholds import THRESHOLDS
 
@@ -280,11 +280,12 @@ def validate_model_spec(
         add_issue("ISOLATED_CONSTRUCT", "warning", "model", "model", f"Isolated construct(s) without any structural paths: {', '.join(isolated_names)}.")
 
     # 7. Moderating effects validation (MOD-M01..M03)
+    seen_moderations: Set[Tuple[str, str, str]] = set()
     for me in spec.moderating_effects:
         me_id = str(me.id)
-        mod_c = str(me.moderator).strip()
-        src_c = str(me.source).strip()
-        tgt_c = str(me.target).strip()
+        mod_c = str(getattr(me, "moderator", None) or getattr(me, "moderator_lv", "")).strip()
+        src_c = str(getattr(me, "source", None) or getattr(me, "predictor", "") or getattr(me, "predictor_lv", "")).strip()
+        tgt_c = str(getattr(me, "target", None) or getattr(me, "outcome", "") or getattr(me, "outcome_lv", "")).strip()
 
         if mod_c not in construct_ids:
             add_issue("UNKNOWN_MODERATOR", "error", "moderator", me_id, f"Moderator '{mod_c}' not found in constructs.")
@@ -293,20 +294,53 @@ def validate_model_spec(
         if tgt_c not in construct_ids:
             add_issue("UNKNOWN_MOD_TARGET", "error", "moderator", me_id, f"Target construct '{tgt_c}' not found in constructs.")
 
+        if mod_c in construct_ids and (mod_c == src_c or mod_c == tgt_c):
+            add_issue(
+                "INVALID_MODERATOR_ROLE",
+                "error",
+                "moderator",
+                me_id,
+                f"Moderator '{mod_c}' cannot be the predictor or outcome of the moderated path.",
+            )
+
+        triple = (mod_c, src_c, tgt_c)
+        if triple in seen_moderations:
+            add_issue(
+                "DUPLICATE_MODERATING_EFFECT",
+                "error",
+                "moderator",
+                me_id,
+                f"Duplicate moderating effect: moderator '{mod_c}' on path '{src_c}' -> '{tgt_c}' already exists.",
+            )
+        else:
+            seen_moderations.add(triple)
+
         if src_c in construct_ids and tgt_c in construct_ids:
             if (src_c, tgt_c) not in path_pairs:
                 add_issue("MISSING_MAIN_PATH_FOR_MODERATION", "error", "moderator", me_id, f"Direct path from '{src_c}' to '{tgt_c}' must exist to test moderation.")
 
-        if mod_c in construct_ids and tgt_c in construct_ids:
-            if (mod_c, tgt_c) not in path_pairs:
-                add_issue(
-                    "MISSING_MODERATOR_DIRECT_PATH",
-                    "warning",
-                    "moderator",
-                    me_id,
-                    f"Direct path from moderator '{mod_c}' to target '{tgt_c}' is missing.",
-                    "The direct effect of the moderator must be included in the model; omitting it inflates the interaction effect.",
-                )
+    # Acyclicity check for the fully expanded model (with implied moderator -> outcome paths)
+    if spec.moderating_effects and not cycle:
+        expanded_constructs = set(construct_ids)
+        expanded_paths = list(spec.paths)
+        for me in spec.moderating_effects:
+            mod_c = str(getattr(me, "moderator", None) or getattr(me, "moderator_lv", "")).strip()
+            src_c = str(getattr(me, "source", None) or getattr(me, "predictor", "") or getattr(me, "predictor_lv", "")).strip()
+            tgt_c = str(getattr(me, "target", None) or getattr(me, "outcome", "") or getattr(me, "outcome_lv", "")).strip()
+            if mod_c in construct_ids and tgt_c in construct_ids:
+                if (mod_c, tgt_c) not in path_pairs:
+                    expanded_paths.append(Path(**{"from": mod_c, "to": tgt_c}))
+
+        exp_cycle = detect_cycles(expanded_constructs, expanded_paths)
+        if exp_cycle:
+            exp_cycle_chain = " -> ".join([construct_id_to_name.get(cid, cid) for cid in exp_cycle])
+            add_issue(
+                "MODERATION_CREATES_CYCLE",
+                "error",
+                "model",
+                "model",
+                f"Moderation creates a cycle in the fully expanded model via implied direct path: {exp_cycle_chain}.",
+            )
 
     # 8. Sample size / 10-times rule check (VAL-02 / SAM-01)
     max_formative = 0
