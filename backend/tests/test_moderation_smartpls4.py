@@ -752,11 +752,8 @@ def test_corporate_reputation_single_moderation():
     for path_str, expected in ref_paths.items():
         src, tgt = path_str.split(" -> ")
         actual = path_mat[tgt].get(src, 0.0)
-        if src == "SC x CUSA":
-            # Compare interaction term best match (two_stage is within 0.015)
-            assert abs(actual - expected) < 0.02, f"{path_str}: expected {expected}, got {actual}"
-        else:
-            assert abs(actual - expected) <= 0.005, f"{path_str}: expected {expected}, got {actual} (diff {abs(actual - expected)})"
+        # Compare all structural paths (including interaction term) against reference within 0.005 tolerance
+        assert abs(actual - expected) <= 0.005, f"{path_str}: expected {expected}, got {actual} (diff {abs(actual - expected)})"
 
 
 def test_corporate_reputation_multiple_moderation():

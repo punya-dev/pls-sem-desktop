@@ -549,6 +549,7 @@ def run_expanded_pls_estimation(
         stage2_paths = list(stage1_paths)
         existing_stage2_pairs = set(existing_path_pairs)
 
+        int_std_scales = {}
         for m in moderations:
             int_name = m["interaction_term"]
             p_score = np.asarray(scores_stage1.get(m["source"], np.zeros(n_obs)), dtype=float)
@@ -557,6 +558,12 @@ def run_expanded_pls_estimation(
             int_std = standardize_series(int_raw, ddof=1) if m.get("standardize", True) else int_raw
             col_int = f"int_{m['source']}_{m['moderator']}"
             df_stage2[col_int] = int_std
+
+            # Compute standard deviation of the interaction term to scale coefficients to unstandardized interaction scale
+            # (Hair et al., SmartPLS 4 standard: latent variables are standardized Z-scores, but the product term
+            # is not divided by its own standard deviation).
+            int_sd = float(np.std(int_raw, ddof=1))
+            int_std_scales[int_name] = int_sd if int_sd > 1e-12 else 1.0
 
             stage2_constructs.append({
                 "id": int_name,
@@ -591,6 +598,26 @@ def run_expanded_pls_estimation(
 
         # Estimate Stage 2
         res_stage2 = run_pipeline(df_stage2, stage2_spec, cfg)
+
+        # Rescale interaction path coefficients back to unstandardized interaction scale
+        # (Hair et al., SmartPLS 4 standard: beta_unstd = beta_std / std(INT))
+        if "structural" in res_stage2 and "path_coefficients" in res_stage2["structural"]:
+            for m in moderations:
+                int_name = m["interaction_term"]
+                tgt = m["target"]
+                scale = int_std_scales.get(int_name, 1.0)
+                if scale > 1e-12:
+                    tgt_paths = res_stage2["structural"]["path_coefficients"].get(tgt, {})
+                    if int_name in tgt_paths:
+                        tgt_paths[int_name] = float(tgt_paths[int_name]) / scale
+                    if "original_coefficients" in res_stage2["structural"]:
+                        orig_paths = res_stage2["structural"]["original_coefficients"].get(tgt, {})
+                        if int_name in orig_paths:
+                            orig_paths[int_name] = float(orig_paths[int_name]) / scale
+                    if "paths" in res_stage2 and isinstance(res_stage2["paths"], list):
+                        for p in res_stage2["paths"]:
+                            if p.get("from") == int_name and p.get("to") == tgt:
+                                p["beta"] = float(p.get("beta", 0.0)) / scale
 
         # Merge results: measurement results from Stage 1, structural results from Stage 2
         final_res = copy.deepcopy(res_stage2)

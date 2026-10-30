@@ -2259,6 +2259,28 @@ export function initModelCanvas() {
     const sName = sNode.label || sKey;
     const tName = tNode.label || tKey;
 
+    // 0. Check activeResults.moderation?.moderating_effects directly if available
+    const modEffects = activeResults.moderation?.moderating_effects;
+    if (Array.isArray(modEffects)) {
+      const match = modEffects.find(eff =>
+        (eff.id && eff.id === mod.id) ||
+        (
+          (eff.moderator === mod.moderator || eff.moderator === mKey || eff.moderator === mName) &&
+          (eff.source === mod.source || eff.source === sKey || eff.source === sName) &&
+          (eff.target === mod.target || eff.target === tKey || eff.target === tName)
+        )
+      );
+      if (match && match.estimates && match.estimates.beta_interaction !== undefined && match.estimates.beta_interaction !== null) {
+        return {
+          beta: Number(match.estimates.beta_interaction),
+          term: match.interaction_term || `${mName} x ${sName}`,
+          target: tName,
+          t: match.estimates.interaction_t !== undefined ? Number(match.estimates.interaction_t) : null,
+          p: match.estimates.interaction_p_value !== undefined ? Number(match.estimates.interaction_p_value) : null
+        };
+      }
+    }
+
     // Possible terms for interaction LV (moderator x predictor)
     const termCandidates = [
       `${mName} x ${sName}`,
@@ -2651,15 +2673,6 @@ export function initModelCanvas() {
         window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Cannot add moderation: would create a circular dependency.' } }));
       } catch (err) {}
       return false;
-    }
-
-    // Auto-add direct edge if not present
-    if (!edges.some(e => e.sourceId === pendingModeratorNode.id && e.targetId === tNode.id)) {
-      edges.push({
-        id: generateId(),
-        sourceId: pendingModeratorNode.id,
-        targetId: tNode.id
-      });
     }
 
     const newMod = {
@@ -4623,16 +4636,6 @@ export function initModelCanvas() {
             } catch (err) {}
           } else {
             // Valid moderation!
-            // 1. Auto-add direct edge from moderator to outcome if it does not exist
-            if (!edges.some(e => e.sourceId === modId && e.targetId === tNode.id)) {
-              edges.push({
-                id: generateId(),
-                sourceId: modId,
-                targetId: tNode.id
-              });
-            }
-
-            // 2. Add moderating effect
             const newMod = {
               id: generateId(),
               moderator: modId,
