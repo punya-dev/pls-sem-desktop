@@ -3078,7 +3078,8 @@ const ModelEditor = () => {
                 className={`tb-dropdown-menu ${openDropdown === 'arrow-color' ? 'show' : ''}`}
                 id="menu-arrow-color"
                 style={{
-                  width: '236px',
+                  width: '202px',
+                  boxSizing: 'border-box',
                   padding: '10px 12px',
                   borderRadius: '8px',
                   boxShadow: 'var(--shadow-float, 0 8px 24px rgba(15, 23, 42, 0.12))',
@@ -3091,14 +3092,15 @@ const ModelEditor = () => {
                 <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '6px'}}>
                   Arrow Color
                 </div>
-                <div style={{display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center'}}>
-                  {[...fixedArrowColors, ...recentArrowColors].map((color, i) => (
+                <div style={{display: 'flex', gap: '6px', flexWrap: 'nowrap', alignItems: 'center'}}>
+                  {[...fixedArrowColors, ...recentArrowColors.filter(c => !isDefaultColor(c))].map((color, i) => (
                     <button
                       key={'arrow-color-'+i}
                       type="button"
                       style={{
                         width: '20px',
                         height: '20px',
+                        flexShrink: 0,
                         borderRadius: '50%',
                         background: color,
                         border: activeArrowColor?.toLowerCase() === color.toLowerCase() ? '2px solid var(--color-accent)' : '1px solid rgba(0,0,0,0.12)',
@@ -3109,7 +3111,7 @@ const ModelEditor = () => {
                       title={color}
                     />
                   ))}
-                  <button type="button" style={{width: '20px', height: '20px', borderRadius: '50%', background: 'transparent', border: '1px dashed var(--color-border-subtle, #cbd5e1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', position: 'relative', cursor: 'pointer'}} title="Custom Color">
+                  <button type="button" style={{width: '20px', height: '20px', flexShrink: 0, borderRadius: '50%', background: 'transparent', border: '1px dashed var(--color-border-subtle, #cbd5e1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', position: 'relative', cursor: 'pointer'}} title="Custom Color">
                     <span style={{fontSize: '12px', lineHeight: 1}}>+</span>
                     <input
                       type="color"
