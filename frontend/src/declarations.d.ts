@@ -22,6 +22,7 @@ declare module '*/utils/model-canvas' {
   export const hasInvalidLatentVariables: () => boolean;
   export const createAndEditNewLatentNode: (x?: number, y?: number) => any;
   export const createAndEditNewTextNode: (x?: number, y?: number) => any;
+  export const getCanvasGridColors: (bgColor?: string) => { dot: string; line: string };
 }
 declare module '*/utils/results.js' {
   const content: any;

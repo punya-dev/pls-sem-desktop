@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore, getStudyDatasets } from '../store';
-import { initModelCanvas, exportModelSpec, getModelCanvasState, loadModelCanvasState, setCanvasResults, renderModelCanvas, clearModelCanvas, resetModelStyles, setCanvasDatasetColumns, updateModeratingEffect, deleteModeratingEffect, getSelectedModeratingEffect, hasInvalidLatentVariables } from '../utils/model-canvas';
+import { initModelCanvas, exportModelSpec, getModelCanvasState, loadModelCanvasState, setCanvasResults, renderModelCanvas, clearModelCanvas, resetModelStyles, setCanvasDatasetColumns, updateModeratingEffect, deleteModeratingEffect, getSelectedModeratingEffect, hasInvalidLatentVariables, getCanvasGridColors } from '../utils/model-canvas';
 import { BootstrapModal } from '../components/BootstrapModal';
 import { AnalysisModal } from '../components/AnalysisModal';
 import { AdvancedResultPanels } from '../components/AdvancedResultPanels';
@@ -156,6 +156,10 @@ const ModelEditor = () => {
     () => getStudyDatasets(datasetsByStudy, effectiveStudyId || ''),
     [datasetsByStudy, effectiveStudyId]
   );
+
+  const canvasGridColors = useMemo(() => {
+    return getCanvasGridColors(settings?.canvasBgColor);
+  }, [settings?.canvasBgColor, theme, settings?.theme]);
 
   useEffect(() => {
     renderModelCanvas();
@@ -3327,10 +3331,10 @@ const ModelEditor = () => {
         <svg id="model-svg" width="100%" height="100%" style={{display: 'block'}} onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }} onDrop={handleCanvasDrop}>
           <defs>
             <pattern id="dot-grid" width={20} height={20} patternUnits="userSpaceOnUse">
-              <circle cx={2} cy={2} r={1} fill="var(--canvas-dot-color)" />
+              <circle cx={2} cy={2} r={1.2} fill={canvasGridColors.dot} />
             </pattern>
             <pattern id="line-grid" width={20} height={20} patternUnits="userSpaceOnUse">
-              <path d="M 20 0 L 0 0 0 20" fill="none" stroke="var(--canvas-dot-color)" strokeWidth="0.8" opacity="0.6" />
+              <path d="M 20 0 L 0 0 0 20" fill="none" stroke={canvasGridColors.line} strokeWidth="1" />
             </pattern>
             <marker id="arrowhead" markerWidth={10} markerHeight={7} refX={9} refY="3.5" orient="auto">
               <polygon points="0 0, 10 3.5, 0 7" fill="var(--color-text-secondary)" style={{pointerEvents: 'none'}} />

@@ -3,6 +3,84 @@
  * Pure Vanilla JS + SVG implementation for professional vector diagramming.
  */
 
+export function getCanvasGridColors(bgColor) {
+  const isDark = typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark';
+  let color = (bgColor || '').trim();
+
+  // If no custom background color, fall back to theme defaults
+  if (!color) {
+    if (isDark) {
+      return {
+        dot: 'rgba(255, 255, 255, 0.40)',
+        line: 'rgba(255, 255, 255, 0.24)'
+      };
+    } else {
+      return {
+        dot: 'rgba(71, 85, 105, 0.40)',
+        line: 'rgba(100, 116, 139, 0.30)'
+      };
+    }
+  }
+
+  // Parse RGB components
+  let r = 255, g = 255, b = 255;
+  if (color.startsWith('#')) {
+    let hex = color.slice(1);
+    if (hex.length === 3) {
+      hex = hex.split('').map(c => c + c).join('');
+    }
+    if (hex.length >= 6) {
+      r = parseInt(hex.slice(0, 2), 16) || 0;
+      g = parseInt(hex.slice(2, 4), 16) || 0;
+      b = parseInt(hex.slice(4, 6), 16) || 0;
+    }
+  } else if (color.startsWith('rgb')) {
+    const match = color.match(/\(([^)]+)\)/);
+    if (match) {
+      const parts = match[1].split(',').map(p => parseFloat(p.trim()));
+      r = Math.min(255, Math.max(0, parts[0] || 0));
+      g = Math.min(255, Math.max(0, parts[1] || 0));
+      b = Math.min(255, Math.max(0, parts[2] || 0));
+    }
+  } else if (typeof document !== 'undefined') {
+    try {
+      const temp = document.createElement('div');
+      temp.style.color = color;
+      document.body.appendChild(temp);
+      const computed = window.getComputedStyle(temp).color;
+      document.body.removeChild(temp);
+      const match = computed.match(/\(([^)]+)\)/);
+      if (match) {
+        const parts = match[1].split(',').map(p => parseFloat(p.trim()));
+        r = parts[0] || 0;
+        g = parts[1] || 0;
+        b = parts[2] || 0;
+      }
+    } catch (e) {}
+  }
+
+  // Calculate relative luminance using ITU-R BT.709 formula
+  const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+
+  if (luminance < 0.45) {
+    // Dark background: use high-contrast white dots & lines
+    const dotAlpha = luminance < 0.2 ? 0.50 : 0.42;
+    const lineAlpha = luminance < 0.2 ? 0.32 : 0.25;
+    return {
+      dot: `rgba(255, 255, 255, ${dotAlpha})`,
+      line: `rgba(255, 255, 255, ${lineAlpha})`
+    };
+  } else {
+    // Light background: use dark slate dots & lines
+    const dotAlpha = luminance > 0.85 ? 0.42 : 0.50;
+    const lineAlpha = luminance > 0.85 ? 0.30 : 0.38;
+    return {
+      dot: `rgba(30, 41, 59, ${dotAlpha})`,
+      line: `rgba(51, 65, 85, ${lineAlpha})`
+    };
+  }
+}
+
 export function initModelCanvas() {
   window.toggleVarCat = function(catEl) {
     const items = catEl.querySelector('.var-items');
@@ -88,6 +166,33 @@ export function initModelCanvas() {
   let currentBgColor = '';
   let currentRecentBgColors = [];
 
+  function updateCanvasGridColors(bgColor) {
+    const colors = getCanvasGridColors(bgColor);
+    const targetCanvasArea = document.querySelector('.canvas-area') || canvasArea;
+    if (targetCanvasArea) {
+      targetCanvasArea.style.setProperty('--canvas-dot-color', colors.dot);
+      targetCanvasArea.style.setProperty('--canvas-line-color', colors.line);
+    }
+    if (typeof document !== 'undefined') {
+      document.documentElement.style.setProperty('--canvas-dot-color', colors.dot);
+      document.documentElement.style.setProperty('--canvas-line-color', colors.line);
+    }
+
+    const dotGridEl = document.getElementById('dot-grid');
+    if (dotGridEl) {
+      const circle = dotGridEl.querySelector('circle');
+      if (circle) circle.setAttribute('fill', colors.dot);
+    }
+    const lineGridEl = document.getElementById('line-grid');
+    if (lineGridEl) {
+      const path = lineGridEl.querySelector('path');
+      if (path) {
+        path.setAttribute('stroke', colors.line);
+        path.removeAttribute('opacity');
+      }
+    }
+  }
+
   function applyGrid(grid) {
     currentGrid = grid || 'dots';
     const targetBgRect = document.getElementById('bg-rect') || bgRect;
@@ -99,6 +204,7 @@ export function initModelCanvas() {
     } else {
       targetBgRect.setAttribute('fill', 'url(#dot-grid)');
     }
+    updateCanvasGridColors(currentBgColor);
   }
 
   function applyBgColor(color) {
@@ -111,6 +217,7 @@ export function initModelCanvas() {
     if (targetCanvasArea) {
       targetCanvasArea.style.backgroundColor = currentBgColor || 'var(--color-bg-base)';
     }
+    updateCanvasGridColors(currentBgColor);
   }
 
   function getCanvasSettingsFromStore() {
@@ -189,6 +296,18 @@ export function initModelCanvas() {
       saveCanvasSettings({ canvasBgColor: e.detail.color });
     }
   }, { signal });
+
+  if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined') {
+    const themeObserver = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        if (m.type === 'attributes' && m.attributeName === 'data-theme') {
+          updateCanvasGridColors(currentBgColor);
+        }
+      }
+    });
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    signal.addEventListener('abort', () => themeObserver.disconnect());
+  }
 
   // Ensure all arrowhead markers exist in SVG defs
   let defs = svg.querySelector('defs');
@@ -398,12 +517,14 @@ export function initModelCanvas() {
     // Prevent browser native text selection dragging on canvas
     e.preventDefault();
 
+    const isCanvasBg = e.target === svg || e.target === bgRect || e.target?.id === 'bg-rect' || e.target?.id === 'bg-color-rect';
+
     if (e.button === 1 || (e.button === 0 && isSpacePressed)) { // Middle click or Space+Left
       isPanning = true;
       panStart = { x: e.clientX, y: e.clientY };
       panTransformStart = { x: transform.x, y: transform.y };
       svg.style.cursor = 'grabbing';
-    } else if (mode === 'text' && (e.target === svg || e.target === bgRect || e.target.tagName === 'svg' || e.target.tagName === 'rect')) {
+    } else if (mode === 'text' && (isCanvasBg || e.target.tagName === 'svg' || e.target.tagName === 'rect')) {
       const pt = svg.createSVGPoint();
       pt.x = e.clientX;
       pt.y = e.clientY;
@@ -411,7 +532,7 @@ export function initModelCanvas() {
       createAndEditNewTextNode(svgPt.x, svgPt.y);
       setMode('select');
       updateToolbarUI(document.querySelector('.tb-btn[title*="Select"]'));
-    } else if (mode === 'select' && e.button === 0 && (e.target === svg || e.target === bgRect)) {
+    } else if (mode === 'select' && e.button === 0 && isCanvasBg) {
       // Marquee drag-to-select on empty canvas
       isMarquee = true;
       const pt = svg.createSVGPoint();
@@ -439,7 +560,7 @@ export function initModelCanvas() {
       marqueeEl.setAttribute('height', 0);
       guidesLayer.appendChild(marqueeEl);
       render();
-    } else if (e.target === svg || e.target === bgRect) {
+    } else if (isCanvasBg) {
       if (mode === 'moderation') {
         const pt = svg.createSVGPoint();
         pt.x = e.clientX;
@@ -634,7 +755,6 @@ export function initModelCanvas() {
     isSnapping = !isSnapping;
     const snapBtn = document.getElementById('hud-snap');
     if (snapBtn) snapBtn.classList.toggle('active', isSnapping);
-    if (bgRect) bgRect.style.fill = isSnapping ? 'url(#dot-grid)' : 'none';
   }
   document.getElementById('hud-snap')?.addEventListener('click', toggleSnapToGrid);
 
