@@ -271,9 +271,13 @@ def validate_model_spec(
         add_issue("CYCLE_DETECTED", "error", "model", "model", f"Cycle detected in structural model: {cycle_chain}. Recursive models are not supported in standard PLS-SEM.")
 
     # 6. Exogenous / Endogenous classification (MOD-13)
-    exogenous = [cid for cid in construct_ids if in_degrees.get(cid, 0) == 0 and out_degrees.get(cid, 0) > 0]
+    mod_construct_ids = {
+        str(getattr(me, "moderator", None) or getattr(me, "moderator_lv", "")).strip()
+        for me in (spec.moderating_effects or [])
+    }
+    exogenous = [cid for cid in construct_ids if (in_degrees.get(cid, 0) == 0 and out_degrees.get(cid, 0) > 0) or (cid in mod_construct_ids and in_degrees.get(cid, 0) == 0)]
     endogenous = [cid for cid in construct_ids if in_degrees.get(cid, 0) > 0]
-    isolated = [cid for cid in construct_ids if in_degrees.get(cid, 0) == 0 and out_degrees.get(cid, 0) == 0]
+    isolated = [cid for cid in construct_ids if in_degrees.get(cid, 0) == 0 and out_degrees.get(cid, 0) == 0 and cid not in mod_construct_ids]
 
     if isolated and len(construct_ids) > 1:
         isolated_names = [construct_id_to_name.get(cid, cid) for cid in isolated]
