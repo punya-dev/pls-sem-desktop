@@ -2302,8 +2302,8 @@ const ModelEditor = () => {
         {/* Toolbar Pill */}
         <div className="canvas-toolbar">
           {/* Group 1: Select, Connect, Erase, Auto-Align */}
-          <div className="tb-btn active" title="Select (V)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" /><path d="M13 13l6 6" /></svg></div>
-          <div className="tb-btn" title="Connect (P) - Connect constructs or drag to the middle of a path for moderation"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><line x1={5} y1={12} x2={19} y2={12} /><polyline points="12 5 19 12 12 19" /></svg></div>
+          <div className="tb-btn active" id="btn-select" title="Select (V)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" /><path d="M13 13l6 6" /></svg></div>
+          <div className="tb-btn" id="btn-connect" title="Connect (P) - Connect constructs or drag to the middle of a path for moderation"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><line x1={5} y1={12} x2={19} y2={12} /><polyline points="12 5 19 12 12 19" /></svg></div>
           <div className="tb-btn" title="Erase Element (E)" id="btn-erase">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 16, height: 16 }}>
               <line x1={18} y1={6} x2={6} y2={18} strokeLinecap="round" strokeLinejoin="round" />

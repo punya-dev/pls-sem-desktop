@@ -840,18 +840,19 @@ export function initModelCanvas() {
     btn.dataset.canvasListenerBound = 'true';
     btn.addEventListener('click', function() {
       const title = this.getAttribute('title') || '';
-      if (title.includes('Select')) {
+      if (title.includes('Select') || this.id === 'btn-select') {
         setMode('select');
         updateToolbarUI(this);
-      } else if (title.includes('Path Connector')) {
+      } else if (title.includes('Connect') || title.includes('Path Connector') || this.id === 'btn-connect') {
         setMode('connect');
         updateToolbarUI(this);
-      } else if (title.includes('Erase')) {
+      } else if (title.includes('Erase') || this.id === 'btn-erase') {
         setMode('erase');
         updateToolbarUI(this);
       } else if (title.includes('Moderation Effect')) {
         setMode('connect');
-        updateToolbarUI(document.querySelector('.canvas-toolbar .tb-btn[title*="Path Connector"]') || this);
+        const connectBtn = document.getElementById('btn-connect') || document.querySelector('.canvas-toolbar .tb-btn[title*="Connect"], .canvas-toolbar .tb-btn[title*="Path Connector"]');
+        updateToolbarUI(connectBtn || this);
         try {
           window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Connect mode active: Drag from a construct to the middle of a path to add moderation.' } }));
         } catch (err) {}
@@ -3117,14 +3118,8 @@ export function initModelCanvas() {
     const btnAutoAlign = document.querySelector('.tb-btn[title*="Auto-Align"]');
     setBtnState(btnAutoAlign, hasNodes);
 
-    // 5. Top Toolbar: Path Connector (P)
-    const btnConnector = document.querySelector('.tb-btn[title*="Path Connector"]');
-    const canConnect = latentCount >= 2;
-    setBtnState(btnConnector, canConnect);
-    if (!canConnect && mode === 'connect') {
-      setMode('select');
-      updateToolbarUI(document.querySelector('.tb-btn[title*="Select"]'));
-    }
+    // 5. Top Toolbar: Connect (P)
+    // Connect mode is a primary tool (like Select) and remains accessible so users can switch tools freely.
 
     // 6. Top Toolbar: Moderation Effect (M), Quadratic Effect (Q), Gaussian Copula
     const btnModeration = document.querySelector('.tb-btn[title*="Moderation"]');
@@ -4344,13 +4339,13 @@ export function initModelCanvas() {
     if (!e.metaKey && !e.ctrlKey) {
       if (e.key.toLowerCase() === 'v') {
         setMode('select');
-        updateToolbarUI(document.querySelector('.canvas-toolbar .tb-btn[title*="Select"]'));
+        updateToolbarUI(document.getElementById('btn-select') || document.querySelector('.canvas-toolbar .tb-btn[title*="Select"]'));
       } else if (e.key.toLowerCase() === 'p') {
         setMode('connect');
-        updateToolbarUI(document.querySelector('.canvas-toolbar .tb-btn[title*="Path Connector"]'));
+        updateToolbarUI(document.getElementById('btn-connect') || document.querySelector('.canvas-toolbar .tb-btn[title*="Connect"], .canvas-toolbar .tb-btn[title*="Path Connector"]'));
       } else if (e.key.toLowerCase() === 'm') {
         setMode('connect');
-        updateToolbarUI(document.querySelector('.canvas-toolbar .tb-btn[title*="Path Connector"]'));
+        updateToolbarUI(document.getElementById('btn-connect') || document.querySelector('.canvas-toolbar .tb-btn[title*="Connect"], .canvas-toolbar .tb-btn[title*="Path Connector"]'));
         try {
           window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Connect mode active: Drag from a construct to the middle of a path to add moderation.' } }));
         } catch (err) {}
