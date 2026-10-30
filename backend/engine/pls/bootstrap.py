@@ -44,6 +44,36 @@ def _extract_model_parameters(
         val = path_matrix.get(to_c, {}).get(from_c, 0.0)
         params[f"path:{from_c}->{to_c}"] = float(val)
 
+    # Capture all paths present in path_matrix (including interaction paths and auto-included moderator paths)
+    for to_c, from_map in path_matrix.items():
+        if isinstance(from_map, dict):
+            for from_c, val in from_map.items():
+                pkey = f"path:{from_c}->{to_c}"
+                if pkey not in params:
+                    params[pkey] = float(val)
+
+    # Capture moderation simple slopes and conditional indirect effects
+    mod_block = res.get("moderation", {})
+    if isinstance(mod_block, dict):
+        for me in mod_block.get("moderating_effects", []):
+            s_name = me.get("source")
+            m_name = me.get("moderator")
+            t_name = me.get("target")
+            int_name = me.get("interaction_term", f"{m_name} x {s_name}")
+            for sl in me.get("simple_slopes", []):
+                lvl_key = str(sl.get("moderator_level", "")).split(" ")[0]
+                params[f"simple_slope:{int_name}->{t_name}:{lvl_key}"] = float(sl.get("slope", 0.0))
+        for cie in mod_block.get("conditional_indirect_effects", []):
+            chain_str = cie.get("chain", "")
+            mod_str = cie.get("moderator", "")
+            idx_val = cie.get("index_of_moderated_mediation", 0.0)
+            params[f"index_of_moderated_mediation:{chain_str}({mod_str})"] = float(idx_val)
+            for ce in cie.get("conditional_effects", []):
+                lvl_key = str(ce.get("w_label", "")).split(" ")[0]
+                params[f"cond_indirect:{chain_str}({mod_str}):{lvl_key}"] = float(ce.get("indirect_effect", 0.0))
+                params[f"cond_direct:{chain_str}({mod_str}):{lvl_key}"] = float(ce.get("direct_effect", 0.0))
+                params[f"cond_total:{chain_str}({mod_str}):{lvl_key}"] = float(ce.get("total_effect", 0.0))
+
     # 2. Outer loadings & weights
     meas = res.get("measurement", {})
     loadings = meas.get("outer_loadings", {})
@@ -461,10 +491,12 @@ class ParallelBootstrapper:
         indicator_names = base_res.get("indicator_names", {})
 
         path_significance = []
+        seen_path_keys = set()
         for p in paths:
             from_c = p.get("from") or p.get("from_node") if isinstance(p, dict) else p[0]
             to_c = p.get("to") or p.get("to_node") if isinstance(p, dict) else p[1]
             k = f"path:{from_c}->{to_c}"
+            seen_path_keys.add(k)
             st = summarized_parameters.get(k, {})
             st_copy = dict(st)
             st_copy["from"] = from_c
@@ -472,6 +504,20 @@ class ParallelBootstrapper:
             st_copy["from_name"] = construct_names.get(from_c, from_c)
             st_copy["to_name"] = construct_names.get(to_c, to_c)
             path_significance.append(st_copy)
+
+        # Include any additional paths (e.g. interaction paths and implied direct paths)
+        for k, st in summarized_parameters.items():
+            if k.startswith("path:") and k not in seen_path_keys:
+                seen_path_keys.add(k)
+                parts = k[5:].split("->")
+                if len(parts) == 2:
+                    from_c, to_c = parts[0], parts[1]
+                    st_copy = dict(st)
+                    st_copy["from"] = from_c
+                    st_copy["to"] = to_c
+                    st_copy["from_name"] = construct_names.get(from_c, from_c)
+                    st_copy["to_name"] = construct_names.get(to_c, to_c)
+                    path_significance.append(st_copy)
 
         loading_significance = []
         weight_significance = []

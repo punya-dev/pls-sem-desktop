@@ -19,6 +19,7 @@ Implements Wold's Lohmöller Partial Least Squares Path Modeling algorithm:
 """
 
 import math
+import copy
 from typing import Dict, List, Optional, Tuple, Any, Union
 import numpy as np
 import pandas as pd
@@ -100,6 +101,17 @@ def parse_model_spec(model_spec: Any) -> Tuple[Dict[str, Dict[str, Any]], Dict[s
         else:
             c_mode = "B" if c_type == "formative" else "A"
 
+        is_int = bool(c.get("is_interaction", False) or (" x " in cid))
+        meta = c.get("metadata")
+        if not meta and " x " in cid:
+            parts = cid.split(" x ")
+            meta = {
+                "moderator": parts[0].strip(),
+                "predictor": parts[1].strip(),
+                "outcome": "",
+                "method": "two_stage",
+            }
+
         constructs[cid] = {
             "id": cid,
             "name": c.get("name", cid),
@@ -108,6 +120,8 @@ def parse_model_spec(model_spec: Any) -> Tuple[Dict[str, Dict[str, Any]], Dict[s
             "weighting": c.get("weighting", "estimated"),
             "predefined_weights": c.get("predefined_weights", {}),
             "outer_mode": c_mode,
+            "is_interaction": is_int,
+            "metadata": meta,
         }
 
     indicator_col_map = {}
@@ -123,8 +137,8 @@ def parse_model_spec(model_spec: Any) -> Tuple[Dict[str, Dict[str, Any]], Dict[s
 
     paths = []
     for p in spec_dict.get("paths", []):
-        from_c = p.get("from") or p.get("from_node")
-        to_c = p.get("to") or p.get("to_node")
+        from_c = p.get("from") or p.get("from_node") or p.get("source")
+        to_c = p.get("to") or p.get("to_node") or p.get("target")
         if from_c and to_c:
             paths.append((str(from_c), str(to_c)))
 
@@ -580,6 +594,30 @@ def estimate_pls(
             "fornell_larcker": fornell_larcker,
             "htmt": htmt,
         },
+        "latent_variables": [
+            {
+                "id": cid,
+                "name": constructs.get(cid, {}).get("name", cid),
+                "type": constructs.get(cid, {}).get("type", "reflective"),
+                "is_interaction": bool(constructs.get(cid, {}).get("is_interaction", False) or (" x " in cid)),
+                "metadata": constructs.get(cid, {}).get("metadata"),
+            }
+            for cid in construct_ids
+        ],
+        "paths": [
+            {
+                "from": from_c,
+                "to": to_c,
+                "beta": float(b_val),
+            }
+            for to_c, from_map in path_coefs.items()
+            if isinstance(from_map, dict)
+            for from_c, b_val in from_map.items()
+        ],
+        "scores": scores_dict,
+        "r2": r_squared,
+        "f2": f_squared,
+        "vif": inner_vif,
     }
 
 
@@ -599,6 +637,136 @@ def run_pipeline(
         cfg = PipelineSettings(**settings)
     else:
         cfg = settings
+
+    spec_dict = model_spec.model_dump(mode="json", by_alias=True) if hasattr(model_spec, "model_dump") else (copy.deepcopy(model_spec) if isinstance(model_spec, dict) else {})
+    raw_mods = spec_dict.get("moderating_effects", [])
+    if raw_mods and len(raw_mods) > 0 and not getattr(cfg, "_in_moderation", False):
+        from engine.pls.moderation import (
+            run_expanded_pls_estimation,
+            normalize_moderation_spec,
+            calculate_moderation_f2,
+            compute_simple_slopes,
+            detect_moderated_mediation_chains,
+            compute_conditional_indirect_effects,
+        )
+        spec_dict_norm, moderations = normalize_moderation_spec(spec_dict)
+        if moderations:
+            cfg_copy = copy.deepcopy(cfg)
+            cfg_copy._in_moderation = True
+            res_full = run_expanded_pls_estimation(df, spec_dict_norm, moderations, cfg_copy)
+
+            # Kenny f2 for each interaction
+            r2_full_map = res_full.get("structural", {}).get("r_squared", {})
+            f2_results = {}
+            for m in moderations:
+                int_name = m["interaction_term"]
+                tgt = m["target"]
+                r2_incl = float(r2_full_map.get(tgt, 0.0))
+                other_mods = [om for om in moderations if om["id"] != m["id"]]
+                res_excl = run_expanded_pls_estimation(df, spec_dict_norm, other_mods, cfg_copy)
+                r2_excl = float(res_excl.get("structural", {}).get("r_squared", {}).get(tgt, 0.0))
+                f2_results[int_name] = calculate_moderation_f2(r2_incl, r2_excl)
+
+            # Simple slopes per moderation
+            path_matrix = res_full.get("structural", {}).get("path_coefficients", {})
+            simple_slopes_by_mod = {}
+            mod_details = []
+            for m in moderations:
+                src = m["source"]
+                mod = m["moderator"]
+                tgt = m["target"]
+                int_name = m["interaction_term"]
+                b_src = float(path_matrix.get(tgt, {}).get(src, 0.0))
+                b_mod = float(path_matrix.get(tgt, {}).get(mod, 0.0))
+                b_int = float(path_matrix.get(tgt, {}).get(int_name, 0.0))
+                slopes_res = compute_simple_slopes(b_src, b_mod, b_int)
+                simple_slopes_by_mod[m["id"]] = slopes_res
+                mod_details.append({
+                    "id": m["id"],
+                    "source": src,
+                    "moderator": mod,
+                    "target": tgt,
+                    "interaction_term": int_name,
+                    "method": m["method"],
+                    "estimates": {
+                        "beta_source": round(b_src, 4),
+                        "beta_moderator": round(b_mod, 4),
+                        "beta_interaction": round(b_int, 4),
+                    },
+                    "f_squared": f2_results.get(int_name, {}),
+                    "simple_slopes": slopes_res["simple_slopes"],
+                    "plot_data": {
+                        "x_range": slopes_res["x_range"],
+                        "lines": slopes_res["simple_slopes"],
+                    },
+                })
+
+            expanded_paths = [(p.get("from") or p.get("source"), p.get("to") or p.get("target")) for p in res_full.get("_expanded_spec", {}).get("paths", [])]
+            chains = detect_moderated_mediation_chains(expanded_paths, moderations)
+            cond_indirect = compute_conditional_indirect_effects(chains, path_matrix)
+
+            res_full["moderation"] = {
+                "moderating_effects": mod_details,
+                "f2_effect_sizes": f2_results,
+                "simple_slopes": simple_slopes_by_mod,
+                "conditional_indirect_effects": cond_indirect,
+            }
+
+            # Synchronize expanded contract fields
+            expanded_constructs_spec = {c.get("id"): c for c in res_full.get("_expanded_spec", {}).get("constructs", [])}
+            all_scores = res_full.get("construct_scores", {})
+            mod_lvs = []
+            cnames_map = dict(res_full.get("construct_names", {}))
+            mod_by_term = {m["interaction_term"]: m for m in moderations}
+            for cid in all_scores.keys():
+                c_meta = expanded_constructs_spec.get(cid, {})
+                is_int = bool(c_meta.get("is_interaction", False) or (" x " in cid) or (cid in mod_by_term))
+                meta_dict = c_meta.get("metadata")
+                if not meta_dict and cid in mod_by_term:
+                    m_info = mod_by_term[cid]
+                    meta_dict = {
+                        "moderator": m_info["moderator"],
+                        "predictor": m_info["source"],
+                        "outcome": m_info["target"],
+                        "method": m_info["method"],
+                    }
+                elif not meta_dict and is_int and " x " in cid:
+                    parts = cid.split(" x ")
+                    meta_dict = {
+                        "moderator": parts[0].strip(),
+                        "predictor": parts[1].strip(),
+                        "outcome": "",
+                        "method": "two_stage",
+                    }
+                cname = c_meta.get("name", cid)
+                mod_lvs.append({
+                    "id": cid,
+                    "name": cname,
+                    "type": c_meta.get("type", "reflective"),
+                    "is_interaction": is_int,
+                    "metadata": meta_dict,
+                })
+                cnames_map[cid] = cname
+
+            res_full["latent_variables"] = mod_lvs
+            res_full["construct_names"] = cnames_map
+
+            paths_list = []
+            for to_c, from_map in path_matrix.items():
+                if isinstance(from_map, dict):
+                    for from_c, b_val in from_map.items():
+                        paths_list.append({
+                            "from": from_c,
+                            "to": to_c,
+                            "beta": float(b_val),
+                        })
+            res_full["paths"] = paths_list
+            res_full["scores"] = all_scores
+            res_full["r2"] = res_full.get("structural", {}).get("r_squared", {})
+            res_full["f2"] = res_full.get("structural", {}).get("f_squared", {})
+            res_full["vif"] = res_full.get("structural", {}).get("inner_vif", {})
+
+            return res_full
 
     constructs, ind_col_map, paths = parse_model_spec(model_spec)
     construct_ids = list(constructs.keys())

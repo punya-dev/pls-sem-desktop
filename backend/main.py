@@ -1651,6 +1651,10 @@ def run_project_pls(req: RunPlsRequest):
         res = algo.fit(df, spec)
         if req.bootstrap:
             res["significance"] = algo.bootstrap(df, spec, n_boot=req.n_boot)
+            res["bootstrap"] = res["significance"]
+            if "moderation" in res and res.get("significance"):
+                from engine.pls.moderation import attach_bootstrap_to_moderation
+                attach_bootstrap_to_moderation(res, res["significance"])
 
         # 5. Persist results in project file scoped to model_id
         spec_dict = spec.model_dump(mode="json", by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else None)
@@ -1825,6 +1829,10 @@ async def start_bootstrap_job(req: BootstrapStartRequest):
                 cancel_event=cancel_event,
             )
             base_res["significance"] = boot_res
+            base_res["bootstrap"] = boot_res
+            if "moderation" in base_res:
+                from engine.pls.moderation import attach_bootstrap_to_moderation
+                attach_bootstrap_to_moderation(base_res, boot_res)
 
             # Save full results with significance to project scoped to model_id
             spec_dict = spec.model_dump(mode="json", by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else None)
