@@ -214,47 +214,54 @@ export const SnapshotView: React.FC = () => {
     }
   }, [layout]);
 
+  // Helper to process wheel events for pinch-to-zoom and two-finger move
+  const processWheel = (
+    e: { clientX: number; clientY: number; deltaX: number; deltaY: number; ctrlKey: boolean; metaKey: boolean },
+    container: HTMLElement
+  ) => {
+    if (e.ctrlKey || e.metaKey) {
+      // Pinch to zoom (trackpad pinch gesture or Ctrl/Cmd + wheel)
+      const zoomIntensity = 0.008;
+      const zoomFactor = Math.exp(-e.deltaY * zoomIntensity);
+
+      const rect = container.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      setZoomLevel(prevK => {
+        const newK = Math.max(0.1, Math.min(3, prevK * zoomFactor));
+        const ratio = newK / prevK;
+        setPanOffset(prevPan => ({
+          x: mouseX - (mouseX - prevPan.x) * ratio,
+          y: mouseY - (mouseY - prevPan.y) * ratio,
+        }));
+        return newK;
+      });
+    } else {
+      // Moving two fingers on trackpad or scrolling mouse wheel -> pan canvas
+      setPanOffset(prev => ({
+        x: prev.x - e.deltaX,
+        y: prev.y - e.deltaY,
+      }));
+    }
+  };
+
   // Touchpad two-finger move across to pan, and pinch to zoom (matching Model Editor)
   useEffect(() => {
-    if (currentView !== 'diagram') return;
+    if (currentView !== 'diagram' || loading) return;
     const container = containerRef.current;
     if (!container) return;
 
-    const handleWheel = (e: WheelEvent) => {
+    const handleWheelNative = (e: WheelEvent) => {
       e.preventDefault();
-
-      if (e.ctrlKey || e.metaKey) {
-        // Pinch to zoom (trackpad pinch gesture or Ctrl/Cmd + wheel)
-        const zoomIntensity = 0.008;
-        const zoomFactor = Math.exp(-e.deltaY * zoomIntensity);
-
-        const rect = container.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left;
-        const mouseY = e.clientY - rect.top;
-
-        setZoomLevel(prevK => {
-          const newK = Math.max(0.1, Math.min(3, prevK * zoomFactor));
-          const ratio = newK / prevK;
-          setPanOffset(prevPan => ({
-            x: mouseX - (mouseX - prevPan.x) * ratio,
-            y: mouseY - (mouseY - prevPan.y) * ratio,
-          }));
-          return newK;
-        });
-      } else {
-        // Moving two fingers on trackpad or scrolling mouse wheel -> pan canvas
-        setPanOffset(prev => ({
-          x: prev.x - e.deltaX,
-          y: prev.y - e.deltaY,
-        }));
-      }
+      processWheel(e, container);
     };
 
-    container.addEventListener('wheel', handleWheel, { passive: false });
+    container.addEventListener('wheel', handleWheelNative, { passive: false });
     return () => {
-      container.removeEventListener('wheel', handleWheel);
+      container.removeEventListener('wheel', handleWheelNative);
     };
-  }, [currentView]);
+  }, [currentView, loading, snapshot]);
 
   // Spacebar pan & global click to close popovers/menus
   useEffect(() => {
@@ -1873,22 +1880,27 @@ export const SnapshotView: React.FC = () => {
             onMouseMove={handleCanvasMouseMove}
             onMouseUp={handleCanvasMouseUp}
             onMouseLeave={handleCanvasMouseUp}
+            onWheel={(e) => {
+              if (containerRef.current) {
+                processWheel(e, containerRef.current);
+              }
+            }}
             onContextMenu={(e) => {
               e.preventDefault();
               setContextMenuPos({ x: e.clientX, y: e.clientY });
             }}
           >
-            {/* Diagram HUD Floating Bar docked on bottom left */}
+            {/* Diagram HUD Floating Bar docked on bottom right */}
             <div
               className="canvas-hud"
               style={{
                 position: 'absolute',
-                bottom: '16px',
-                left: '24px',
-                right: 'auto',
+                bottom: '20px',
+                right: '20px',
+                left: 'auto',
                 width: 'fit-content',
                 transform: 'none',
-                zIndex: 10,
+                zIndex: 40,
                 display: 'flex',
                 alignItems: 'center',
                 gap: '8px'
@@ -2279,6 +2291,10 @@ export const SnapshotView: React.FC = () => {
                   width="100%"
                   height="100%"
                   style={{ display: 'block', width: '100%', height: '100%' }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setContextMenuPos({ x: e.clientX, y: e.clientY });
+                  }}
                 >
                   <defs>
                     <pattern id="dot-grid-snap" width={20} height={20} patternUnits="userSpaceOnUse">
