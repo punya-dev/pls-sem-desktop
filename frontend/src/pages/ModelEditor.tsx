@@ -1680,24 +1680,22 @@ const ModelEditor = () => {
 
     const handleColorPickerClosed = (e: any) => {
       const { id, color } = e.detail;
+      if (!color) return;
       if (id === 'picker-fill') {
         setActiveFill(color);
-        setRecentFills(prev => {
-          if (['#334155', '#ffffff'].includes(color)) return prev;
-          return [...prev.filter(c => c !== color), color].slice(-3);
-        });
+        if (!isDefaultColor(color)) {
+          setRecentFills(prev => [...prev.filter(c => c.toLowerCase() !== color.toLowerCase()), color].slice(-3));
+        }
       } else if (id === 'picker-border') {
         setActiveBorder(color);
-        setRecentBorders(prev => {
-          if (['transparent', '#1e293b'].includes(color)) return prev;
-          return [...prev.filter(c => c !== color), color].slice(-3);
-        });
+        if (!isDefaultColor(color)) {
+          setRecentBorders(prev => [...prev.filter(c => c.toLowerCase() !== color.toLowerCase()), color].slice(-3));
+        }
       } else if (id === 'picker-text') {
         setActiveText(color);
-        setRecentTextColors(prev => {
-          if (['#ffffff', '#1e293b'].includes(color)) return prev;
-          return [...prev.filter(c => c !== color), color].slice(-1);
-        });
+        if (!isDefaultColor(color)) {
+          setRecentTextColors(prev => [...prev.filter(c => c.toLowerCase() !== color.toLowerCase()), color].slice(-3));
+        }
       }
     };
     
@@ -2618,18 +2616,19 @@ const ModelEditor = () => {
             <div
               className={`tb-dropdown-menu ${openDropdown === 'colors' ? 'show' : ''}`}
               id="menu-colors"
-              style={{ width: '236px', padding: '10px 12px', display: openDropdown === 'colors' ? 'flex' : 'none', flexDirection: 'column' }}
+              style={{ width: '202px', boxSizing: 'border-box', padding: '10px 12px', display: openDropdown === 'colors' ? 'flex' : 'none', flexDirection: 'column' }}
             >
               <div style={{marginBottom: '10px'}}>
                 <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '6px'}}>Fill Color</div>
-                <div style={{display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center'}}>
-                  {[...fixedFills, ...recentFills].map((color, i) => (
+                <div style={{display: 'flex', gap: '6px', flexWrap: 'nowrap', alignItems: 'center'}}>
+                  {[...fixedFills, ...recentFills.filter(c => !isDefaultColor(c))].map((color, i) => (
                     <button
                       key={'fill'+i}
                       type="button"
                       style={{
                         width: '20px',
                         height: '20px',
+                        flexShrink: 0,
                         borderRadius: '50%',
                         background: color === 'transparent' ? 'url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVQIW2NkYGD4z8DAwMgAI0AMDA4YAQc0D+oAAAAASUVORK5CYII=)' : color,
                         border: activeFill?.toLowerCase() === color.toLowerCase() ? '2px solid var(--color-accent)' : '1px solid rgba(0,0,0,0.12)',
@@ -2640,7 +2639,7 @@ const ModelEditor = () => {
                       title={color}
                     />
                   ))}
-                  <button type="button" style={{width: '20px', height: '20px', borderRadius: '50%', background: 'transparent', border: '1px dashed var(--color-border-subtle, #cbd5e1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', position: 'relative', cursor: 'pointer'}} title="Custom Color">
+                  <button type="button" style={{width: '20px', height: '20px', flexShrink: 0, borderRadius: '50%', background: 'transparent', border: '1px dashed var(--color-border-subtle, #cbd5e1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', position: 'relative', cursor: 'pointer'}} title="Custom Color">
                     <span style={{fontSize: '12px', lineHeight: 1}}>+</span>
                     <input
                       type="color"
@@ -2659,14 +2658,15 @@ const ModelEditor = () => {
 
               <div style={{marginBottom: '10px'}}>
                 <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '6px'}}>Border Color</div>
-                <div style={{display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center'}}>
-                  {[...fixedBorders, ...recentBorders].map((color, i) => (
+                <div style={{display: 'flex', gap: '6px', flexWrap: 'nowrap', alignItems: 'center'}}>
+                  {[...fixedBorders, ...recentBorders.filter(c => !isDefaultColor(c))].map((color, i) => (
                     <button
                       key={'border'+i}
                       type="button"
                       style={{
                         width: '20px',
                         height: '20px',
+                        flexShrink: 0,
                         borderRadius: '50%',
                         background: color === 'transparent' ? 'url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVQIW2NkYGD4z8DAwMgAI0AMDA4YAQc0D+oAAAAASUVORK5CYII=)' : color,
                         border: activeBorder?.toLowerCase() === color.toLowerCase() ? '2px solid var(--color-accent)' : '1px solid rgba(0,0,0,0.12)',
@@ -2677,7 +2677,7 @@ const ModelEditor = () => {
                       title={color}
                     />
                   ))}
-                  <button type="button" style={{width: '20px', height: '20px', borderRadius: '50%', background: 'transparent', border: '1px dashed var(--color-border-subtle, #cbd5e1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', position: 'relative', cursor: 'pointer'}} title="Custom Color">
+                  <button type="button" style={{width: '20px', height: '20px', flexShrink: 0, borderRadius: '50%', background: 'transparent', border: '1px dashed var(--color-border-subtle, #cbd5e1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', position: 'relative', cursor: 'pointer'}} title="Custom Color">
                     <span style={{fontSize: '12px', lineHeight: 1}}>+</span>
                     <input
                       type="color"
@@ -2792,14 +2792,15 @@ const ModelEditor = () => {
 
               <div style={{marginBottom: '8px'}}>
                 <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '6px'}}>Text Color</div>
-                <div style={{display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center'}}>
-                  {[...fixedTexts, ...recentTextColors].map((color, i) => (
+                <div style={{display: 'flex', gap: '6px', flexWrap: 'nowrap', alignItems: 'center'}}>
+                  {[...fixedTexts, ...recentTextColors.filter(c => !isDefaultColor(c))].map((color, i) => (
                     <button
                       key={'text'+i}
                       type="button"
                       style={{
                         width: '20px',
                         height: '20px',
+                        flexShrink: 0,
                         borderRadius: '50%',
                         background: color === 'transparent' ? 'url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVQIW2NkYGD4z8DAwMgAI0AMDA4YAQc0D+oAAAAASUVORK5CYII=)' : color,
                         border: activeText?.toLowerCase() === color.toLowerCase() ? '2px solid var(--color-accent)' : '1px solid rgba(0,0,0,0.12)',
@@ -2810,7 +2811,7 @@ const ModelEditor = () => {
                       title={color}
                     />
                   ))}
-                  <button type="button" style={{width: '20px', height: '20px', borderRadius: '50%', background: 'transparent', border: '1px dashed var(--color-border-subtle, #cbd5e1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', cursor: 'pointer', position: 'relative'}} title="Custom Color">
+                  <button type="button" style={{width: '20px', height: '20px', flexShrink: 0, borderRadius: '50%', background: 'transparent', border: '1px dashed var(--color-border-subtle, #cbd5e1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', cursor: 'pointer', position: 'relative'}} title="Custom Color">
                     <span style={{fontSize: '12px', lineHeight: 1}}>+</span>
                     <input
                       type="color"
