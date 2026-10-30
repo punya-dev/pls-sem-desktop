@@ -2245,6 +2245,26 @@ export const SnapshotView: React.FC = () => {
                       <span style={{ fontSize: '11px', color: 'var(--color-text-hint)' }}>⌘A</span>
                     </div>
 
+                    {/* Move Name Inside / Outside */}
+                    <div
+                      className="canvas-ctx-item"
+                      title={targetNode.textInside ? 'Move name outside construct' : 'Move name inside construct'}
+                      onClick={() => {
+                        setContextMenuPos(null);
+                        const isInside = !!targetNode.textInside;
+                        setLayoutNodes(prev => prev.map(n => n.id === targetNode.id ? { ...n, textInside: !isInside } : n));
+                        setToastMsg(!isInside ? 'Name moved inside' : 'Name moved outside');
+                        setTimeout(() => setToastMsg(null), 2000);
+                      }}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: 16 }}>
+                        {targetNode.textInside ? 'open_in_new' : 'vertical_align_center'}
+                      </span>
+                      <span style={{ flex: 1 }}>{targetNode.textInside ? 'Move Name Outside' : 'Move Name Inside'}</span>
+                    </div>
+
+                    <div className="canvas-ctx-divider" />
+
                     {/* 2. Hide Indicators */}
                     <div
                       className={`canvas-ctx-item ${!hasIndicators ? 'disabled' : ''}`}
@@ -2324,6 +2344,69 @@ export const SnapshotView: React.FC = () => {
                     >
                       <span className="material-symbols-outlined" style={{ fontSize: 16 }}>align_vertical_bottom</span>
                       <span style={{ flex: 1 }}>Align Indicators Bottom</span>
+                    </div>
+
+                    <div className="canvas-ctx-divider" />
+
+                    <div
+                      className="canvas-ctx-item"
+                      title="Fit diagram to center"
+                      onClick={() => {
+                        setContextMenuPos(null);
+                        setZoomLevel(1);
+                        centerDiagram(layoutNodes.length > 0 ? layoutNodes : (layout?.nodes || []));
+                      }}
+                    >
+                      <Maximize2 size={15} style={{ color: 'var(--color-text-secondary)' }} />
+                      <span style={{ flex: 1 }}>Fit Screen</span>
+                    </div>
+                  </div>
+                );
+              }
+
+              const isIndicator = targetNode && !targetNode.isLatent && !targetNode.isText;
+              if (isIndicator) {
+                const isIndInside = targetNode.textInside !== undefined ? targetNode.textInside : true;
+                return (
+                  <div
+                    className="canvas-ctx-menu"
+                    style={{
+                      display: 'block',
+                      position: 'fixed',
+                      left: Math.min(contextMenuPos.x, window.innerWidth - 220),
+                      top: Math.min(contextMenuPos.y, window.innerHeight - 240),
+                      zIndex: 10000,
+                      backgroundColor: 'var(--color-bg-elevated)',
+                      backdropFilter: 'blur(12px)',
+                      border: '1px solid var(--color-border-default)',
+                      borderRadius: 'var(--radius-md, 8px)',
+                      boxShadow: 'var(--shadow-float, 0 8px 24px rgba(15, 23, 42, 0.12))',
+                      padding: '4px',
+                      minWidth: '200px',
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div style={{ padding: '6px 10px', fontSize: '11px', fontWeight: 600, color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '3px', background: 'rgba(234, 179, 8, 0.15)', color: '#ca8a04', fontWeight: 700 }}>INDICATOR</span>
+                      <span style={{ color: 'var(--color-text-primary)' }}>{targetNode.label}</span>
+                    </div>
+                    <div className="canvas-ctx-divider" />
+
+                    {/* Move Name Inside / Outside */}
+                    <div
+                      className="canvas-ctx-item"
+                      title={isIndInside ? 'Move label outside indicator box' : 'Move label inside indicator box'}
+                      onClick={() => {
+                        setContextMenuPos(null);
+                        setLayoutNodes(prev => prev.map(n => n.id === targetNode.id ? { ...n, textInside: !isIndInside } : n));
+                        setToastMsg(isIndInside ? 'Name moved outside' : 'Name moved inside');
+                        setTimeout(() => setToastMsg(null), 2000);
+                      }}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: 16 }}>
+                        {isIndInside ? 'open_in_new' : 'vertical_align_center'}
+                      </span>
+                      <span style={{ flex: 1 }}>{isIndInside ? 'Move Name Outside' : 'Move Name Inside'}</span>
                     </div>
 
                     <div className="canvas-ctx-divider" />
@@ -2801,39 +2884,107 @@ export const SnapshotView: React.FC = () => {
                                 stroke={node.stroke || "var(--canvas-latent-stroke, #1e293b)"}
                                 strokeWidth="2"
                               />
-                              <text
-                                textAnchor="middle"
-                                y={r2 !== undefined ? -4 : 4}
-                                fontSize="12"
-                                fontWeight="600"
-                                fill={node.textColor || "var(--canvas-latent-text, #ffffff)"}
-                                style={{ userSelect: 'none' }}
-                              >
-                                {node.label}
-                              </text>
-                              {r2 !== undefined && (
-                                <text
-                                  textAnchor="middle"
-                                  y="14"
-                                  fontSize="10"
-                                  fontWeight="500"
-                                  fill="var(--color-accent, #6366f1)"
-                                  style={{ userSelect: 'none' }}
-                                >
-                                  R² = {fmt(r2, 3)}
-                                </text>
+                              {node.textInside ? (
+                                <>
+                                  <text
+                                    textAnchor="middle"
+                                    y={r2 !== undefined ? -4 : 4}
+                                    fontSize="12"
+                                    fontWeight="600"
+                                    fill={node.textColor || "var(--canvas-latent-text, #ffffff)"}
+                                    style={{ userSelect: 'none' }}
+                                  >
+                                    {node.label}
+                                  </text>
+                                  {r2 !== undefined && (
+                                    <text
+                                      textAnchor="middle"
+                                      y="14"
+                                      fontSize="10"
+                                      fontWeight="500"
+                                      fill="var(--color-accent, #6366f1)"
+                                      style={{ userSelect: 'none' }}
+                                    >
+                                      R² = {fmt(r2, 3)}
+                                    </text>
+                                  )}
+                                </>
+                              ) : (
+                                <>
+                                  <text
+                                    textAnchor="middle"
+                                    y={(node.r || 36) + 18}
+                                    fontSize="12"
+                                    fontWeight="600"
+                                    fill="var(--color-text-primary, #0f172a)"
+                                    style={{ userSelect: 'none' }}
+                                  >
+                                    {node.label}
+                                  </text>
+                                  {r2 !== undefined && (
+                                    <text
+                                      textAnchor="middle"
+                                      y="4"
+                                      fontSize="11"
+                                      fontWeight="600"
+                                      fill="var(--color-accent, #6366f1)"
+                                      style={{ userSelect: 'none' }}
+                                    >
+                                      R² = {fmt(r2, 3)}
+                                    </text>
+                                  )}
+                                </>
                               )}
+
+                              {/* If indicators are hidden, render a clean purple eye icon beside the label */}
+                              {node.indicatorsHidden && (() => {
+                                const childInds = displayNodes.filter((n: any) => n.parentId === node.id && !n.isLatent);
+                                if (childInds.length === 0) return null;
+                                const labelLen = (node.label || '').length * 8;
+                                const eyeX = (labelLen / 2) + 12;
+                                const eyeY = node.textInside ? (r2 !== undefined ? -4 : 4) : ((node.r || 36) + 18);
+                                return (
+                                  <g
+                                    className="canvas-hidden-indicators-icon-btn"
+                                    transform={`translate(${eyeX}, ${eyeY - 9})`}
+                                    style={{ cursor: 'pointer', pointerEvents: 'all' }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setLayoutNodes(prev => prev.map(n => n.id === node.id ? { ...n, indicatorsHidden: false } : n));
+                                      setToastMsg('Indicators visible');
+                                      setTimeout(() => setToastMsg(null), 2000);
+                                    }}
+                                  >
+                                    <title>{childInds.length} indicators hidden. Click to show.</title>
+                                    <rect x="-4" y="-3" width="24" height="20" fill="transparent" />
+                                    <g transform="scale(0.7) translate(-2, 0)">
+                                      <path
+                                        d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"
+                                        fill="var(--color-accent, #6B4EE6)"
+                                        fillRule="evenodd"
+                                      />
+                                    </g>
+                                  </g>
+                                );
+                              })()}
                             </g>
                           );
                         }
 
                         // Indicator (Manifest variable)
                         const parentNode = displayNodes.find((n: any) => n.id === node.parentId);
+                        const isIndInside = node.textInside !== undefined ? node.textInside : true;
                         return (
                           <g
                             key={node.id}
                             transform={`translate(${node.x - 35}, ${node.y - 14})`}
                             onMouseDown={(e) => handleNodeMouseDown(e, node.id)}
+                            onContextMenu={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setHoveredLatent(null);
+                              setContextMenuPos({ x: e.clientX, y: e.clientY, targetNodeId: node.id });
+                            }}
                             style={{ cursor: 'move', pointerEvents: 'all' }}
                           >
                             <title>{node.label} (Indicator of {parentNode?.label || 'construct'})</title>
@@ -2845,17 +2996,31 @@ export const SnapshotView: React.FC = () => {
                               stroke={node.stroke || "var(--canvas-manifest-stroke, #ca8a04)"}
                               strokeWidth="1.5"
                             />
-                            <text
-                              x="35"
-                              y="18"
-                              textAnchor="middle"
-                              fontSize="11"
-                              fontWeight="500"
-                              fill={node.textColor || "var(--canvas-manifest-text, #422006)"}
-                              style={{ userSelect: 'none' }}
-                            >
-                              {node.label}
-                            </text>
+                            {isIndInside ? (
+                              <text
+                                x="35"
+                                y="18"
+                                textAnchor="middle"
+                                fontSize="11"
+                                fontWeight="500"
+                                fill={node.textColor || "var(--canvas-manifest-text, #422006)"}
+                                style={{ userSelect: 'none' }}
+                              >
+                                {node.label}
+                              </text>
+                            ) : (
+                              <text
+                                x="35"
+                                y="42"
+                                textAnchor="middle"
+                                fontSize="11"
+                                fontWeight="500"
+                                fill="var(--color-text-primary, #0f172a)"
+                                style={{ userSelect: 'none' }}
+                              >
+                                {node.label}
+                              </text>
+                            )}
                           </g>
                         );
                       })}

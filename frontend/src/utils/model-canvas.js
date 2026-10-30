@@ -5176,6 +5176,10 @@ export function initModelCanvas() {
       const areIndicatorsHidden = !!targetNode.indicatorsHidden;
       const childInds = nodes.filter(n => n.parentId === targetNode.id && !n.isLatent);
       const hasIndicators = childInds.length > 0;
+      const isInside = !!targetNode.textInside;
+      const metrics = getConstructMetrics(targetNode);
+      const hasR2 = !!(metrics && metrics.r2 !== null && metrics.r2 !== undefined);
+      const canMoveInside = !(hasR2 && !isInside);
 
       items = [
         { id: 'ctx-copy', label: 'Copy', icon: 'content_copy', shortcut: '⌘C', action: () => copySelected() },
@@ -5183,6 +5187,14 @@ export function initModelCanvas() {
         { id: 'ctx-duplicate', label: 'Duplicate', icon: 'control_point_duplicate', shortcut: '⌘D', action: () => duplicateNode(targetNode) },
         { divider: true },
         { id: 'ctx-rename', label: 'Rename', icon: 'edit', action: () => startInlineNodeRename(targetNode) },
+        { id: 'ctx-text-inside', label: isInside ? 'Move Name Outside' : 'Move Name Inside', icon: isInside ? 'open_in_new' : 'vertical_align_center', disabled: !isInside && !canMoveInside, title: (!isInside && !canMoveInside) ? 'Move inside disabled: R² is displayed inside construct' : '', action: () => {
+            if (!isInside && !canMoveInside) return;
+            targetNode.textInside = !isInside;
+            render();
+            pushHistory();
+            window.dispatchEvent(new CustomEvent('canvas-changed'));
+          }
+        },
         { divider: true },
         { id: 'ctx-mode', label: isReflective ? 'Make Formative' : 'Make Reflexive', icon: 'swap_horiz', action: () => {
             targetNode.type = isReflective ? 'formative' : 'reflective';
@@ -5215,12 +5227,20 @@ export function initModelCanvas() {
       ];
     } else if (isIndicator) {
       // ─── Indicator Node Menu ───
+      const isIndInside = targetNode.textInside !== undefined ? targetNode.textInside : true;
       items = [
         { id: 'ctx-copy', label: 'Copy', icon: 'content_copy', shortcut: '⌘C', action: () => copySelected() },
         { id: 'ctx-paste', label: 'Paste', icon: 'content_paste', shortcut: '⌘V', disabled: !hasClipboard, action: () => pasteClipboard() },
         { id: 'ctx-duplicate', label: 'Duplicate', icon: 'control_point_duplicate', shortcut: '⌘D', action: () => duplicateNode(targetNode) },
         { divider: true },
         { id: 'ctx-rename', label: 'Rename', icon: 'edit', action: () => startInlineNodeRename(targetNode) },
+        { id: 'ctx-text-inside', label: isIndInside ? 'Move Name Outside' : 'Move Name Inside', icon: isIndInside ? 'open_in_new' : 'vertical_align_center', action: () => {
+            targetNode.textInside = !isIndInside;
+            render();
+            pushHistory();
+            window.dispatchEvent(new CustomEvent('canvas-changed'));
+          }
+        },
         { divider: true },
         { id: 'ctx-delete', label: 'Delete', icon: 'delete', danger: true, shortcut: 'Del', action: () => deleteSelected() }
       ];
