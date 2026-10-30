@@ -29,6 +29,128 @@ export function initModelCanvas() {
   const guidesLayer = document.getElementById('guides-layer');
   const emptyHint = document.getElementById('canvas-empty-hint');
   const bgRect = document.getElementById('bg-rect');
+  const bgColorRect = document.getElementById('bg-color-rect');
+  const canvasArea = document.querySelector('.canvas-area');
+
+  // Helper for dynamic colored arrowhead markers
+  function getOrCreateMarker(type, color) {
+    if (!type || type === 'none') return '';
+    const safeColor = String(color || '#0f172a').replace(/[^a-zA-Z0-9]/g, '_');
+    const markerId = `arrow-${type}-${safeColor}`;
+    if (!defs.querySelector(`#${markerId}`)) {
+      const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+      marker.setAttribute('id', markerId);
+      marker.setAttribute('markerWidth', '10');
+      marker.setAttribute('markerHeight', '10');
+      marker.setAttribute('orient', 'auto');
+      if (type === 'solid') {
+        marker.setAttribute('refX', '9');
+        marker.setAttribute('refY', '5');
+        const p = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+        p.setAttribute('points', '0 1.5, 9 5, 0 8.5');
+        p.setAttribute('fill', color);
+        marker.appendChild(p);
+      } else if (type === 'open') {
+        marker.setAttribute('refX', '8.5');
+        marker.setAttribute('refY', '5');
+        const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        p.setAttribute('d', 'M 1 1.5 L 8.5 5 L 1 8.5');
+        p.setAttribute('fill', 'none');
+        p.setAttribute('stroke', color);
+        p.setAttribute('stroke-width', '1.8');
+        p.setAttribute('stroke-linecap', 'round');
+        p.setAttribute('stroke-linejoin', 'round');
+        marker.appendChild(p);
+      } else if (type === 'diamond') {
+        marker.setAttribute('refX', '9');
+        marker.setAttribute('refY', '5');
+        const p = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+        p.setAttribute('points', '1 5, 5 1.8, 9 5, 5 8.2');
+        p.setAttribute('fill', color);
+        marker.appendChild(p);
+      } else if (type === 'circle') {
+        marker.setAttribute('refX', '8.5');
+        marker.setAttribute('refY', '5');
+        const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        c.setAttribute('cx', '5');
+        c.setAttribute('cy', '5');
+        c.setAttribute('r', '3.5');
+        c.setAttribute('fill', color);
+        marker.appendChild(c);
+      }
+      defs.appendChild(marker);
+    }
+    return markerId;
+  }
+
+  // Canvas Grid & Background Color management
+  let currentGrid = 'dots';
+  let currentBgColor = '';
+  let currentRecentBgColors = [];
+
+  function applyGrid(grid) {
+    currentGrid = grid || 'dots';
+    const targetBgRect = document.getElementById('bg-rect') || bgRect;
+    if (!targetBgRect) return;
+    if (currentGrid === 'blank') {
+      targetBgRect.setAttribute('fill', 'transparent');
+    } else if (currentGrid === 'grid') {
+      targetBgRect.setAttribute('fill', 'url(#line-grid)');
+    } else {
+      targetBgRect.setAttribute('fill', 'url(#dot-grid)');
+    }
+  }
+
+  function applyBgColor(color) {
+    currentBgColor = color || '';
+    const targetBgColorRect = document.getElementById('bg-color-rect') || bgColorRect;
+    if (targetBgColorRect) {
+      targetBgColorRect.setAttribute('fill', currentBgColor || 'transparent');
+    }
+    const targetCanvasArea = document.querySelector('.canvas-area') || canvasArea;
+    if (targetCanvasArea) {
+      targetCanvasArea.style.backgroundColor = currentBgColor || 'var(--color-bg-base)';
+    }
+  }
+
+  function loadCanvasSettings() {
+    try {
+      const stored = localStorage.getItem('statsem-storage');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed?.state?.settings) {
+          if (parsed.state.settings.canvasGrid) currentGrid = parsed.state.settings.canvasGrid;
+          if (parsed.state.settings.canvasBgColor) currentBgColor = parsed.state.settings.canvasBgColor;
+          if (parsed.state.settings.canvasRecentBgColors) currentRecentBgColors = parsed.state.settings.canvasRecentBgColors;
+        }
+      }
+    } catch (e) {}
+    applyGrid(currentGrid);
+    applyBgColor(currentBgColor);
+  }
+
+  function saveCanvasSettings(updates) {
+    try {
+      const stored = localStorage.getItem('statsem-storage');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed?.state?.settings) {
+          parsed.state.settings = { ...parsed.state.settings, ...updates };
+          localStorage.setItem('statsem-storage', JSON.stringify(parsed));
+        }
+      }
+    } catch (e) {}
+  }
+
+  loadCanvasSettings();
+
+  window.addEventListener('canvas-grid-change', (e) => {
+    if (e.detail?.grid) applyGrid(e.detail.grid);
+  }, { signal });
+
+  window.addEventListener('canvas-bg-change', (e) => {
+    if (e.detail?.color !== undefined) applyBgColor(e.detail.color);
+  }, { signal });
 
   // Ensure all arrowhead markers exist in SVG defs
   let defs = svg.querySelector('defs');
@@ -37,14 +159,14 @@ export function initModelCanvas() {
     svg.insertBefore(defs, svg.firstChild);
   }
   const requiredMarkers = [
-    { id: 'arrow-solid', tag: 'polygon', attrs: { points: '1 2, 9 5, 1 8', fill: 'var(--color-text-primary, #1e293b)' }, refX: '8', refY: '5' },
-    { id: 'arrow-solid-selected', tag: 'polygon', attrs: { points: '1 2, 9 5, 1 8', fill: 'var(--color-accent, #6B4EE6)' }, refX: '8', refY: '5' },
-    { id: 'arrow-open', tag: 'path', attrs: { d: 'M 2 2 L 8 5 L 2 8', fill: 'none', stroke: 'var(--color-text-primary, #1e293b)', 'stroke-width': '1.5', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, refX: '7', refY: '5' },
-    { id: 'arrow-open-selected', tag: 'path', attrs: { d: 'M 2 2 L 8 5 L 2 8', fill: 'none', stroke: 'var(--color-accent, #6B4EE6)', 'stroke-width': '1.5', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, refX: '7', refY: '5' },
-    { id: 'arrow-diamond', tag: 'polygon', attrs: { points: '5 1.5, 8.5 5, 5 8.5, 1.5 5', fill: 'var(--color-text-primary, #1e293b)' }, refX: '5', refY: '5' },
-    { id: 'arrow-diamond-selected', tag: 'polygon', attrs: { points: '5 1.5, 8.5 5, 5 8.5, 1.5 5', fill: 'var(--color-accent, #6B4EE6)' }, refX: '5', refY: '5' },
-    { id: 'arrow-circle', tag: 'circle', attrs: { cx: '5', cy: '5', r: '3', fill: 'var(--color-text-primary, #1e293b)' }, refX: '5', refY: '5' },
-    { id: 'arrow-circle-selected', tag: 'circle', attrs: { cx: '5', cy: '5', r: '3', fill: 'var(--color-accent, #6B4EE6)' }, refX: '5', refY: '5' },
+    { id: 'arrow-solid', tag: 'polygon', attrs: { points: '0 1.5, 9 5, 0 8.5', fill: 'var(--color-text-primary, #1e293b)' }, refX: '9', refY: '5' },
+    { id: 'arrow-solid-selected', tag: 'polygon', attrs: { points: '0 1.5, 9 5, 0 8.5', fill: 'var(--color-accent, #6B4EE6)' }, refX: '9', refY: '5' },
+    { id: 'arrow-open', tag: 'path', attrs: { d: 'M 1 1.5 L 8.5 5 L 1 8.5', fill: 'none', stroke: 'var(--color-text-primary, #1e293b)', 'stroke-width': '1.8', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, refX: '8.5', refY: '5' },
+    { id: 'arrow-open-selected', tag: 'path', attrs: { d: 'M 1 1.5 L 8.5 5 L 1 8.5', fill: 'none', stroke: 'var(--color-accent, #6B4EE6)', 'stroke-width': '1.8', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, refX: '8.5', refY: '5' },
+    { id: 'arrow-diamond', tag: 'polygon', attrs: { points: '1 5, 5 1.8, 9 5, 5 8.2', fill: 'var(--color-text-primary, #1e293b)' }, refX: '9', refY: '5' },
+    { id: 'arrow-diamond-selected', tag: 'polygon', attrs: { points: '1 5, 5 1.8, 9 5, 5 8.2', fill: 'var(--color-accent, #6B4EE6)' }, refX: '9', refY: '5' },
+    { id: 'arrow-circle', tag: 'circle', attrs: { cx: '5', cy: '5', r: '3.5', fill: 'var(--color-text-primary, #1e293b)' }, refX: '8.5', refY: '5' },
+    { id: 'arrow-circle-selected', tag: 'circle', attrs: { cx: '5', cy: '5', r: '3.5', fill: 'var(--color-accent, #6B4EE6)' }, refX: '8.5', refY: '5' },
   ];
   requiredMarkers.forEach(m => {
     if (!defs.querySelector(`#${m.id}`)) {
@@ -129,10 +251,12 @@ export function initModelCanvas() {
     }
     
     // Scale background pattern
-    const pattern = document.getElementById('dot-grid');
-    if (pattern) {
-      pattern.setAttribute('patternTransform', `translate(${transform.x}, ${transform.y}) scale(${transform.k})`);
-    }
+    ['dot-grid', 'line-grid'].forEach(gridId => {
+      const pattern = document.getElementById(gridId);
+      if (pattern) {
+        pattern.setAttribute('patternTransform', `translate(${transform.x}, ${transform.y}) scale(${transform.k})`);
+      }
+    });
   }
 
   function getModelCenterOfMass() {
@@ -2350,26 +2474,35 @@ export function initModelCanvas() {
         d += ` L ${x2} ${y2}`;
       }
       
-      path.setAttribute('d', d);
-      path.setAttribute('class', selectedIds.has(edge.id) ? 'edge-path selected' : 'edge-path');
-      
-      let markerName = 'arrow-solid';
-      if (edge.arrowhead) {
-        markerName = `arrow-${edge.arrowhead}`;
+      const isSelected = selectedIds.has(edge.id);
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      const defEdgeColor = isDark ? '#ffffff' : '#0f172a';
+      const effectiveEdgeColor = edge.color || defEdgeColor;
+
+      if (isSelected) {
+        const halo = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        halo.setAttribute('d', d);
+        halo.setAttribute('fill', 'none');
+        halo.setAttribute('stroke', 'var(--color-accent, #6B4EE6)');
+        halo.setAttribute('stroke-width', String((parseFloat(edge.strokeWidth || '2')) + 5));
+        halo.setAttribute('stroke-opacity', '0.45');
+        halo.setAttribute('stroke-linecap', 'round');
+        edgesLayer.appendChild(halo);
       }
-      if (edge.arrowhead === 'none') markerName = '';
+
+      path.setAttribute('d', d);
+      path.setAttribute('class', isSelected ? 'edge-path selected' : 'edge-path');
       
-      if (markerName) {
-        path.setAttribute('marker-end', selectedIds.has(edge.id) ? `url(#${markerName}-selected)` : `url(#${markerName})`);
+      const arrowType = edge.arrowhead !== undefined ? edge.arrowhead : 'solid';
+      if (arrowType && arrowType !== 'none') {
+        const markerId = getOrCreateMarker(arrowType, effectiveEdgeColor);
+        path.setAttribute('marker-end', `url(#${markerId})`);
       } else {
         path.removeAttribute('marker-end');
       }
 
-      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-      const defEdgeColor = isDark ? '#ffffff' : '#0f172a';
-      const edgeColor = selectedIds.has(edge.id) ? 'var(--color-accent)' : (edge.color || defEdgeColor);
-      path.style.stroke = edgeColor;
-      path.style.color = edgeColor;
+      path.style.stroke = effectiveEdgeColor;
+      path.style.color = effectiveEdgeColor;
       path.style.strokeWidth = edge.strokeWidth || '2';
       if (edge.strokeDasharray) {
         path.style.strokeDasharray = edge.strokeDasharray;
@@ -2606,22 +2739,39 @@ export function initModelCanvas() {
       const startY = modNode.y + (mdy / mlen) * modR;
 
       const isSelected = selectedIds.has(mod.id);
-      let modMarker = `arrow-${mod.arrowhead || 'open'}`;
       const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
       const defModColor = isDark ? '#cbd5e1' : 'rgba(107, 78, 230, 0.75)';
-      const modColor = isSelected ? 'var(--color-accent, #6B4EE6)' : (mod.color || defModColor);
+      const effectiveModColor = mod.color || defModColor;
+
+      if (isSelected) {
+        const halo = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        halo.setAttribute('d', `M ${startX} ${startY} L ${mx} ${my}`);
+        halo.setAttribute('fill', 'none');
+        halo.setAttribute('stroke', 'var(--color-accent, #6B4EE6)');
+        halo.setAttribute('stroke-width', String((parseFloat(mod.strokeWidth || '1.5')) + 5));
+        halo.setAttribute('stroke-opacity', '0.45');
+        halo.setAttribute('stroke-linecap', 'round');
+        edgesLayer.appendChild(halo);
+      }
 
       // 1. Dashed line from moderator to midpoint
       const dashLine = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       dashLine.setAttribute('d', `M ${startX} ${startY} L ${mx} ${my}`);
       dashLine.setAttribute('class', isSelected ? 'moderation-line selected' : 'moderation-line');
-      dashLine.style.stroke = modColor;
-      dashLine.style.color = modColor;
+      dashLine.style.stroke = effectiveModColor;
+      dashLine.style.color = effectiveModColor;
       dashLine.style.strokeWidth = mod.strokeWidth ? String(mod.strokeWidth) : '1.5';
       dashLine.style.strokeDasharray = mod.strokeDasharray !== undefined ? mod.strokeDasharray : '4 4';
       dashLine.style.fill = 'none';
       dashLine.style.cursor = 'pointer';
-      dashLine.setAttribute('marker-end', isSelected ? `url(#${modMarker}-selected)` : `url(#${modMarker})`);
+
+      const modArrow = mod.arrowhead !== undefined ? mod.arrowhead : 'open';
+      if (modArrow && modArrow !== 'none') {
+        const mId = getOrCreateMarker(modArrow, effectiveModColor);
+        dashLine.setAttribute('marker-end', `url(#${mId})`);
+      } else {
+        dashLine.removeAttribute('marker-end');
+      }
       edgesLayer.appendChild(dashLine);
 
       // 2. Midpoint Dot (small circle where dashed line lands on the path)
@@ -2629,7 +2779,7 @@ export function initModelCanvas() {
       dot.setAttribute('cx', mx);
       dot.setAttribute('cy', my);
       dot.setAttribute('r', '4');
-      dot.setAttribute('fill', isSelected ? 'var(--color-accent, #6B4EE6)' : (mod.color || '#6B4EE6'));
+      dot.setAttribute('fill', effectiveModColor);
       dot.setAttribute('stroke', '#ffffff');
       dot.setAttribute('stroke-width', '1.5');
       dot.style.cursor = 'pointer';
@@ -3264,21 +3414,36 @@ export function initModelCanvas() {
             }
 
             const isIndEdgeSelected = selectedIds.has(indEdgeId) || isSelected;
-            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-            path.setAttribute('d', d);
             const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
             const defIndColor = isDark ? '#cbd5e1' : 'var(--canvas-edge-stroke)';
-            const indColor = isIndEdgeSelected ? 'var(--color-accent, #6B4EE6)' : (node.edgeColor || defIndColor);
-            path.setAttribute('stroke', indColor);
-            path.style.stroke = indColor;
-            path.style.color = indColor;
+            const effectiveIndColor = node.edgeColor || defIndColor;
+
+            if (isIndEdgeSelected) {
+              const halo = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+              halo.setAttribute('d', d);
+              halo.setAttribute('fill', 'none');
+              halo.setAttribute('stroke', 'var(--color-accent, #6B4EE6)');
+              halo.setAttribute('stroke-width', String((parseFloat(node.edgeStrokeWidth || '1.5')) + 5));
+              halo.setAttribute('stroke-opacity', '0.45');
+              halo.setAttribute('stroke-linecap', 'round');
+              edgesLayer.appendChild(halo);
+            }
+
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.setAttribute('d', d);
+            path.setAttribute('stroke', effectiveIndColor);
+            path.style.stroke = effectiveIndColor;
+            path.style.color = effectiveIndColor;
             path.setAttribute('stroke-width', node.edgeStrokeWidth || '1.5');
             if (node.edgeStrokeDasharray) {
               path.style.strokeDasharray = node.edgeStrokeDasharray;
             }
             const indArrow = node.edgeArrowhead || 'solid';
             if (indArrow !== 'none') {
-              path.setAttribute('marker-end', isIndEdgeSelected ? `url(#arrow-${indArrow}-selected)` : `url(#arrow-${indArrow})`);
+              const mId = getOrCreateMarker(indArrow, effectiveIndColor);
+              path.setAttribute('marker-end', `url(#${mId})`);
+            } else {
+              path.removeAttribute('marker-end');
             }
             path.style.fill = 'none';
             edgesLayer.appendChild(path);
@@ -4378,9 +4543,226 @@ export function initModelCanvas() {
     return !!(payload && payload.nodes && payload.nodes.length > 0);
   }
 
+  function createGridPatternCtxElement() {
+    const container = document.createElement('div');
+    container.style.padding = '4px 8px 6px';
+    container.style.userSelect = 'none';
+
+    const label = document.createElement('div');
+    label.style.fontSize = '10px';
+    label.style.fontWeight = '600';
+    label.style.textTransform = 'uppercase';
+    label.style.letterSpacing = '0.05em';
+    label.style.color = 'var(--color-text-hint)';
+    label.style.marginBottom = '6px';
+    label.style.paddingLeft = '2px';
+    label.textContent = 'Grid Pattern';
+    container.appendChild(label);
+
+    const btnGroup = document.createElement('div');
+    btnGroup.style.display = 'flex';
+    btnGroup.style.gap = '4px';
+    btnGroup.style.background = 'var(--color-bg-base)';
+    btnGroup.style.padding = '2px';
+    btnGroup.style.borderRadius = '6px';
+    btnGroup.style.border = '1px solid var(--color-border-subtle, #e2e8f0)';
+
+    const options = [
+      { id: 'blank', label: 'Blank', icon: 'crop_free' },
+      { id: 'dots', label: 'Dotted', icon: 'grain' },
+      { id: 'grid', label: 'Ruled', icon: 'grid_4x4' }
+    ];
+
+    options.forEach(opt => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      const isActive = currentGrid === opt.id;
+      btn.style.flex = '1';
+      btn.style.height = '26px';
+      btn.style.display = 'flex';
+      btn.style.alignItems = 'center';
+      btn.style.justifyContent = 'center';
+      btn.style.gap = '4px';
+      btn.style.border = isActive ? '1px solid var(--color-accent-subtle)' : 'none';
+      btn.style.borderRadius = '4px';
+      btn.style.background = isActive ? 'var(--color-accent-subtle, rgba(107, 78, 230, 0.12))' : 'transparent';
+      btn.style.color = isActive ? 'var(--color-accent, #6B4EE6)' : 'var(--color-text-secondary)';
+      btn.style.fontSize = '11px';
+      btn.style.fontWeight = isActive ? '600' : '500';
+      btn.style.cursor = 'pointer';
+      btn.style.transition = 'all 0.15s ease';
+
+      const icon = document.createElement('span');
+      icon.className = 'material-symbols-outlined';
+      icon.style.fontSize = '14px';
+      icon.textContent = opt.icon;
+      btn.appendChild(icon);
+
+      const txt = document.createElement('span');
+      txt.textContent = opt.label;
+      btn.appendChild(txt);
+
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        applyGrid(opt.id);
+        saveCanvasSettings({ canvasGrid: opt.id });
+        window.dispatchEvent(new CustomEvent('canvas-grid-change', { detail: { grid: opt.id } }));
+        hideContextMenu();
+      });
+
+      btnGroup.appendChild(btn);
+    });
+
+    container.appendChild(btnGroup);
+    return container;
+  }
+
+  function createCanvasBgCtxElement() {
+    const container = document.createElement('div');
+    container.style.padding = '4px 8px 6px';
+    container.style.userSelect = 'none';
+
+    const label = document.createElement('div');
+    label.style.fontSize = '10px';
+    label.style.fontWeight = '600';
+    label.style.textTransform = 'uppercase';
+    label.style.letterSpacing = '0.05em';
+    label.style.color = 'var(--color-text-hint)';
+    label.style.marginBottom = '6px';
+    label.style.paddingLeft = '2px';
+    label.textContent = 'Canvas Background';
+    container.appendChild(label);
+
+    const swatchRow = document.createElement('div');
+    swatchRow.style.display = 'flex';
+    swatchRow.style.alignItems = 'center';
+    swatchRow.style.gap = '8px';
+    swatchRow.style.paddingLeft = '2px';
+
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const defaultColors = [
+      { id: '', label: 'Default', bg: isDark ? '#0f172a' : '#ffffff' },
+      { id: isDark ? '#1e293b' : '#f8fafc', label: 'Soft', bg: isDark ? '#1e293b' : '#f8fafc' }
+    ];
+
+    defaultColors.forEach(item => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      const isSelected = (!currentBgColor && item.id === '') || (currentBgColor && currentBgColor.toLowerCase() === item.id.toLowerCase());
+      btn.title = item.label;
+      btn.style.width = '22px';
+      btn.style.height = '22px';
+      btn.style.borderRadius = '50%';
+      btn.style.background = item.bg;
+      btn.style.border = isSelected ? '2px solid var(--color-accent, #6B4EE6)' : '1px solid rgba(0,0,0,0.2)';
+      btn.style.boxShadow = isSelected ? '0 0 0 2px var(--color-accent-subtle)' : 'none';
+      btn.style.cursor = 'pointer';
+      btn.style.flexShrink = '0';
+
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        applyBgColor(item.id);
+        saveCanvasSettings({ canvasBgColor: item.id });
+        window.dispatchEvent(new CustomEvent('canvas-bg-change', { detail: { color: item.id } }));
+        hideContextMenu();
+      });
+      swatchRow.appendChild(btn);
+    });
+
+    // 1 History swatch (if set and not in defaults)
+    const defHexes = ['', isDark ? '#1e293b' : '#f8fafc', '#ffffff', '#0f172a'];
+    const recentColor = currentRecentBgColors.find(c => c && !defHexes.some(d => d.toLowerCase() === c.toLowerCase()));
+    if (recentColor) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      const isSelected = currentBgColor && currentBgColor.toLowerCase() === recentColor.toLowerCase();
+      btn.title = `Recent: ${recentColor}`;
+      btn.style.width = '22px';
+      btn.style.height = '22px';
+      btn.style.borderRadius = '50%';
+      btn.style.background = recentColor;
+      btn.style.border = isSelected ? '2px solid var(--color-accent, #6B4EE6)' : '1px solid rgba(0,0,0,0.2)';
+      btn.style.boxShadow = isSelected ? '0 0 0 2px var(--color-accent-subtle)' : 'none';
+      btn.style.cursor = 'pointer';
+      btn.style.flexShrink = '0';
+
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        applyBgColor(recentColor);
+        saveCanvasSettings({ canvasBgColor: recentColor });
+        window.dispatchEvent(new CustomEvent('canvas-bg-change', { detail: { color: recentColor } }));
+        hideContextMenu();
+      });
+      swatchRow.appendChild(btn);
+    }
+
+    // Custom Color "+" button
+    const plusBtn = document.createElement('button');
+    plusBtn.type = 'button';
+    plusBtn.title = 'Custom Canvas Color';
+    plusBtn.style.width = '22px';
+    plusBtn.style.height = '22px';
+    plusBtn.style.borderRadius = '50%';
+    plusBtn.style.background = 'transparent';
+    plusBtn.style.border = '1px dashed var(--color-border-subtle, #cbd5e1)';
+    plusBtn.style.display = 'flex';
+    plusBtn.style.alignItems = 'center';
+    plusBtn.style.justifyContent = 'center';
+    plusBtn.style.color = 'var(--color-text-secondary)';
+    plusBtn.style.position = 'relative';
+    plusBtn.style.cursor = 'pointer';
+    plusBtn.style.flexShrink = '0';
+
+    const plusSign = document.createElement('span');
+    plusSign.style.fontSize = '14px';
+    plusSign.style.lineHeight = '1';
+    plusSign.textContent = '+';
+    plusBtn.appendChild(plusSign);
+
+    const colorInput = document.createElement('input');
+    colorInput.type = 'color';
+    colorInput.value = currentBgColor || (isDark ? '#0f172a' : '#ffffff');
+    colorInput.style.position = 'absolute';
+    colorInput.style.top = '0';
+    colorInput.style.left = '0';
+    colorInput.style.width = '100%';
+    colorInput.style.height = '100%';
+    colorInput.style.opacity = '0';
+    colorInput.style.cursor = 'pointer';
+
+    const onColorPick = (val) => {
+      applyBgColor(val);
+      if (!defHexes.some(d => d.toLowerCase() === val.toLowerCase())) {
+        currentRecentBgColors = [val];
+      }
+      saveCanvasSettings({ canvasBgColor: val, canvasRecentBgColors: currentRecentBgColors });
+      window.dispatchEvent(new CustomEvent('canvas-bg-change', { detail: { color: val } }));
+    };
+
+    colorInput.addEventListener('input', (ev) => {
+      onColorPick(ev.target.value);
+    });
+    colorInput.addEventListener('change', (ev) => {
+      onColorPick(ev.target.value);
+      hideContextMenu();
+    });
+    plusBtn.appendChild(colorInput);
+    swatchRow.appendChild(plusBtn);
+
+    container.appendChild(swatchRow);
+    return container;
+  }
+
   function renderContextMenuItems(items) {
     contextMenu.innerHTML = '';
     items.forEach(item => {
+      if (item.custom) {
+        if (typeof item.render === 'function') {
+          const customEl = item.render();
+          if (customEl) contextMenu.appendChild(customEl);
+        }
+        return;
+      }
       if (item.divider) {
         const div = document.createElement('div');
         div.className = 'canvas-ctx-divider';
@@ -4518,6 +4900,11 @@ export function initModelCanvas() {
         { id: 'ctx-export', label: 'Export as Image', icon: 'image', disabled: !hasCanvasElements, action: () => exportCanvasAsImage() },
         { divider: true },
         { id: 'ctx-snap', label: isSnapping ? 'Disable Snap to Grid' : 'Enable Snap to Grid', icon: isSnapping ? 'grid_off' : 'grid_on', action: () => toggleSnapToGrid() },
+        { divider: true },
+        { custom: true, render: () => createGridPatternCtxElement() },
+        { divider: true },
+        { custom: true, render: () => createCanvasBgCtxElement() },
+        { divider: true },
         { id: 'ctx-reset-styles', label: 'Reset Default Styles', icon: 'restart_alt', disabled: !hasCanvasElements, action: () => {
             if (window._customResetStylesHandler) {
               window._customResetStylesHandler();

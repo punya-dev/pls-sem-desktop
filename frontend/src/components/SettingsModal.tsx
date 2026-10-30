@@ -518,6 +518,33 @@ export const SettingsModal: React.FC = () => {
               </div>
 
               <div className="settings-section">
+                <div className="settings-section__header">Canvas Grid</div>
+                <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '8px' }}>
+                  Choose your preferred background style for the model canvas
+                </div>
+                <div className="settings-theme-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+                  {[
+                    { id: 'blank', label: 'Blank', icon: 'crop_free' },
+                    { id: 'dots', label: 'Dotted', icon: 'grain' },
+                    { id: 'grid', label: 'Ruled / Grid', icon: 'grid_4x4' },
+                  ].map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={`settings-theme-btn ${(settings.canvasGrid || 'dots') === item.id ? 'settings-theme-btn--active' : ''}`}
+                      onClick={() => {
+                        updateSettings({ canvasGrid: item.id as any });
+                        window.dispatchEvent(new CustomEvent('canvas-grid-change', { detail: { grid: item.id } }));
+                      }}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>{item.icon}</span>
+                      <span style={{ fontSize: '12px', fontWeight: 500 }}>{item.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="settings-section">
                 <div className="settings-section__header">Typography</div>
                 <div className="settings-row">
                   <div className="settings-row__label">

@@ -3316,6 +3316,9 @@ const ModelEditor = () => {
             <pattern id="dot-grid" width={20} height={20} patternUnits="userSpaceOnUse">
               <circle cx={2} cy={2} r={1} fill="var(--canvas-dot-color)" />
             </pattern>
+            <pattern id="line-grid" width={20} height={20} patternUnits="userSpaceOnUse">
+              <path d="M 20 0 L 0 0 0 20" fill="none" stroke="var(--canvas-dot-color)" strokeWidth="0.8" opacity="0.6" />
+            </pattern>
             <marker id="arrowhead" markerWidth={10} markerHeight={7} refX={9} refY="3.5" orient="auto">
               <polygon points="0 0, 10 3.5, 0 7" fill="var(--color-text-secondary)" style={{pointerEvents: 'none'}} />
             </marker>
@@ -3347,6 +3350,7 @@ const ModelEditor = () => {
               <circle cx={5} cy={5} r={3.5} fill="var(--color-accent)" />
             </marker>
           </defs>
+          <rect id="bg-color-rect" width="100%" height="100%" fill="transparent" />
           <rect id="bg-rect" width="100%" height="100%" fill="url(#dot-grid)" />
           <g id="zoom-layer">
             <g id="edges-layer" />
