@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore, getStudyDatasets } from '../store';
-import { initModelCanvas, exportModelSpec, getModelCanvasState, loadModelCanvasState, setCanvasResults, renderModelCanvas, clearModelCanvas, resetModelStyles, setCanvasDatasetColumns, updateModeratingEffect, deleteModeratingEffect, getSelectedModeratingEffect } from '../utils/model-canvas';
+import { initModelCanvas, exportModelSpec, getModelCanvasState, loadModelCanvasState, setCanvasResults, renderModelCanvas, clearModelCanvas, resetModelStyles, setCanvasDatasetColumns, updateModeratingEffect, deleteModeratingEffect, getSelectedModeratingEffect, hasInvalidLatentVariables } from '../utils/model-canvas';
 import { BootstrapModal } from '../components/BootstrapModal';
 import { AnalysisModal } from '../components/AnalysisModal';
 import { AdvancedResultPanels } from '../components/AdvancedResultPanels';
@@ -687,6 +687,10 @@ const ModelEditor = () => {
 
   const performSilentRecalculate = async () => {
     if (!hasCalculatedOnceRef.current || isAutoCalculatingRef.current || !activeStudy?.path) return;
+    if (hasInvalidLatentVariables()) {
+      setIsModelOutdated(true);
+      return;
+    }
     try {
       isAutoCalculatingRef.current = true;
       const spec = exportModelSpec();
@@ -789,6 +793,10 @@ const ModelEditor = () => {
   const handleCalculate = async () => {
     if (!activeStudy?.path) {
       alert('Please open or select an active project study first.');
+      return;
+    }
+    if (hasInvalidLatentVariables()) {
+      alert('Cannot calculate model: all latent variables must be connected and have indicators assigned.');
       return;
     }
     try {
@@ -2334,11 +2342,19 @@ const ModelEditor = () => {
           <div className="tb-btn" title="Moderation Effect (M)" style={{ display: 'none' }}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx={12} cy={12} r={10} /><line x1={12} y1={8} x2={12} y2={16} /><line x1={8} y1={12} x2={16} y2={12} /></svg></div>
           <div className="tb-btn" title="Quadratic Effect (Q)"><span className="tb-btn--text">x²</span></div>
           <div className="tb-btn" title="Gaussian Copula"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M4 22h14a2 2 0 0 0 2-2V7.5L14.5 2H6a2 2 0 0 0-2 2v4" /><polyline points="14 2 14 8 20 8" /><path d="M2 15h10" /><path d="M6 11l-4 4 4 4" /></svg></div>
-          <div className="tb-btn" title="Text Note (T)" data-action="add-text-note"><span className="tb-btn--text">T</span></div>
+          <div className="tb-btn" id="btn-add-text-note" title="Text Note (T)" data-action="add-text-note"><span className="tb-btn--text">T</span></div>
           
           <div className="tb-divider" />
-          <div id="node-formatting-tools" style={{display: 'flex', gap: '4px'}}>
-          <div className="tb-dropdown-container">
+          <button className="tb-btn" type="button" title="Undo (Cmd+Z / Ctrl+Z)" id="btn-undo">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 16, height: 16}}><path strokeLinecap="round" strokeLinejoin="round" d="M3 7v6h6" /><path strokeLinecap="round" strokeLinejoin="round" d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" /></svg>
+          </button>
+          <button className="tb-btn" type="button" title="Redo (Cmd+Shift+Z / Ctrl+Y)" id="btn-redo">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 16, height: 16}}><path strokeLinecap="round" strokeLinejoin="round" d="M21 7v6h-6" /><path strokeLinecap="round" strokeLinejoin="round" d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13" /></svg>
+          </button>
+
+          <div className="tb-divider" id="formatting-divider" style={{display: 'none'}} />
+          <div id="node-formatting-tools" style={{display: 'none', gap: '4px'}}>
+          <div className="tb-dropdown-container" id="container-align">
             <button className="tb-dropdown-btn" type="button" title="Alignment" id="btn-align">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><line x1={21} y1={6} x2={3} y2={6} /><line x1={15} y1={12} x2={3} y2={12} /><line x1={17} y1={18} x2={3} y2={18} /></svg>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><polyline points="6 9 12 15 18 9" /></svg>
@@ -2350,7 +2366,7 @@ const ModelEditor = () => {
               <div className="tb-dropdown-item" data-action="align-right"><span className="material-symbols-outlined">align_horizontal_right</span> Align Right</div>
             </div>
           </div>
-          <div className="tb-dropdown-container">
+          <div className="tb-dropdown-container" id="container-style">
             <button className="tb-dropdown-btn" type="button" title="Style" id="btn-style">
               <div className="tb-shape-preview" />
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><polyline points="6 9 12 15 18 9" /></svg>
@@ -2362,7 +2378,7 @@ const ModelEditor = () => {
               <div className="tb-dropdown-item" data-action="shape-oct"><span className="material-symbols-outlined">stop_circle</span> Octagon</div>
             </div>
           </div>
-          <div className="tb-dropdown-container">
+          <div className="tb-dropdown-container" id="container-colors">
             <button className="tb-dropdown-btn" type="button" title="Color &amp; Stroke Styling" id="btn-colors">
               <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>palette</span>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 14, height: 14}}><polyline points="6 9 12 15 18 9" /></svg>
@@ -2412,7 +2428,7 @@ const ModelEditor = () => {
             </div>
           </div>
           
-          <div className="tb-dropdown-container">
+          <div className="tb-dropdown-container" id="container-text">
             <button className="tb-dropdown-btn" type="button" title="Typography Settings" id="btn-text">
               <span style={{fontWeight: 600, fontSize: '13px', color: 'var(--color-text-primary)'}}>Aa</span>
               <span className="tb-font-size-label" style={{fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-text-hint)', marginLeft: '2px'}}>14</span>
@@ -2537,14 +2553,6 @@ const ModelEditor = () => {
               </div>
             </div>
           </div>
-          
-          <div className="tb-divider" />
-          <button className="tb-btn" type="button" title="Undo (Cmd+Z / Ctrl+Z)" id="btn-undo">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 16, height: 16}}><path strokeLinecap="round" strokeLinejoin="round" d="M3 7v6h6" /><path strokeLinecap="round" strokeLinejoin="round" d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" /></svg>
-          </button>
-          <button className="tb-btn" type="button" title="Redo (Cmd+Shift+Z / Ctrl+Y)" id="btn-redo">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 16, height: 16}}><path strokeLinecap="round" strokeLinejoin="round" d="M21 7v6h-6" /><path strokeLinecap="round" strokeLinejoin="round" d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13" /></svg>
-          </button>
         </div>
 
         {/* Zoom HUD */}

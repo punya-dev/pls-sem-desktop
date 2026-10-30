@@ -221,6 +221,11 @@ export function initModelCanvas() {
   let marqueeEl = null;
 
   svg.addEventListener('mousedown', (e) => {
+    const activeRenameInput = document.getElementById('canvas-direct-inline-rename');
+    if (activeRenameInput) {
+      activeRenameInput.blur();
+    }
+
     // Prevent browser native text selection dragging on canvas
     e.preventDefault();
 
@@ -234,12 +239,7 @@ export function initModelCanvas() {
       pt.x = e.clientX;
       pt.y = e.clientY;
       const svgPt = pt.matrixTransform(zoomLayer.getScreenCTM().inverse());
-      
-      const text = prompt('Enter text note:');
-      if (text && text.trim()) {
-        nodes.push({ id: generateId(), label: text.trim(), x: svgPt.x, y: svgPt.y, isLatent: null, isText: true, bold: false, italic: false, fontSize: 14 });
-        render();
-      }
+      createAndEditNewTextNode(svgPt.x, svgPt.y);
       setMode('select');
       updateToolbarUI(document.querySelector('.tb-btn[title*="Select"]'));
     } else if (mode === 'select' && e.button === 0 && (e.target === svg || e.target === bgRect)) {
@@ -723,17 +723,24 @@ export function initModelCanvas() {
       finished = true;
       delete node._isRenaming;
       const newVal = input.value.trim();
-      if (newVal && newVal !== node.label) {
-        node.label = newVal;
-        if (!node.isLatent && !node.isText) {
-          const charW = (node.fontSize ? Number(node.fontSize) * 0.72 : 7.2);
-          const neededW = Math.max(64, Math.ceil(newVal.length * charW + 20));
-          if (neededW > (node.width || 64)) {
-            node.width = neededW;
+      if (newVal) {
+        if (newVal !== node.label) {
+          node.label = newVal;
+          if (!node.isLatent && !node.isText) {
+            const charW = (node.fontSize ? Number(node.fontSize) * 0.72 : 7.2);
+            const neededW = Math.max(64, Math.ceil(newVal.length * charW + 20));
+            if (neededW > (node.width || 64)) {
+              node.width = neededW;
+            }
           }
+          pushHistory();
+          window.dispatchEvent(new CustomEvent('canvas-changed'));
         }
-        pushHistory();
-        window.dispatchEvent(new CustomEvent('canvas-changed'));
+      } else {
+        // If user didn't type a name or left it empty, preserve and fix the default name
+        if (!node.label) {
+          node.label = node.isLatent ? 'LV_1' : (node.isText ? 'Note' : 'Var');
+        }
       }
       if (input.parentNode) input.remove();
       render();
@@ -750,6 +757,50 @@ export function initModelCanvas() {
         render();
       }
     });
+  }
+
+  // Global capture listener to ensure inline rename commits before clicking elsewhere
+  document.addEventListener('mousedown', (e) => {
+    const active = document.getElementById('canvas-direct-inline-rename');
+    if (active && e.target !== active) {
+      active.blur();
+    }
+  }, true);
+
+  function findNonIntersectingPosition(startX, startY, minDistance = 150) {
+    if (!nodes || nodes.length === 0) {
+      return { x: Math.round(startX), y: Math.round(startY) };
+    }
+
+    const collides = (px, py) => {
+      for (const n of nodes) {
+        if (typeof n.x !== 'number' || typeof n.y !== 'number') continue;
+        const dist = Math.hypot(px - n.x, py - n.y);
+        const threshold = n.isLatent ? minDistance : 110;
+        if (dist < threshold) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    if (!collides(startX, startY)) {
+      return { x: Math.round(startX), y: Math.round(startY) };
+    }
+
+    // Radial spiral search outward from startX, startY
+    const stepAngle = Math.PI / 8; // 16 directions
+    for (let r = 110; r <= 1600; r += 50) {
+      for (let angle = 0; angle < 2 * Math.PI; angle += stepAngle) {
+        const candX = startX + r * Math.cos(angle);
+        const candY = startY + r * Math.sin(angle);
+        if (candX > 90 && candY > 90 && !collides(candX, candY)) {
+          return { x: Math.round(candX), y: Math.round(candY) };
+        }
+      }
+    }
+
+    return { x: Math.round(startX + 180), y: Math.round(startY + 180) };
   }
 
   function createAndEditNewLatentNode(x, y) {
@@ -769,13 +820,15 @@ export function initModelCanvas() {
       targetY = center.y;
     }
 
+    const pos = findNonIntersectingPosition(targetX, targetY, 150);
+
     const latentCount = nodes.filter(n => n.isLatent && !n.isText).length;
     const newName = `LV_${latentCount + 1}`;
     const newNode = {
       id: generateId(),
       label: newName,
-      x: targetX,
-      y: targetY,
+      x: pos.x,
+      y: pos.y,
       isLatent: true,
       type: 'reflective'
     };
@@ -795,6 +848,68 @@ export function initModelCanvas() {
     return newNode;
   }
   window.createAndEditNewLatentNode = createAndEditNewLatentNode;
+
+  function createAndEditNewTextNode(x, y) {
+    setMode('select');
+    const selectBtn = document.querySelector('.tb-btn[title*="Select"]');
+    if (selectBtn) updateToolbarUI(selectBtn);
+
+    let targetX = x;
+    let targetY = y;
+    if (typeof targetX !== 'number' || isNaN(targetX) || typeof targetY !== 'number' || isNaN(targetY)) {
+      const center = getSvgCenter();
+      targetX = center.x;
+      targetY = center.y;
+    }
+
+    const pos = findNonIntersectingPosition(targetX, targetY, 120);
+    const textCount = nodes.filter(n => n.isText).length;
+    const defaultLabel = textCount === 0 ? 'Text Note' : `Text Note ${textCount + 1}`;
+
+    const newNode = {
+      id: generateId(),
+      label: defaultLabel,
+      x: pos.x,
+      y: pos.y,
+      isLatent: null,
+      isText: true,
+      bold: false,
+      italic: false,
+      fontSize: 14,
+      fill: 'transparent',
+      stroke: 'transparent',
+      color: 'var(--color-text-primary)'
+    };
+
+    nodes.push(newNode);
+    if (emptyHint) emptyHint.style.display = 'none';
+    selectedIds.clear();
+    selectedIds.add(newNode.id);
+    render();
+    pushHistory();
+    window.dispatchEvent(new CustomEvent('canvas-changed'));
+
+    setTimeout(() => {
+      startInlineNodeRename(newNode);
+    }, 60);
+
+    return newNode;
+  }
+  window.createAndEditNewTextNode = createAndEditNewTextNode;
+
+  function hasInvalidLatentVariables() {
+    const latentNodes = nodes.filter(n => n.isLatent !== false && !n.isText);
+    if (latentNodes.length === 0) return false;
+    return latentNodes.some(ln => {
+      // Disconnected from other latent variables in model
+      if (!isLatentConnectedInModel(ln)) return true;
+      // Missing indicators
+      const childInds = nodes.filter(ind => ind.parentId === ln.id && !ind.isLatent && !ind.isText);
+      if (childInds.length === 0) return true;
+      return false;
+    });
+  }
+  window.hasInvalidLatentVariables = hasInvalidLatentVariables;
 
   function duplicateNode(node) {
     if (!node) return;
@@ -858,24 +973,10 @@ export function initModelCanvas() {
         } catch (err) {}
       } else if (title.includes('Latent variable') || this.id === 'btn-add-latent') {
         createAndEditNewLatentNode();
-      } else if (title.includes('Text Note') || this.getAttribute('data-action') === 'add-text-note') {
-        const text = prompt('Enter text note:');
-        if (text && text.trim()) {
-          const pt = getSvgCenter();
-          nodes.push({ id: generateId(), label: text.trim(), x: pt.x, y: pt.y, isLatent: null, isText: true, bold: false, italic: false, fontSize: 14 });
-          if (emptyHint) emptyHint.style.display = 'none';
-          render();
-          pushHistory();
-        }
+      } else if (title.includes('Text Note') || this.getAttribute('data-action') === 'add-text-note' || this.id === 'btn-add-text-note') {
+        createAndEditNewTextNode();
       } else if (title.includes('Add Comment')) {
-        const text = prompt('Enter Comment:');
-        if (text && text.trim()) {
-          const pt = getSvgCenter();
-          nodes.push({ id: generateId(), label: text.trim(), x: pt.x, y: pt.y, isText: true });
-          emptyHint.style.display = 'none';
-          render();
-        }
-        pushHistory();
+        createAndEditNewTextNode();
       }
     });
   });
@@ -2930,15 +3031,44 @@ export function initModelCanvas() {
 
     const nodeFormattingTools = document.getElementById('node-formatting-tools');
     const edgeFormattingTools = document.getElementById('edge-formatting-tools');
-    
+    const formattingDivider = document.getElementById('formatting-divider');
+    const containerAlign = document.getElementById('container-align');
+    const containerStyle = document.getElementById('container-style');
+    const containerColors = document.getElementById('container-colors');
+    const containerText = document.getElementById('container-text');
+
     if (selectedIds.size === 1) {
       const selectedId = Array.from(selectedIds)[0];
       const selectedNode = nodes.find(n => n.id === selectedId);
-      const selectedEdge = edges.find(e => e.id === selectedId);
+      const selectedEdge = edges.find(e => e.id === selectedId) ||
+                           moderatingEffects.find(m => m.id === selectedId) ||
+                           (selectedId.startsWith('edge_ind_') ? { id: selectedId } : null);
       
       if (selectedNode) {
+        if (formattingDivider) formattingDivider.style.display = 'block';
         if (nodeFormattingTools) nodeFormattingTools.style.display = 'flex';
         if (edgeFormattingTools) edgeFormattingTools.style.display = 'none';
+
+        if (selectedNode.isLatent && !selectedNode.isText) {
+          // Latent Variable selected: extend toolbar with Align, Style/Shape, Colors, Typography
+          if (containerAlign) containerAlign.style.display = 'block';
+          if (containerStyle) containerStyle.style.display = 'block';
+          if (containerColors) containerColors.style.display = 'block';
+          if (containerText) containerText.style.display = 'block';
+        } else if (selectedNode.isText) {
+          // Text Note selected: extend toolbar with Align, Colors, Typography (hide shape)
+          if (containerAlign) containerAlign.style.display = 'block';
+          if (containerStyle) containerStyle.style.display = 'none';
+          if (containerColors) containerColors.style.display = 'block';
+          if (containerText) containerText.style.display = 'block';
+        } else {
+          // Indicator selected: extend toolbar with Align, Colors, Typography (hide shape)
+          if (containerAlign) containerAlign.style.display = 'block';
+          if (containerStyle) containerStyle.style.display = 'none';
+          if (containerColors) containerColors.style.display = 'block';
+          if (containerText) containerText.style.display = 'block';
+        }
+
         const pickerFill = document.getElementById('picker-fill');
         const pickerBorder = document.getElementById('picker-border');
         const pickerText = document.getElementById('picker-text');
@@ -2998,6 +3128,7 @@ export function initModelCanvas() {
           window.syncColorPickers(pickerFill?.value, pickerBorder?.value, pickerText?.value);
         }
       } else if (selectedEdge) {
+        if (formattingDivider) formattingDivider.style.display = 'block';
         if (nodeFormattingTools) nodeFormattingTools.style.display = 'none';
         if (edgeFormattingTools) edgeFormattingTools.style.display = 'flex';
         
@@ -3042,8 +3173,31 @@ export function initModelCanvas() {
           if (checkmark) checkmark.style.display = 'block';
         }
       }
+    } else if (selectedIds.size > 1) {
+      const selectedNodes = nodes.filter(n => selectedIds.has(n.id));
+      const selectedEdgesList = edges.filter(e => selectedIds.has(e.id));
+      if (selectedNodes.length > 0 && selectedEdgesList.length === 0) {
+        if (formattingDivider) formattingDivider.style.display = 'block';
+        if (nodeFormattingTools) nodeFormattingTools.style.display = 'flex';
+        if (edgeFormattingTools) edgeFormattingTools.style.display = 'none';
+        if (containerAlign) containerAlign.style.display = 'block';
+        const hasLatent = selectedNodes.some(n => n.isLatent && !n.isText);
+        if (containerStyle) containerStyle.style.display = hasLatent ? 'block' : 'none';
+        if (containerColors) containerColors.style.display = 'block';
+        if (containerText) containerText.style.display = 'block';
+      } else if (selectedEdgesList.length > 0 && selectedNodes.length === 0) {
+        if (formattingDivider) formattingDivider.style.display = 'block';
+        if (nodeFormattingTools) nodeFormattingTools.style.display = 'none';
+        if (edgeFormattingTools) edgeFormattingTools.style.display = 'flex';
+      } else {
+        if (formattingDivider) formattingDivider.style.display = 'none';
+        if (nodeFormattingTools) nodeFormattingTools.style.display = 'none';
+        if (edgeFormattingTools) edgeFormattingTools.style.display = 'none';
+      }
     } else {
-      if (nodeFormattingTools) nodeFormattingTools.style.display = 'flex';
+      // DEFAULT (0 items selected): only show up to Textbox and Undo/Redo
+      if (formattingDivider) formattingDivider.style.display = 'none';
+      if (nodeFormattingTools) nodeFormattingTools.style.display = 'none';
       if (edgeFormattingTools) edgeFormattingTools.style.display = 'none';
     }
 
@@ -3126,6 +3280,10 @@ export function initModelCanvas() {
   let connectStartNode = null;
 
   function handleNodeMouseDown(e, node) {
+    const activeRenameInput = document.getElementById('canvas-direct-inline-rename');
+    if (activeRenameInput) {
+      activeRenameInput.blur();
+    }
     hideLatentHoverPopup();
     e.stopPropagation();
 
@@ -4343,6 +4501,8 @@ export function initModelCanvas() {
         updateToolbarUI(document.querySelector('.canvas-toolbar .tb-btn[title*="Erase"]'));
       } else if (e.key.toLowerCase() === 'o') {
         createAndEditNewLatentNode();
+      } else if (e.key.toLowerCase() === 't') {
+        createAndEditNewTextNode();
       }
     }
 
@@ -4699,6 +4859,19 @@ export function createAndEditNewLatentNode(x, y) {
   if (typeof window !== 'undefined' && window.createAndEditNewLatentNode) {
     return window.createAndEditNewLatentNode(x, y);
   }
+}
+
+export function createAndEditNewTextNode(x, y) {
+  if (typeof window !== 'undefined' && window.createAndEditNewTextNode) {
+    return window.createAndEditNewTextNode(x, y);
+  }
+}
+
+export function hasInvalidLatentVariables() {
+  if (typeof window !== 'undefined' && window.hasInvalidLatentVariables) {
+    return window.hasInvalidLatentVariables();
+  }
+  return false;
 }
 
 export function selectCanvasNodesByVarNames(varNames) {
