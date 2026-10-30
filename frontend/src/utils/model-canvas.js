@@ -661,15 +661,46 @@ export function initModelCanvas() {
       const pt = svg.createSVGPoint();
       pt.x = node.x;
       if (node.isLatent) {
+        const w = node.width || NODE_R * 2;
         const h = node.height || NODE_R * 2;
-        // Text baseline is at (h/2 + 24); visual cap-center is ~5px higher
-        pt.y = node.textInside ? (node.y + 1) : (node.y + h / 2 + 19);
+        if (node.textInside) {
+          pt.y = node.y + 1;
+        } else {
+          const pos = node.textPosition || 'bottom';
+          if (pos === 'top') {
+            pt.y = node.y - h / 2 - 12;
+          } else if (pos === 'left') {
+            pt.x = node.x - w / 2 - 12;
+            pt.y = node.y + 1;
+          } else if (pos === 'right') {
+            pt.x = node.x + w / 2 + 12;
+            pt.y = node.y + 1;
+          } else {
+            pt.y = node.y + h / 2 + 19;
+          }
+        }
       } else if (node.isText) {
         pt.y = node.y;
       } else {
         const isIndInside = node.textInside !== undefined ? node.textInside : true;
+        const w = node.width || 80;
         const h = node.height || 28;
-        pt.y = isIndInside ? node.y : (node.y + h / 2 + 14);
+        if (isIndInside) {
+          pt.y = node.y;
+        } else {
+          const pos = node.textPosition || 'bottom';
+          if (pos === 'top') {
+            pt.y = node.y - h / 2 - 8;
+          } else if (pos === 'left') {
+            pt.x = node.x - w / 2 - 8;
+            pt.y = node.y;
+          } else if (pos === 'right') {
+            pt.x = node.x + w / 2 + 8;
+            pt.y = node.y;
+          } else {
+            pt.y = node.y + h / 2 + 14;
+          }
+        }
       }
       const screenPt = pt.matrixTransform(zoomLayer.getScreenCTM());
       screenCenterX = screenPt.x;
@@ -1246,6 +1277,14 @@ export function initModelCanvas() {
               const currentInside = n.textInside !== undefined ? n.textInside : true;
               n.textInside = !currentInside;
             }
+          });
+          render();
+          pushHistory();
+          window.dispatchEvent(new CustomEvent('canvas-changed'));
+        } else if (action.startsWith('text-pos-')) {
+          const pos = action.replace('text-pos-', '');
+          nodes.filter(n => selectedIds.has(n.id) && !n.isText).forEach(n => {
+            n.textPosition = pos;
           });
           render();
           pushHistory();
@@ -2755,26 +2794,41 @@ export function initModelCanvas() {
         text.style.userSelect = 'none';
         text.style.webkitUserSelect = 'none';
         
+        const textPos = node.textPosition || 'bottom';
+        let labelX = 0;
         let labelY = h/2 + 24;
+        let textAnchor = 'middle';
+
         if (node.textInside) {
+          labelX = 0;
           labelY = 5;
-          text.setAttribute('y', 5); // visually centered
-          const getContrast = (hex) => {
-            if (!hex || hex === 'none') return '#ffffff';
-            if (hex.startsWith('var')) return '#ffffff'; // Fallback for css vars
-            hex = hex.replace('#', '');
-            if (hex.length === 3) hex = hex.split('').map(c => c+c).join('');
-            const r = parseInt(hex.substr(0, 2), 16) || 0;
-            const g = parseInt(hex.substr(2, 2), 16) || 0;
-            const b = parseInt(hex.substr(4, 2), 16) || 0;
-            const yiq = ((r * 299) + (g * 587) + (b * 114)) / 1000;
-            return (yiq >= 128) ? '#000000' : '#ffffff';
-          };
+          textAnchor = 'middle';
+          text.setAttribute('x', '0');
+          text.setAttribute('y', '5');
+          text.setAttribute('text-anchor', 'middle');
           text.setAttribute('fill', node.color || 'var(--canvas-latent-text)');
           text.style.fill = node.color || 'var(--canvas-latent-text)';
         } else {
-          labelY = h/2 + 24;
-          text.setAttribute('y', labelY);
+          if (textPos === 'top') {
+            labelX = 0;
+            labelY = -h / 2 - 12;
+            textAnchor = 'middle';
+          } else if (textPos === 'left') {
+            labelX = -w / 2 - 12;
+            labelY = 5;
+            textAnchor = 'end';
+          } else if (textPos === 'right') {
+            labelX = w / 2 + 12;
+            labelY = 5;
+            textAnchor = 'start';
+          } else { // 'bottom'
+            labelX = 0;
+            labelY = h / 2 + 24;
+            textAnchor = 'middle';
+          }
+          text.setAttribute('x', String(labelX));
+          text.setAttribute('y', String(labelY));
+          text.setAttribute('text-anchor', textAnchor);
           text.setAttribute('fill', node.color || 'var(--color-text-primary)');
           text.style.fill = node.color || 'var(--color-text-primary)';
         }
@@ -3102,15 +3156,40 @@ export function initModelCanvas() {
         const isIndInside = node.textInside !== undefined ? node.textInside : true;
         const indText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         indText.textContent = node.label;
-        indText.setAttribute('x', '0');
+        
+        const indTextPos = node.textPosition || 'bottom';
+        let indX = 0;
+        let indY = 4;
+        let indAnchor = 'middle';
+
         if (isIndInside) {
-          indText.setAttribute('y', 4);
+          indX = 0;
+          indY = 4;
+          indAnchor = 'middle';
           indText.setAttribute('fill', node.isMissingInDataset ? '#ef4444' : (node.color || 'var(--canvas-manifest-text)'));
         } else {
-          indText.setAttribute('y', h / 2 + 14);
+          if (indTextPos === 'top') {
+            indX = 0;
+            indY = -h / 2 - 8;
+            indAnchor = 'middle';
+          } else if (indTextPos === 'left') {
+            indX = -w / 2 - 8;
+            indY = 4;
+            indAnchor = 'end';
+          } else if (indTextPos === 'right') {
+            indX = w / 2 + 8;
+            indY = 4;
+            indAnchor = 'start';
+          } else { // 'bottom'
+            indX = 0;
+            indY = h / 2 + 14;
+            indAnchor = 'middle';
+          }
           indText.setAttribute('fill', node.isMissingInDataset ? '#ef4444' : (node.color || 'var(--color-text-primary)'));
         }
-        indText.setAttribute('text-anchor', 'middle');
+        indText.setAttribute('x', String(indX));
+        indText.setAttribute('y', String(indY));
+        indText.setAttribute('text-anchor', indAnchor);
         indText.setAttribute('font-size', node.fontSize || '10');
         if (node.bold) indText.setAttribute('font-weight', 'bold');
         if (node.italic) indText.setAttribute('font-style', 'italic');
@@ -3413,7 +3492,7 @@ export function initModelCanvas() {
         
         if (rowTextInside) {
           if (!selectedNode.isText) {
-            rowTextInside.style.display = 'block';
+            rowTextInside.style.display = 'flex';
             let isInside = false;
             let canMoveInside = true;
             let disableReason = '';
@@ -3431,11 +3510,42 @@ export function initModelCanvas() {
               isInside = selectedNode.textInside !== undefined ? selectedNode.textInside : true;
             }
 
-            if (textInsideLabel) {
-              textInsideLabel.textContent = isInside ? 'Move Outside' : 'Move Inside';
+            const containerOutsidePos = document.getElementById('container-text-outside-pos');
+            const btnTextInside = rowTextInside.querySelector('button[data-action="text-inside"]');
+
+            if (isInside) {
+              if (containerOutsidePos) containerOutsidePos.style.display = 'none';
+              if (btnTextInside) {
+                btnTextInside.style.width = '100%';
+                btnTextInside.style.flex = 'none';
+              }
+              if (textInsideLabel) {
+                textInsideLabel.textContent = 'Move Outside';
+              }
+            } else {
+              if (containerOutsidePos) {
+                containerOutsidePos.style.display = 'flex';
+                const currentPos = selectedNode.textPosition || 'bottom';
+                containerOutsidePos.querySelectorAll('button[data-action^="text-pos-"]').forEach(btn => {
+                  const btnPos = btn.getAttribute('data-action').replace('text-pos-', '');
+                  if (btnPos === currentPos) {
+                    btn.style.background = 'var(--color-accent-subtle, rgba(79, 70, 229, 0.12))';
+                    btn.style.color = 'var(--color-accent, #4f46e5)';
+                  } else {
+                    btn.style.background = 'transparent';
+                    btn.style.color = 'var(--color-text-secondary, #64748b)';
+                  }
+                });
+              }
+              if (btnTextInside) {
+                btnTextInside.style.width = 'auto';
+                btnTextInside.style.flex = '1';
+              }
+              if (textInsideLabel) {
+                textInsideLabel.textContent = 'Move Inside';
+              }
             }
 
-            const btnTextInside = rowTextInside.querySelector('button[data-action="text-inside"]');
             if (btnTextInside) {
               if (!canMoveInside) {
                 btnTextInside.disabled = true;
@@ -5138,6 +5248,7 @@ export function initModelCanvas() {
         underline: !!node.underline,
         textInside: node.isLatent ? !!node.textInside : (node.textInside !== undefined ? node.textInside : true),
         labelInside: node.isLatent ? !!node.textInside : (node.textInside !== undefined ? node.textInside : true),
+        textPosition: node.textPosition || 'bottom',
         isText: !!node.isText,
         isLatent: !!node.isLatent
       };

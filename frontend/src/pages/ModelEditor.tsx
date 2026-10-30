@@ -2825,13 +2825,13 @@ const ModelEditor = () => {
                 </div>
               </div>
 
-              <div id="row-text-inside" style={{borderTop: '1px solid var(--color-border-subtle, #e2e8f0)', paddingTop: '8px', marginTop: '2px', display: 'none'}}>
+              <div id="row-text-inside" style={{borderTop: '1px solid var(--color-border-subtle, #e2e8f0)', paddingTop: '8px', marginTop: '2px', display: 'none', alignItems: 'center', gap: '6px'}}>
                 <button
                   className="tb-font-btn"
                   data-action="text-inside"
                   type="button"
                   style={{
-                    width: '100%',
+                    flex: 1,
                     height: '28px',
                     border: '1px solid var(--color-border-subtle, #e2e8f0)',
                     background: 'var(--color-bg-base)',
@@ -2841,16 +2841,32 @@ const ModelEditor = () => {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    gap: '6px',
+                    gap: '4px',
                     fontSize: '11px',
                     fontWeight: 500,
-                    transition: 'all 0.15s ease'
+                    transition: 'all 0.15s ease',
+                    whiteSpace: 'nowrap',
+                    padding: '0 8px'
                   }}
                   title="Toggle text label position inside or outside"
                 >
-                  <span className="material-symbols-outlined" style={{fontSize: '16px', color: 'var(--color-accent)'}}>vertical_align_center</span>
-                  <span id="text-inside-label">Move Inside / Outside</span>
+                  <span className="material-symbols-outlined" style={{fontSize: '15px', color: 'var(--color-accent)'}}>vertical_align_center</span>
+                  <span id="text-inside-label">Move Inside</span>
                 </button>
+                <div id="container-text-outside-pos" style={{display: 'none', alignItems: 'center', gap: '2px', background: 'var(--color-bg-base)', borderRadius: '6px', border: '1px solid var(--color-border-subtle, #e2e8f0)', padding: '2px', height: '28px', boxSizing: 'border-box'}}>
+                  <button className="tb-font-btn" data-action="text-pos-top" type="button" style={{width: '22px', height: '22px', border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', padding: 0}} title="Position Top">
+                    <span className="material-symbols-outlined" style={{fontSize: '15px'}}>align_vertical_top</span>
+                  </button>
+                  <button className="tb-font-btn" data-action="text-pos-bottom" type="button" style={{width: '22px', height: '22px', border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', padding: 0}} title="Position Bottom">
+                    <span className="material-symbols-outlined" style={{fontSize: '15px'}}>align_vertical_bottom</span>
+                  </button>
+                  <button className="tb-font-btn" data-action="text-pos-left" type="button" style={{width: '22px', height: '22px', border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', padding: 0}} title="Position Left">
+                    <span className="material-symbols-outlined" style={{fontSize: '15px'}}>align_horizontal_left</span>
+                  </button>
+                  <button className="tb-font-btn" data-action="text-pos-right" type="button" style={{width: '22px', height: '22px', border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', padding: 0}} title="Position Right">
+                    <span className="material-symbols-outlined" style={{fontSize: '15px'}}>align_horizontal_right</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
