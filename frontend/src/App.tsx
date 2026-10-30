@@ -113,6 +113,10 @@ function App() {
     }
   }, [settings.fontFamily]);
 
+  useEffect(() => {
+    document.documentElement.dataset.sidebarPosition = settings.sidebarPosition || 'left';
+  }, [settings.sidebarPosition]);
+
   const renderContent = () => {
     if (!activeTab || activeTab.type === 'get-started') {
       return <GetStarted />;

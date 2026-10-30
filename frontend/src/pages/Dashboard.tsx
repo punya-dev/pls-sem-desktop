@@ -28,6 +28,7 @@ const Dashboard = () => {
     datasetsByStudy, setStudyDataset, addStudyDataset, touchStudy, archiveWorkspace, restoreWorkspace, renameWorkspace,
     deleteWorkspace, deleteStudy, deleteModel, deleteDataset, requestDelete,
     renameStudy, duplicateStudy, renameModel, duplicateModel, openTab,
+    togglePinStudy,
     snapshotsByStudy, setStudySnapshots, removeStudySnapshot,
     lastUsedDatasetByStudy,
     setStudyLastDatasetId,
@@ -106,6 +107,11 @@ const Dashboard = () => {
   }, [isSortMenuOpen]);
 
   const sortedStudies = [...filteredStudies].sort((a, b) => {
+    const aPinned = Boolean(a.isPinned);
+    const bPinned = Boolean(b.isPinned);
+    if (aPinned !== bPinned) {
+      return aPinned ? -1 : 1;
+    }
     let comparison = 0;
     if (sortField === 'name') {
       comparison = a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
@@ -293,10 +299,20 @@ const Dashboard = () => {
     }
   };
 
+  const handleCreateStudy = () => {
+    setIsStudyModalOpen(true);
+  };
+
   const openWorkspaceContextMenu = (e: React.MouseEvent, ws: { id: string; name: string; path?: string }) => {
     e.preventDefault();
     e.stopPropagation();
     useStore.getState().openContextMenu(e.clientX, e.clientY, [
+      {
+        id: 'new-study',
+        label: 'New Study',
+        icon: 'create_new_folder',
+        action: () => handleCreateStudy(),
+      },
       {
         id: 'rename',
         label: 'Rename Workspace',
@@ -349,10 +365,6 @@ const Dashboard = () => {
         },
       },
     ]);
-  };
-
-  const handleCreateStudy = () => {
-    setIsStudyModalOpen(true);
   };
 
   const toggleStudy = (studyId: string, e: React.MouseEvent) => {
@@ -602,15 +614,31 @@ const Dashboard = () => {
                     <div key={study.id} className="study-entry">
                           <div 
                             key={study.id} 
-                            className="study-row" 
+                            className={`study-row ${study.isPinned ? 'study-row--pinned' : ''}`}
                             onClick={(e) => toggleStudy(study.id, e)}
                             onContextMenu={(e) => {
                               e.preventDefault();
+                              e.stopPropagation();
                               useStore.getState().openContextMenu(e.clientX, e.clientY, [
                                 {
-                                  id: 'create-model', label: 'Create Model', icon: 'add', action: () => { setModelModalStudyId(study.id); setModelName(''); setModelType('PLS-SEM'); setModelModalOpen(true); }
+                                  id: 'pin-study',
+                                  label: study.isPinned ? 'Unpin Study' : 'Pin Study to Top',
+                                  icon: 'push_pin',
+                                  action: () => togglePinStudy(study.id),
                                 },
-                                { id: 'add-dataset', label: 'Add Dataset', icon: 'upload_file', action: () => { setImportingStudyId(study.id); fileInputRef.current?.click(); } },
+                                {
+                                  id: 'create-model',
+                                  label: 'Create Model',
+                                  icon: 'add',
+                                  action: () => { setModelModalStudyId(study.id); setModelName(''); setModelType('PLS-SEM'); setModelModalOpen(true); },
+                                },
+                                {
+                                  id: 'new-study',
+                                  label: 'New Study',
+                                  icon: 'create_new_folder',
+                                  action: () => handleCreateStudy(),
+                                },
+                                { id: 'import-dataset', label: 'Import Dataset', icon: 'upload_file', action: () => { setImportingStudyId(study.id); fileInputRef.current?.click(); } },
                                 { 
                                   id: 'rename', 
                                   label: 'Rename Study', 
@@ -700,6 +728,17 @@ const Dashboard = () => {
                           )}
                         </div>
                         <div className="study-row__meta">
+                          <button
+                            type="button"
+                            className={`study-pin-btn ${study.isPinned ? 'active' : ''}`}
+                            title={study.isPinned ? 'Unpin study' : 'Pin study to top'}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              togglePinStudy(study.id);
+                            }}
+                          >
+                            <span className="material-symbols-outlined" style={{ fontSize: '15px' }}>push_pin</span>
+                          </button>
                           <span className="study-row__time">{study.lastModified}</span>
                           <span className="study-row__chevron">
                             <span className="material-symbols-outlined study-chevron" style={{transform: isExpanded || isEmpty ? 'rotate(90deg)' : 'rotate(90deg)'}}>

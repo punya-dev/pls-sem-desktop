@@ -44,7 +44,12 @@
 }
 .subheader__breadcrumb-current svg { width: 12px; height: 12px; color: var(--color-accent); }
 
-.subheader__actions { display: flex; align-items: center; gap: 6px; }
+.subheader__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
 
 .subheader__icon-btn {
   width: 28px;
@@ -568,6 +573,19 @@
 
 .hud-divider { width: 1px; height: 16px; background: var(--color-border-default); flex-shrink: 0; }
 
+.tb-btn.disabled,
+.tb-btn:disabled,
+.tb-dropdown-btn.disabled,
+.tb-dropdown-btn:disabled,
+.hud-btn.disabled,
+.hud-btn:disabled,
+.hud-icon-btn.disabled,
+.hud-icon-btn:disabled {
+  opacity: 0.35 !important;
+  pointer-events: none !important;
+  cursor: not-allowed !important;
+}
+
 /* Custom Toolbar Elements */
 .tb-color-picker {
   width: 24px;
@@ -958,5 +976,132 @@
   height: 1px;
   background: var(--color-border-subtle);
   margin: 6px 0;
+}
+
+/* ─── Canvas Context Menu ────────────────────────────────────────────────── */
+
+.canvas-context-menu {
+  position: fixed;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.05);
+  padding: 4px;
+  display: none;
+  z-index: 10000;
+  min-width: 190px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  animation: tabDropdownFadeIn 100ms ease;
+  user-select: none;
+}
+
+.canvas-ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.canvas-ctx-item:hover {
+  background-color: var(--color-accent-subtle);
+  color: var(--color-accent);
+}
+
+.canvas-ctx-item .material-symbols-outlined {
+  font-size: 16px;
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+  transition: color var(--transition-fast);
+}
+
+.canvas-ctx-item:hover .material-symbols-outlined {
+  color: var(--color-accent);
+}
+
+.canvas-ctx-item--danger {
+  color: var(--color-danger, #ef4444);
+}
+
+.canvas-ctx-item--danger .material-symbols-outlined {
+  color: var(--color-danger, #ef4444);
+}
+
+.canvas-ctx-item--danger:hover {
+  background-color: rgba(239, 68, 68, 0.08) !important;
+  color: var(--color-danger, #ef4444) !important;
+}
+
+.canvas-ctx-item--danger:hover .material-symbols-outlined {
+  color: var(--color-danger, #ef4444) !important;
+}
+
+.canvas-ctx-item--disabled {
+  opacity: 0.38 !important;
+  color: var(--color-text-muted, #94a3b8) !important;
+  cursor: not-allowed !important;
+  pointer-events: none !important;
+}
+
+.canvas-ctx-item--disabled:hover {
+  background-color: transparent !important;
+  color: var(--color-text-muted, #94a3b8) !important;
+}
+
+.canvas-ctx-item--disabled .material-symbols-outlined,
+.canvas-ctx-item--disabled .canvas-ctx-shortcut,
+.canvas-ctx-item--disabled span {
+  color: var(--color-text-muted, #94a3b8) !important;
+}
+
+.canvas-ctx-shortcut {
+  margin-left: auto;
+  font-size: 10.5px;
+  font-family: var(--font-mono);
+  color: var(--color-text-muted);
+  opacity: 0.8;
+}
+
+.canvas-ctx-divider {
+  height: 1px;
+  background-color: var(--color-border-divider);
+  margin: 3px 2px;
+}
+
+/* ─── Inline Node Rename Pill ────────────────────────────────────────────── */
+
+#canvas-inline-node-rename {
+  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.1));
+}
+
+#canvas-inline-node-rename input {
+  transition: all var(--transition-fast);
+}
+
+/* ─── Hidden Indicators Badge ────────────────────────────────────────────── */
+
+.hidden-indicators-badge {
+  cursor: pointer;
+  transition: transform var(--transition-fast);
+}
+
+.hidden-indicators-badge:hover {
+  transform: scale(1.08);
+}
+
+.canvas-hidden-indicators-icon-btn {
+  cursor: pointer;
+  pointer-events: all;
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
+}
+
+.canvas-hidden-indicators-icon-btn:hover {
+  opacity: 0.75;
 }
 

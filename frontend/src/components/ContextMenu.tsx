@@ -41,14 +41,16 @@ const ContextMenu = () => {
       {contextMenu.items.map(item => (
         <div 
           key={item.id} 
-          className={`cspls-context-menu-item ${item.danger ? 'danger' : ''}`}
+          className={`cspls-context-menu-item ${item.danger ? 'danger' : ''} ${item.disabled ? 'disabled' : ''}`}
+          style={item.disabled ? { opacity: 0.38, cursor: 'not-allowed', pointerEvents: 'none', color: 'var(--color-text-muted, #94a3b8)' } : undefined}
           onClick={(e) => {
+            if (item.disabled) return;
             e.stopPropagation();
             item.action();
             closeContextMenu();
           }}
         >
-          <span className="material-symbols-outlined">{item.icon}</span>
+          <span className="material-symbols-outlined" style={item.disabled ? { color: 'var(--color-text-muted, #94a3b8)' } : undefined}>{item.icon}</span>
           <span>{item.label}</span>
         </div>
       ))}

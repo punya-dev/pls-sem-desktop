@@ -20,6 +20,9 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ activeNav }) => {
     archivedWorkspaces,
     isSidebarCollapsed,
     toggleSidebar,
+    settings,
+    updateSettings,
+    togglePinWorkspace,
   } = useStore();
 
   const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = useState(false);
@@ -60,9 +63,14 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ activeNav }) => {
     }
   };
 
-  const filteredWorkspaces = workspaces.filter((ws) =>
-    ws.name.toLowerCase().includes(workspaceQuery.toLowerCase())
-  );
+  const filteredWorkspaces = workspaces
+    .filter((ws) => ws.name.toLowerCase().includes(workspaceQuery.toLowerCase()))
+    .sort((a, b) => {
+      if (Boolean(a.isPinned) !== Boolean(b.isPinned)) {
+        return a.isPinned ? -1 : 1;
+      }
+      return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+    });
 
   const commitWsRename = (wsId: string) => {
     if (editWsName.trim()) {
@@ -142,13 +150,27 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ activeNav }) => {
                   </svg>
                 </button>
                 <button
-                  className="icon-btn icon-btn--sm"
+                  className={`icon-btn icon-btn--sm ${settings.lockExpandedSidebar ? 'sidebar-locked-btn' : ''}`}
                   id="sidebar-collapse-btn"
-                  title={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+                  title={
+                    settings.lockExpandedSidebar
+                      ? "Sidebar is locked expanded (Click to unlock)"
+                      : isSidebarCollapsed
+                      ? "Expand sidebar"
+                      : "Collapse sidebar"
+                  }
                   type="button"
-                  onClick={toggleSidebar}
+                  onClick={() => {
+                    if (settings.lockExpandedSidebar) {
+                      updateSettings({ lockExpandedSidebar: false });
+                    } else {
+                      toggleSidebar();
+                    }
+                  }}
                 >
-                  <span className="material-symbols-outlined">left_panel_close</span>
+                  <span className="material-symbols-outlined">
+                    {settings.lockExpandedSidebar ? 'lock' : 'left_panel_close'}
+                  </span>
                 </button>
               </div>
             </div>
@@ -174,6 +196,12 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ activeNav }) => {
                   onContextMenu={(e) => {
                     e.preventDefault();
                     useStore.getState().openContextMenu(e.clientX, e.clientY, [
+                      {
+                        id: 'pin',
+                        label: ws.isPinned ? 'Unpin Workspace' : 'Pin Workspace to Top',
+                        icon: 'push_pin',
+                        action: () => togglePinWorkspace(ws.id),
+                      },
                       {
                         id: 'rename',
                         label: 'Rename Workspace',
@@ -229,26 +257,46 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ activeNav }) => {
                     ]);
                   }}
                   style={{ cursor: 'pointer' }}
+                  title={ws.isPinned ? `[Pinned] ${ws.name}` : ws.name}
                 >
-                  <span className="sidebar-item__left" style={{ width: '100%', overflow: 'hidden' }}>
-                    <span className="material-symbols-outlined">folder</span>
-                    {editingWsId === ws.id ? (
-                      <input
-                        autoFocus
-                        type="text"
-                        className="inline-seamless-rename-input"
-                        value={editWsName}
-                        size={Math.max(editWsName.length, 1)}
-                        onChange={(e) => setEditWsName(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') commitWsRename(ws.id);
-                          else if (e.key === 'Escape') setEditingWsId(null);
+                  <span className="sidebar-item__left" style={{ width: '100%', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden', minWidth: 0, flex: 1 }}>
+                      <span className="material-symbols-outlined" style={ws.isPinned ? { color: 'var(--color-accent)' } : undefined}>
+                        {ws.isPinned && isSidebarCollapsed ? 'push_pin' : 'folder'}
+                      </span>
+                      {editingWsId === ws.id ? (
+                        <input
+                          autoFocus
+                          type="text"
+                          className="inline-seamless-rename-input"
+                          value={editWsName}
+                          size={Math.max(editWsName.length, 1)}
+                          onChange={(e) => setEditWsName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') commitWsRename(ws.id);
+                            else if (e.key === 'Escape') setEditingWsId(null);
+                          }}
+                          onBlur={() => commitWsRename(ws.id)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <span className="truncate">{ws.name}</span>
+                      )}
+                    </span>
+                    {!isSidebarCollapsed && (
+                      <button
+                        type="button"
+                        className={`sidebar-ws-pin-btn ${ws.isPinned ? 'active' : ''}`}
+                        title={ws.isPinned ? "Unpin workspace" : "Pin workspace to top"}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          togglePinWorkspace(ws.id);
                         }}
-                        onBlur={() => commitWsRename(ws.id)}
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                    ) : (
-                      <span>{ws.name}</span>
+                      >
+                        <span className="material-symbols-outlined" style={{ fontSize: '13px' }}>
+                          push_pin
+                        </span>
+                      </button>
                     )}
                   </span>
                 </div>

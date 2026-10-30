@@ -135,9 +135,16 @@ export const TabBar: React.FC = () => {
     };
   }, [tabs, activeTabId, collapsedGroups]);
 
-  const filteredWorkspaces = workspaces.filter((ws) =>
-    ws.name.toLowerCase().includes(searchQuery.toLowerCase().trim())
-  );
+  const filteredWorkspaces = workspaces
+    .filter((ws) =>
+      ws.name.toLowerCase().includes(searchQuery.toLowerCase().trim())
+    )
+    .sort((a, b) => {
+      const aPinned = Boolean(a.isPinned);
+      const bPinned = Boolean(b.isPinned);
+      if (aPinned !== bPinned) return aPinned ? -1 : 1;
+      return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+    });
 
   // ─── Tab Context Menu State ───────────────────────────────────────────────
   interface TabContextMenuState {
@@ -1142,7 +1149,7 @@ export const TabBar: React.FC = () => {
                       <button
                         key={ws.id}
                         type="button"
-                        className="tab-menu-dropdown__item"
+                        className={`tab-menu-dropdown__item ${ws.isPinned ? 'tab-menu-dropdown__item--pinned' : ''}`}
                         onClick={() => {
                           openTab({
                             type: 'workspace',
@@ -1152,7 +1159,12 @@ export const TabBar: React.FC = () => {
                           setIsDropdownOpen(false);
                         }}
                       >
-                        <span className="material-symbols-outlined">folder</span>
+                        <span 
+                          className="material-symbols-outlined"
+                          style={ws.isPinned ? { color: 'var(--color-accent)' } : undefined}
+                        >
+                          {ws.isPinned ? 'push_pin' : 'folder'}
+                        </span>
                         <span className="tab-menu-dropdown__item-title">{ws.name}</span>
                         {isOpen && <span className="tab-menu-dropdown__badge">Open</span>}
                       </button>
