@@ -5182,38 +5182,40 @@ export function initModelCanvas() {
             window.dispatchEvent(new CustomEvent('canvas-changed'));
           }
         },
-        { id: 'ctx-name-top', label: 'Move Name Top', icon: 'align_vertical_top', action: () => {
-            targetNode.textInside = false;
-            targetNode.textPosition = 'top';
-            render();
-            pushHistory();
-            window.dispatchEvent(new CustomEvent('canvas-changed'));
+        ...(!isInside ? [
+          { id: 'ctx-name-top', label: 'Move Name Top', icon: 'align_vertical_top', action: () => {
+              targetNode.textInside = false;
+              targetNode.textPosition = 'top';
+              render();
+              pushHistory();
+              window.dispatchEvent(new CustomEvent('canvas-changed'));
+            }
+          },
+          { id: 'ctx-name-bottom', label: 'Move Name Bottom', icon: 'align_vertical_bottom', action: () => {
+              targetNode.textInside = false;
+              targetNode.textPosition = 'bottom';
+              render();
+              pushHistory();
+              window.dispatchEvent(new CustomEvent('canvas-changed'));
+            }
+          },
+          { id: 'ctx-name-left', label: 'Move Name Left', icon: 'align_horizontal_left', action: () => {
+              targetNode.textInside = false;
+              targetNode.textPosition = 'left';
+              render();
+              pushHistory();
+              window.dispatchEvent(new CustomEvent('canvas-changed'));
+            }
+          },
+          { id: 'ctx-name-right', label: 'Move Name Right', icon: 'align_horizontal_right', action: () => {
+              targetNode.textInside = false;
+              targetNode.textPosition = 'right';
+              render();
+              pushHistory();
+              window.dispatchEvent(new CustomEvent('canvas-changed'));
+            }
           }
-        },
-        { id: 'ctx-name-bottom', label: 'Move Name Bottom', icon: 'align_vertical_bottom', action: () => {
-            targetNode.textInside = false;
-            targetNode.textPosition = 'bottom';
-            render();
-            pushHistory();
-            window.dispatchEvent(new CustomEvent('canvas-changed'));
-          }
-        },
-        { id: 'ctx-name-left', label: 'Move Name Left', icon: 'align_horizontal_left', action: () => {
-            targetNode.textInside = false;
-            targetNode.textPosition = 'left';
-            render();
-            pushHistory();
-            window.dispatchEvent(new CustomEvent('canvas-changed'));
-          }
-        },
-        { id: 'ctx-name-right', label: 'Move Name Right', icon: 'align_horizontal_right', action: () => {
-            targetNode.textInside = false;
-            targetNode.textPosition = 'right';
-            render();
-            pushHistory();
-            window.dispatchEvent(new CustomEvent('canvas-changed'));
-          }
-        },
+        ] : []),
         { divider: true },
         { id: 'ctx-mode', label: isReflective ? 'Make Formative' : 'Make Reflexive', icon: 'swap_horiz', action: () => {
             targetNode.type = isReflective ? 'formative' : 'reflective';
@@ -5260,38 +5262,40 @@ export function initModelCanvas() {
             window.dispatchEvent(new CustomEvent('canvas-changed'));
           }
         },
-        { id: 'ctx-name-top', label: 'Move Name Top', icon: 'align_vertical_top', action: () => {
-            targetNode.textInside = false;
-            targetNode.textPosition = 'top';
-            render();
-            pushHistory();
-            window.dispatchEvent(new CustomEvent('canvas-changed'));
+        ...(!isIndInside ? [
+          { id: 'ctx-name-top', label: 'Move Name Top', icon: 'align_vertical_top', action: () => {
+              targetNode.textInside = false;
+              targetNode.textPosition = 'top';
+              render();
+              pushHistory();
+              window.dispatchEvent(new CustomEvent('canvas-changed'));
+            }
+          },
+          { id: 'ctx-name-bottom', label: 'Move Name Bottom', icon: 'align_vertical_bottom', action: () => {
+              targetNode.textInside = false;
+              targetNode.textPosition = 'bottom';
+              render();
+              pushHistory();
+              window.dispatchEvent(new CustomEvent('canvas-changed'));
+            }
+          },
+          { id: 'ctx-name-left', label: 'Move Name Left', icon: 'align_horizontal_left', action: () => {
+              targetNode.textInside = false;
+              targetNode.textPosition = 'left';
+              render();
+              pushHistory();
+              window.dispatchEvent(new CustomEvent('canvas-changed'));
+            }
+          },
+          { id: 'ctx-name-right', label: 'Move Name Right', icon: 'align_horizontal_right', action: () => {
+              targetNode.textInside = false;
+              targetNode.textPosition = 'right';
+              render();
+              pushHistory();
+              window.dispatchEvent(new CustomEvent('canvas-changed'));
+            }
           }
-        },
-        { id: 'ctx-name-bottom', label: 'Move Name Bottom', icon: 'align_vertical_bottom', action: () => {
-            targetNode.textInside = false;
-            targetNode.textPosition = 'bottom';
-            render();
-            pushHistory();
-            window.dispatchEvent(new CustomEvent('canvas-changed'));
-          }
-        },
-        { id: 'ctx-name-left', label: 'Move Name Left', icon: 'align_horizontal_left', action: () => {
-            targetNode.textInside = false;
-            targetNode.textPosition = 'left';
-            render();
-            pushHistory();
-            window.dispatchEvent(new CustomEvent('canvas-changed'));
-          }
-        },
-        { id: 'ctx-name-right', label: 'Move Name Right', icon: 'align_horizontal_right', action: () => {
-            targetNode.textInside = false;
-            targetNode.textPosition = 'right';
-            render();
-            pushHistory();
-            window.dispatchEvent(new CustomEvent('canvas-changed'));
-          }
-        },
+        ] : []),
         { divider: true },
         { id: 'ctx-delete', label: 'Delete', icon: 'delete', danger: true, shortcut: 'Del', action: () => deleteSelected() }
       ];
