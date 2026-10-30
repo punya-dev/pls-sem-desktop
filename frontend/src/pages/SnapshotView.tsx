@@ -16,8 +16,10 @@ import {
   FileText,
   Code,
   FileCheck,
-  LayoutGrid
+  LayoutGrid,
+  RotateCcw
 } from 'lucide-react';
+import { getCanvasGridColors } from '../utils/model-canvas';
 import '../model-canvas.css';
 import '../results.css';
 
@@ -87,7 +89,7 @@ const TableHeaderToggle: React.FC<TableHeaderToggleProps> = ({ label, mode, onTo
 );
 
 export const SnapshotView: React.FC = () => {
-  const { tabs, activeTabId, studies, workspaces, models, addModel, openTab } = useStore();
+  const { tabs, activeTabId, studies, workspaces, models, addModel, openTab, settings, theme } = useStore();
   const activeTab = tabs.find(t => t.id === activeTabId);
 
   const activeStudy = studies.find(s => s.id === activeTab?.studyId) ||
@@ -119,9 +121,34 @@ export const SnapshotView: React.FC = () => {
   const [zoomLevel, setZoomLevel] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
+  const [isSpacePressed, setIsSpacePressed] = useState(false);
+  const [isSnapping, setIsSnapping] = useState(true);
+  const [canvasBgColor, setCanvasBgColor] = useState<string>(settings?.canvasBgColor || '');
+  const [canvasGrid, setCanvasGrid] = useState<string>(settings?.canvasGrid || 'dots');
+  const [hudConfirm, setHudConfirm] = useState<'reset' | null>(null);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [contextMenuPos, setContextMenuPos] = useState<{ x: number; y: number; targetNodeId?: string | null } | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [hoveredLatent, setHoveredLatent] = useState<{
+    name: string;
+    r2: number | null;
+    r2Adj: number | null;
+    cr: number | null;
+    ave: number | null;
+    alpha: number | null;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  const originalLayoutNodesRef = useRef<any[]>([]);
   const panStartRef = useRef({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+
+  // Dynamic grid colors matching background contrast
+  const gridColors = useMemo(() => {
+    return getCanvasGridColors(canvasBgColor);
+  }, [canvasBgColor, theme, settings?.theme]);
 
   // Dragging and interactive layout nodes
   const [layoutNodes, setLayoutNodes] = useState<any[]>([]);
@@ -189,12 +216,227 @@ export const SnapshotView: React.FC = () => {
   // Initialize layoutNodes and auto-center diagram view when diagram layout is loaded
   useEffect(() => {
     if (layout?.nodes && layout.nodes.length > 0) {
-      setLayoutNodes(JSON.parse(JSON.stringify(layout.nodes)));
+      const cloned = JSON.parse(JSON.stringify(layout.nodes));
+      originalLayoutNodesRef.current = JSON.parse(JSON.stringify(layout.nodes));
+      setLayoutNodes(cloned);
       setTimeout(() => {
-        centerDiagram(layout.nodes);
+        centerDiagram(cloned);
       }, 50);
     }
   }, [layout]);
+
+  // Helper to process wheel events for pinch-to-zoom and two-finger move
+  const processWheel = (
+    e: { clientX: number; clientY: number; deltaX: number; deltaY: number; ctrlKey: boolean; metaKey: boolean },
+    container: HTMLElement
+  ) => {
+    if (e.ctrlKey || e.metaKey) {
+      // Pinch to zoom (trackpad pinch gesture or Ctrl/Cmd + wheel)
+      const zoomIntensity = 0.008;
+      const zoomFactor = Math.exp(-e.deltaY * zoomIntensity);
+
+      const rect = container.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      setZoomLevel(prevK => {
+        const newK = Math.max(0.1, Math.min(3, prevK * zoomFactor));
+        const ratio = newK / prevK;
+        setPanOffset(prevPan => ({
+          x: mouseX - (mouseX - prevPan.x) * ratio,
+          y: mouseY - (mouseY - prevPan.y) * ratio,
+        }));
+        return newK;
+      });
+    } else {
+      // Moving two fingers on trackpad or scrolling mouse wheel -> pan canvas
+      setPanOffset(prev => ({
+        x: prev.x - e.deltaX,
+        y: prev.y - e.deltaY,
+      }));
+    }
+  };
+
+  // Touchpad two-finger move across to pan, and pinch to zoom (matching Model Editor)
+  useEffect(() => {
+    if (currentView !== 'diagram' || loading) return;
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleWheelNative = (e: WheelEvent) => {
+      e.preventDefault();
+      processWheel(e, container);
+    };
+
+    container.addEventListener('wheel', handleWheelNative, { passive: false });
+    return () => {
+      container.removeEventListener('wheel', handleWheelNative);
+    };
+  }, [currentView, loading, snapshot]);
+
+  // Spacebar pan & global click to close popovers/menus
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !e.repeat) {
+        const isInput = e.target && (
+          (e.target as HTMLElement).tagName === 'INPUT' ||
+          (e.target as HTMLElement).tagName === 'TEXTAREA' ||
+          (e.target as HTMLElement).isContentEditable
+        );
+        if (!isInput) {
+          setIsSpacePressed(true);
+        }
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        setIsSpacePressed(false);
+      }
+    };
+
+    const handleGlobalClick = () => {
+      setContextMenuPos(null);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('click', handleGlobalClick);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('click', handleGlobalClick);
+    };
+  }, []);
+
+  // Revert to Default layout & styles
+  const handleRevertToDefault = () => {
+    const base = originalLayoutNodesRef.current.length > 0
+      ? originalLayoutNodesRef.current
+      : (layout?.nodes || []);
+    if (base.length > 0) {
+      const restored = JSON.parse(JSON.stringify(base));
+      setLayoutNodes(restored);
+      setZoomLevel(1);
+      centerDiagram(restored);
+    }
+    setCanvasBgColor('');
+    setCanvasGrid('dots');
+    setIsSnapping(true);
+    setHudConfirm(null);
+    setToastMsg('Canvas reverted to default layout and styles');
+    setTimeout(() => setToastMsg(null), 2500);
+  };
+
+  // --- Geometric intersection offset helper matching model-canvas.js ---
+  const getNodeIntersectionOffset = (node: any, ptX: number, ptY: number) => {
+    const dx = ptX - node.x;
+    const dy = ptY - node.y;
+    const distance = Math.hypot(dx, dy);
+    if (distance === 0) return { x: 0, y: 0 };
+
+    const isLatent = node.isLatent !== false && !node.isText;
+    const shape = node.shape || (isLatent ? 'circle' : 'rect');
+    const w = node.width || (isLatent ? (node.r ? node.r * 2 : 72) : 70);
+    const h = node.height || (isLatent ? (node.r ? node.r * 2 : 72) : 28);
+
+    if (shape === 'circle') {
+      const rx = w / 2;
+      const ry = h / 2;
+      return { x: (dx / distance) * rx, y: (dy / distance) * ry };
+    } else {
+      const rx = w / 2;
+      const ry = h / 2;
+      if (Math.abs(dx) * ry > Math.abs(dy) * rx) {
+        return { x: Math.sign(dx) * rx, y: dy * (rx / Math.abs(dx)) };
+      } else {
+        return { x: dx * (ry / Math.abs(dy)), y: Math.sign(dy) * ry };
+      }
+    }
+  };
+
+  // Helper to extract outer loading / weight matching model-canvas.js
+  const getOuterLoading = (parentNode: any, indNode: any): number | null => {
+    if (!results) return null;
+    const loadings = results.measurement?.outer_loadings || results.outer_loadings || {};
+    const weights = results.measurement?.outer_weights || results.outer_weights || {};
+    const pKeys = [parentNode.label, parentNode.id, parentNode.label?.toUpperCase()].filter(Boolean);
+    const iKeys = [indNode.label, indNode.id, indNode.label?.toUpperCase(), indNode.label?.toLowerCase()].filter(Boolean);
+
+    const isFormative = parentNode.type === 'formative';
+    const dict = isFormative ? (Object.keys(weights).length ? weights : loadings) : loadings;
+
+    for (const p of pKeys) {
+      if (dict[p]) {
+        for (const i of iKeys) {
+          if (dict[p][i] !== undefined && dict[p][i] !== null) {
+            return Number(dict[p][i]);
+          }
+        }
+      }
+    }
+    return null;
+  };
+
+  // Helper to extract structural path coefficient
+  const getPathCoefficient = (srcNode: any, tgtNode: any): number | null => {
+    if (!results) return null;
+    const paths = results.structural?.path_coefficients || results.path_coefficients || {};
+    const sKeys = [srcNode.label, srcNode.id, srcNode.label?.toUpperCase()].filter(Boolean);
+    const tKeys = [tgtNode.label, tgtNode.id, tgtNode.label?.toUpperCase()].filter(Boolean);
+
+    for (const t of tKeys) {
+      if (paths[t]) {
+        for (const s of sKeys) {
+          if (paths[t][s] !== undefined && paths[t][s] !== null) {
+            return Number(paths[t][s]);
+          }
+        }
+      }
+    }
+    return null;
+  };
+
+  // Helper to align indicators around a latent construct parent
+  const alignIndicators = (direction: 'left' | 'right' | 'top' | 'bottom', parentId: string) => {
+    const parent = layoutNodes.find(n => n.id === parentId);
+    if (!parent) return;
+
+    const indicators = layoutNodes.filter(n => n.parentId === parentId && !n.isLatent);
+    if (indicators.length === 0) return;
+
+    const indWidth = 70;
+    const indHeight = 28;
+    const gap = 16;
+    const spacing = (direction === 'left' || direction === 'right') ? indHeight + gap : indWidth + gap;
+    const offset = (direction === 'top' || direction === 'bottom') ? 140 : 155;
+    const totalLength = (indicators.length - 1) * spacing;
+    const start = -totalLength / 2;
+
+    const updated = layoutNodes.map(node => {
+      const idx = indicators.findIndex(ind => ind.id === node.id);
+      if (idx === -1) return node;
+      const clone = { ...node };
+      if (direction === 'right') {
+        clone.x = parent.x + offset;
+        clone.y = parent.y + start + (idx * spacing);
+      } else if (direction === 'left') {
+        clone.x = parent.x - offset;
+        clone.y = parent.y + start + (idx * spacing);
+      } else if (direction === 'top') {
+        clone.x = parent.x + start + (idx * spacing);
+        clone.y = parent.y - offset;
+      } else if (direction === 'bottom') {
+        clone.x = parent.x + start + (idx * spacing);
+        clone.y = parent.y + offset;
+      }
+      return clone;
+    });
+
+    setLayoutNodes(updated);
+    setToastMsg(`Indicators aligned to ${direction}`);
+    setTimeout(() => setToastMsg(null), 2000);
+  };
 
   const handleNodeMouseDown = (e: React.MouseEvent, nodeId: string) => {
     e.stopPropagation();
@@ -215,11 +457,11 @@ export const SnapshotView: React.FC = () => {
       const initialPos = initialNodesPosRef.current.get(draggingNodeId);
       if (!initialPos) return;
 
-      // Snap to 10px grid
+      // Snap to 10px grid if snapping is active
       const rawNewX = initialPos.x + dx;
       const rawNewY = initialPos.y + dy;
-      const snappedX = Math.round(rawNewX / 10) * 10;
-      const snappedY = Math.round(rawNewY / 10) * 10;
+      const snappedX = isSnapping ? Math.round(rawNewX / 10) * 10 : rawNewX;
+      const snappedY = isSnapping ? Math.round(rawNewY / 10) * 10 : rawNewY;
       const actualDx = snappedX - initialPos.x;
       const actualDy = snappedY - initialPos.y;
 
@@ -346,7 +588,8 @@ export const SnapshotView: React.FC = () => {
         const context = canvas.getContext('2d');
         if (!context) return;
         context.scale(scale, scale);
-        context.fillStyle = '#ffffff';
+        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+        context.fillStyle = canvasBgColor || (isDark ? '#0f172a' : '#ffffff');
         context.fillRect(0, 0, width, height);
         context.drawImage(image, 0, 0);
 
@@ -1747,10 +1990,10 @@ export const SnapshotView: React.FC = () => {
               position: 'relative',
               backgroundColor: 'var(--color-bg-base)',
               overflow: 'hidden',
-              cursor: isPanning ? 'grabbing' : (draggingNodeId ? 'move' : 'grab')
+              cursor: isPanning ? 'grabbing' : (isSpacePressed ? 'grab' : (draggingNodeId ? 'move' : 'default'))
             }}
             onMouseDown={(e) => {
-              if (e.button === 0 && !draggingNodeId) {
+              if ((e.button === 0 || e.button === 1 || isSpacePressed) && !draggingNodeId) {
                 setIsPanning(true);
                 panStartRef.current = { x: e.clientX - panOffset.x, y: e.clientY - panOffset.y };
               }
@@ -1759,22 +2002,26 @@ export const SnapshotView: React.FC = () => {
             onMouseUp={handleCanvasMouseUp}
             onMouseLeave={handleCanvasMouseUp}
             onWheel={(e) => {
+              if (containerRef.current) {
+                processWheel(e, containerRef.current);
+              }
+            }}
+            onContextMenu={(e) => {
               e.preventDefault();
-              const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
-              setZoomLevel(prev => Math.max(0.2, Math.min(3, prev * zoomFactor)));
+              setContextMenuPos({ x: e.clientX, y: e.clientY });
             }}
           >
-            {/* Diagram HUD Floating Bar docked on bottom left */}
+            {/* Diagram HUD Floating Bar docked on bottom right */}
             <div
               className="canvas-hud"
               style={{
                 position: 'absolute',
-                bottom: '16px',
-                left: '24px',
-                right: 'auto',
+                bottom: '20px',
+                right: '20px',
+                left: 'auto',
                 width: 'fit-content',
                 transform: 'none',
-                zIndex: 10,
+                zIndex: 40,
                 display: 'flex',
                 alignItems: 'center',
                 gap: '8px'
@@ -1783,8 +2030,8 @@ export const SnapshotView: React.FC = () => {
               <div className="hud-zoom">
                 <div
                   className="hud-zoom__btn"
-                  onClick={() => setZoomLevel(z => Math.max(0.2, z - 0.1))}
-                  title="Zoom Out"
+                  onClick={() => setZoomLevel(z => Math.max(0.1, z - 0.1))}
+                  title="Zoom Out (−)"
                 >
                   −
                 </div>
@@ -1794,46 +2041,696 @@ export const SnapshotView: React.FC = () => {
                     setZoomLevel(1);
                     centerDiagram(layoutNodes.length > 0 ? layoutNodes : (layout?.nodes || []));
                   }}
-                  title="Reset Zoom"
+                  title="Reset Zoom to 100%"
                 >
                   {Math.round(zoomLevel * 100)}%
                 </div>
                 <div
                   className="hud-zoom__btn"
                   onClick={() => setZoomLevel(z => Math.min(3, z + 0.1))}
-                  title="Zoom In"
+                  title="Zoom In (+)"
                 >
                   +
                 </div>
               </div>
+
               <div
                 className="hud-btn"
                 onClick={() => {
                   setZoomLevel(1);
                   centerDiagram(layoutNodes.length > 0 ? layoutNodes : (layout?.nodes || []));
                 }}
-                title="Fit to Center"
+                title="Fit to Center (Reset Pan & Zoom)"
               >
                 <Maximize2 size={13} />
                 <span>Fit</span>
               </div>
+
+              <div className="hud-divider" />
+
+              <div
+                className={`hud-icon-btn ${isSnapping ? 'active' : ''}`}
+                onClick={() => setIsSnapping(s => !s)}
+                title={isSnapping ? "Disable Snap to Grid" : "Enable Snap to Grid (10px)"}
+              >
+                <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 14, height: 14 }}>
+                  <circle cx="4" cy="4" r="2" />
+                  <circle cx="12" cy="4" r="2" />
+                  <circle cx="20" cy="4" r="2" />
+                  <circle cx="4" cy="12" r="2" />
+                  <circle cx="12" cy="12" r="2" />
+                  <circle cx="20" cy="12" r="2" />
+                  <circle cx="4" cy="20" r="2" />
+                  <circle cx="12" cy="20" r="2" />
+                  <circle cx="20" cy="20" r="2" />
+                </svg>
+              </div>
+
+              <div className="hud-divider" />
+
               <div
                 className="hud-btn"
                 onClick={handleAutoAlign}
-                title="Auto-Align Layout"
+                title="Auto-Align Layout (Hierarchical Arrangement)"
               >
                 <LayoutGrid size={13} />
                 <span>Auto Align</span>
               </div>
+
               <div
                 className="hud-btn"
                 onClick={handleDownloadPNG}
-                title="Download PNG"
+                title="Download Diagram as High-Resolution PNG"
               >
                 <Download size={13} />
                 <span>Download PNG</span>
               </div>
+
+              <div className="hud-divider" />
+
+              <div
+                className="hud-btn"
+                id="hud-reset"
+                title="Reset to Default Layout & Styles"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setHudConfirm(c => c === 'reset' ? null : 'reset');
+                }}
+                style={{ color: 'var(--color-text-secondary)', padding: '0 6px', position: 'relative' }}
+              >
+                <RotateCcw size={14} />
+              </div>
+
+              {/* Popover confirmation matching canvas-hud pill dimensions & aesthetic */}
+              {hudConfirm === 'reset' && (
+                <div
+                  className="canvas-hud-confirm-popover"
+                  style={{
+                    position: 'absolute',
+                    bottom: 'calc(100% + 8px)',
+                    left: 0,
+                    right: 0,
+                    height: '38px',
+                    backgroundColor: 'var(--color-bg-elevated)',
+                    backdropFilter: 'blur(12px)',
+                    border: '1px solid var(--color-border-default)',
+                    boxShadow: 'var(--shadow-float)',
+                    borderRadius: 'var(--radius-xl)',
+                    padding: '4px 10px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    boxSizing: 'border-box',
+                    whiteSpace: 'nowrap',
+                    zIndex: 100,
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <span style={{ color: 'var(--color-text-primary)', fontWeight: 500, fontSize: '12px' }}>
+                    Revert to default layout &amp; styles?
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setHudConfirm(null)}
+                      title="Keep current changes"
+                      style={{
+                        height: '24px',
+                        padding: '0 8px',
+                        borderRadius: 'var(--radius-md, 6px)',
+                        backgroundColor: 'transparent',
+                        color: 'var(--color-text-secondary)',
+                        border: 'none',
+                        fontSize: '11px',
+                        fontWeight: 500,
+                        cursor: 'pointer',
+                        transition: 'all var(--transition-fast)',
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRevertToDefault}
+                      title="Confirm revert back to initial snapshot layout"
+                      style={{
+                        height: '24px',
+                        padding: '0 10px',
+                        borderRadius: 'var(--radius-md, 6px)',
+                        backgroundColor: 'var(--color-accent)',
+                        color: '#ffffff',
+                        border: 'none',
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        boxShadow: '0 1px 3px rgba(107, 78, 230, 0.3)',
+                        transition: 'all var(--transition-fast)',
+                      }}
+                    >
+                      Revert
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
+
+            {/* Context Menu on Right Click (Latent Node or Canvas) */}
+            {contextMenuPos && (() => {
+              const targetNode = contextMenuPos.targetNodeId ? layoutNodes.find(n => n.id === contextMenuPos.targetNodeId) : null;
+              const isLatent = targetNode && targetNode.isLatent !== false && !targetNode.isText;
+
+              if (isLatent) {
+                const areIndicatorsHidden = !!targetNode.indicatorsHidden;
+                const childInds = layoutNodes.filter(n => n.parentId === targetNode.id && !n.isLatent);
+                const hasIndicators = childInds.length > 0;
+
+                return (
+                  <div
+                    className="canvas-ctx-menu"
+                    style={{
+                      display: 'block',
+                      position: 'fixed',
+                      left: Math.min(contextMenuPos.x, window.innerWidth - 240),
+                      top: Math.min(contextMenuPos.y, window.innerHeight - 340),
+                      zIndex: 10000,
+                      backgroundColor: 'var(--color-bg-elevated)',
+                      backdropFilter: 'blur(12px)',
+                      border: '1px solid var(--color-border-default)',
+                      borderRadius: 'var(--radius-md, 8px)',
+                      boxShadow: 'var(--shadow-float, 0 8px 24px rgba(15, 23, 42, 0.12))',
+                      padding: '4px',
+                      minWidth: '220px',
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div style={{ padding: '6px 10px', fontSize: '11px', fontWeight: 600, color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '3px', background: 'var(--color-accent-subtle)', color: 'var(--color-accent)', fontWeight: 700 }}>LATENT</span>
+                      <span style={{ color: 'var(--color-text-primary)' }}>{targetNode.label}</span>
+                    </div>
+                    <div className="canvas-ctx-divider" />
+
+                    {/* Move Name Inside / Outside */}
+                    <div
+                      className="canvas-ctx-item"
+                      title={targetNode.textInside ? 'Move name outside construct' : 'Move name inside construct'}
+                      onClick={() => {
+                        setContextMenuPos(null);
+                        const isInside = !!targetNode.textInside;
+                        setLayoutNodes(prev => prev.map(n => n.id === targetNode.id ? { ...n, textInside: !isInside } : n));
+                        setToastMsg(!isInside ? 'Name moved inside' : 'Name moved outside');
+                        setTimeout(() => setToastMsg(null), 2000);
+                      }}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: 16 }}>
+                        {targetNode.textInside ? 'open_in_new' : 'vertical_align_center'}
+                      </span>
+                      <span style={{ flex: 1 }}>{targetNode.textInside ? 'Move Name Outside' : 'Move Name Inside'}</span>
+                    </div>
+
+                    {!targetNode.textInside && (
+                      <>
+                        <div
+                          className="canvas-ctx-item"
+                          onClick={() => {
+                            setContextMenuPos(null);
+                            setLayoutNodes(prev => prev.map(n => n.id === targetNode.id ? { ...n, textInside: false, textPosition: 'top' } : n));
+                            setToastMsg('Name positioned top');
+                            setTimeout(() => setToastMsg(null), 2000);
+                          }}
+                        >
+                          <span className="material-symbols-outlined" style={{ fontSize: 16 }}>align_vertical_top</span>
+                          <span style={{ flex: 1 }}>Move Name Top</span>
+                        </div>
+
+                        <div
+                          className="canvas-ctx-item"
+                          onClick={() => {
+                            setContextMenuPos(null);
+                            setLayoutNodes(prev => prev.map(n => n.id === targetNode.id ? { ...n, textInside: false, textPosition: 'bottom' } : n));
+                            setToastMsg('Name positioned bottom');
+                            setTimeout(() => setToastMsg(null), 2000);
+                          }}
+                        >
+                          <span className="material-symbols-outlined" style={{ fontSize: 16 }}>align_vertical_bottom</span>
+                          <span style={{ flex: 1 }}>Move Name Bottom</span>
+                        </div>
+
+                        <div
+                          className="canvas-ctx-item"
+                          onClick={() => {
+                            setContextMenuPos(null);
+                            setLayoutNodes(prev => prev.map(n => n.id === targetNode.id ? { ...n, textInside: false, textPosition: 'left' } : n));
+                            setToastMsg('Name positioned left');
+                            setTimeout(() => setToastMsg(null), 2000);
+                          }}
+                        >
+                          <span className="material-symbols-outlined" style={{ fontSize: 16 }}>align_horizontal_left</span>
+                          <span style={{ flex: 1 }}>Move Name Left</span>
+                        </div>
+
+                        <div
+                          className="canvas-ctx-item"
+                          onClick={() => {
+                            setContextMenuPos(null);
+                            setLayoutNodes(prev => prev.map(n => n.id === targetNode.id ? { ...n, textInside: false, textPosition: 'right' } : n));
+                            setToastMsg('Name positioned right');
+                            setTimeout(() => setToastMsg(null), 2000);
+                          }}
+                        >
+                          <span className="material-symbols-outlined" style={{ fontSize: 16 }}>align_horizontal_right</span>
+                          <span style={{ flex: 1 }}>Move Name Right</span>
+                        </div>
+                      </>
+                    )}
+
+                    <div className="canvas-ctx-divider" />
+
+                    {/* 2. Hide Indicators */}
+                    <div
+                      className={`canvas-ctx-item ${!hasIndicators ? 'disabled' : ''}`}
+                      title={areIndicatorsHidden ? 'Show construct indicators' : 'Hide construct indicators'}
+                      onClick={() => {
+                        if (!hasIndicators) return;
+                        setContextMenuPos(null);
+                        setLayoutNodes(prev => prev.map(n => n.id === targetNode.id ? { ...n, indicatorsHidden: !areIndicatorsHidden } : n));
+                        setToastMsg(areIndicatorsHidden ? 'Indicators visible' : 'Indicators hidden');
+                        setTimeout(() => setToastMsg(null), 2000);
+                      }}
+                      style={{ opacity: hasIndicators ? 1 : 0.5, cursor: hasIndicators ? 'pointer' : 'default' }}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: 16 }}>
+                        {areIndicatorsHidden ? 'visibility' : 'visibility_off'}
+                      </span>
+                      <span style={{ flex: 1 }}>{areIndicatorsHidden ? 'Show Indicators' : 'Hide Indicators'}</span>
+                    </div>
+
+                    <div className="canvas-ctx-divider" />
+
+                    {/* 3. Align Indicators Left */}
+                    <div
+                      className={`canvas-ctx-item ${!hasIndicators ? 'disabled' : ''}`}
+                      title="Align indicators vertically to the left"
+                      onClick={() => {
+                        if (!hasIndicators) return;
+                        setContextMenuPos(null);
+                        alignIndicators('left', targetNode.id);
+                      }}
+                      style={{ opacity: hasIndicators ? 1 : 0.5, cursor: hasIndicators ? 'pointer' : 'default' }}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: 16 }}>align_horizontal_left</span>
+                      <span style={{ flex: 1 }}>Align Indicators Left</span>
+                    </div>
+
+                    {/* 4. Align Indicators Right */}
+                    <div
+                      className={`canvas-ctx-item ${!hasIndicators ? 'disabled' : ''}`}
+                      title="Align indicators vertically to the right"
+                      onClick={() => {
+                        if (!hasIndicators) return;
+                        setContextMenuPos(null);
+                        alignIndicators('right', targetNode.id);
+                      }}
+                      style={{ opacity: hasIndicators ? 1 : 0.5, cursor: hasIndicators ? 'pointer' : 'default' }}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: 16 }}>align_horizontal_right</span>
+                      <span style={{ flex: 1 }}>Align Indicators Right</span>
+                    </div>
+
+                    {/* 5. Align Indicators Top */}
+                    <div
+                      className={`canvas-ctx-item ${!hasIndicators ? 'disabled' : ''}`}
+                      title="Align indicators horizontally on top"
+                      onClick={() => {
+                        if (!hasIndicators) return;
+                        setContextMenuPos(null);
+                        alignIndicators('top', targetNode.id);
+                      }}
+                      style={{ opacity: hasIndicators ? 1 : 0.5, cursor: hasIndicators ? 'pointer' : 'default' }}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: 16 }}>align_vertical_top</span>
+                      <span style={{ flex: 1 }}>Align Indicators Top</span>
+                    </div>
+
+                    {/* 6. Align Indicators Bottom */}
+                    <div
+                      className={`canvas-ctx-item ${!hasIndicators ? 'disabled' : ''}`}
+                      title="Align indicators horizontally on bottom"
+                      onClick={() => {
+                        if (!hasIndicators) return;
+                        setContextMenuPos(null);
+                        alignIndicators('bottom', targetNode.id);
+                      }}
+                      style={{ opacity: hasIndicators ? 1 : 0.5, cursor: hasIndicators ? 'pointer' : 'default' }}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: 16 }}>align_vertical_bottom</span>
+                      <span style={{ flex: 1 }}>Align Indicators Bottom</span>
+                    </div>
+
+                    <div className="canvas-ctx-divider" />
+
+                    <div
+                      className="canvas-ctx-item"
+                      title="Fit diagram to center"
+                      onClick={() => {
+                        setContextMenuPos(null);
+                        setZoomLevel(1);
+                        centerDiagram(layoutNodes.length > 0 ? layoutNodes : (layout?.nodes || []));
+                      }}
+                    >
+                      <Maximize2 size={15} style={{ color: 'var(--color-text-secondary)' }} />
+                      <span style={{ flex: 1 }}>Fit Screen</span>
+                    </div>
+                  </div>
+                );
+              }
+
+              const isIndicator = targetNode && !targetNode.isLatent && !targetNode.isText;
+              if (isIndicator) {
+                const isIndInside = targetNode.textInside !== undefined ? targetNode.textInside : true;
+                return (
+                  <div
+                    className="canvas-ctx-menu"
+                    style={{
+                      display: 'block',
+                      position: 'fixed',
+                      left: Math.min(contextMenuPos.x, window.innerWidth - 220),
+                      top: Math.min(contextMenuPos.y, window.innerHeight - 240),
+                      zIndex: 10000,
+                      backgroundColor: 'var(--color-bg-elevated)',
+                      backdropFilter: 'blur(12px)',
+                      border: '1px solid var(--color-border-default)',
+                      borderRadius: 'var(--radius-md, 8px)',
+                      boxShadow: 'var(--shadow-float, 0 8px 24px rgba(15, 23, 42, 0.12))',
+                      padding: '4px',
+                      minWidth: '200px',
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div style={{ padding: '6px 10px', fontSize: '11px', fontWeight: 600, color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '3px', background: 'rgba(234, 179, 8, 0.15)', color: '#ca8a04', fontWeight: 700 }}>INDICATOR</span>
+                      <span style={{ color: 'var(--color-text-primary)' }}>{targetNode.label}</span>
+                    </div>
+                    <div className="canvas-ctx-divider" />
+
+                    {/* Move Name Inside / Outside */}
+                    <div
+                      className="canvas-ctx-item"
+                      title={isIndInside ? 'Move label outside indicator box' : 'Move label inside indicator box'}
+                      onClick={() => {
+                        setContextMenuPos(null);
+                        setLayoutNodes(prev => prev.map(n => n.id === targetNode.id ? { ...n, textInside: !isIndInside } : n));
+                        setToastMsg(isIndInside ? 'Name moved outside' : 'Name moved inside');
+                        setTimeout(() => setToastMsg(null), 2000);
+                      }}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: 16 }}>
+                        {isIndInside ? 'open_in_new' : 'vertical_align_center'}
+                      </span>
+                      <span style={{ flex: 1 }}>{isIndInside ? 'Move Name Outside' : 'Move Name Inside'}</span>
+                    </div>
+
+                    {!isIndInside && (
+                      <>
+                        <div
+                          className="canvas-ctx-item"
+                          onClick={() => {
+                            setContextMenuPos(null);
+                            setLayoutNodes(prev => prev.map(n => n.id === targetNode.id ? { ...n, textInside: false, textPosition: 'top' } : n));
+                            setToastMsg('Name positioned top');
+                            setTimeout(() => setToastMsg(null), 2000);
+                          }}
+                        >
+                          <span className="material-symbols-outlined" style={{ fontSize: 16 }}>align_vertical_top</span>
+                          <span style={{ flex: 1 }}>Move Name Top</span>
+                        </div>
+
+                        <div
+                          className="canvas-ctx-item"
+                          onClick={() => {
+                            setContextMenuPos(null);
+                            setLayoutNodes(prev => prev.map(n => n.id === targetNode.id ? { ...n, textInside: false, textPosition: 'bottom' } : n));
+                            setToastMsg('Name positioned bottom');
+                            setTimeout(() => setToastMsg(null), 2000);
+                          }}
+                        >
+                          <span className="material-symbols-outlined" style={{ fontSize: 16 }}>align_vertical_bottom</span>
+                          <span style={{ flex: 1 }}>Move Name Bottom</span>
+                        </div>
+
+                        <div
+                          className="canvas-ctx-item"
+                          onClick={() => {
+                            setContextMenuPos(null);
+                            setLayoutNodes(prev => prev.map(n => n.id === targetNode.id ? { ...n, textInside: false, textPosition: 'left' } : n));
+                            setToastMsg('Name positioned left');
+                            setTimeout(() => setToastMsg(null), 2000);
+                          }}
+                        >
+                          <span className="material-symbols-outlined" style={{ fontSize: 16 }}>align_horizontal_left</span>
+                          <span style={{ flex: 1 }}>Move Name Left</span>
+                        </div>
+
+                        <div
+                          className="canvas-ctx-item"
+                          onClick={() => {
+                            setContextMenuPos(null);
+                            setLayoutNodes(prev => prev.map(n => n.id === targetNode.id ? { ...n, textInside: false, textPosition: 'right' } : n));
+                            setToastMsg('Name positioned right');
+                            setTimeout(() => setToastMsg(null), 2000);
+                          }}
+                        >
+                          <span className="material-symbols-outlined" style={{ fontSize: 16 }}>align_horizontal_right</span>
+                          <span style={{ flex: 1 }}>Move Name Right</span>
+                        </div>
+                      </>
+                    )}
+
+                    <div className="canvas-ctx-divider" />
+
+                    <div
+                      className="canvas-ctx-item"
+                      title="Fit diagram to center"
+                      onClick={() => {
+                        setContextMenuPos(null);
+                        setZoomLevel(1);
+                        centerDiagram(layoutNodes.length > 0 ? layoutNodes : (layout?.nodes || []));
+                      }}
+                    >
+                      <Maximize2 size={15} style={{ color: 'var(--color-text-secondary)' }} />
+                      <span style={{ flex: 1 }}>Fit Screen</span>
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <div
+                  className="canvas-ctx-menu"
+                  style={{
+                    display: 'block',
+                    position: 'fixed',
+                    left: Math.min(contextMenuPos.x, window.innerWidth - 220),
+                    top: Math.min(contextMenuPos.y, window.innerHeight - 280),
+                    zIndex: 10000,
+                    backgroundColor: 'var(--color-bg-elevated)',
+                    backdropFilter: 'blur(12px)',
+                    border: '1px solid var(--color-border-default)',
+                    borderRadius: 'var(--radius-md, 8px)',
+                    boxShadow: 'var(--shadow-float, 0 8px 24px rgba(15, 23, 42, 0.12))',
+                    padding: '4px',
+                    minWidth: '200px',
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div
+                    className="canvas-ctx-item"
+                    title="Fit diagram to center"
+                    onClick={() => {
+                      setContextMenuPos(null);
+                      setZoomLevel(1);
+                      centerDiagram(layoutNodes.length > 0 ? layoutNodes : (layout?.nodes || []));
+                    }}
+                  >
+                    <Maximize2 size={15} style={{ color: 'var(--color-text-secondary)' }} />
+                    <span style={{ flex: 1 }}>Fit Screen</span>
+                  </div>
+                  <div
+                    className="canvas-ctx-item"
+                    title="Export diagram as high-resolution image"
+                    onClick={() => {
+                      setContextMenuPos(null);
+                      handleDownloadPNG();
+                    }}
+                  >
+                    <Download size={15} style={{ color: 'var(--color-text-secondary)' }} />
+                    <span style={{ flex: 1 }}>Export as Image</span>
+                  </div>
+
+                  <div className="canvas-ctx-divider" />
+
+                  <div
+                    className="canvas-ctx-item"
+                    title={isSnapping ? "Disable 10px grid snapping" : "Enable 10px grid snapping"}
+                    onClick={() => {
+                      setContextMenuPos(null);
+                      setIsSnapping(s => !s);
+                    }}
+                  >
+                    <span className="material-symbols-outlined" style={{ fontSize: 16 }}>
+                      {isSnapping ? 'grid_off' : 'grid_on'}
+                    </span>
+                    <span style={{ flex: 1 }}>{isSnapping ? 'Disable Snap to Grid' : 'Enable Snap to Grid'}</span>
+                  </div>
+
+                  <div className="canvas-ctx-divider" />
+
+                  {/* Grid Pattern Options */}
+                  <div style={{ padding: '4px 8px' }}>
+                    <div style={{ fontSize: '10px', fontWeight: 600, color: 'var(--color-text-hint)', textTransform: 'uppercase', marginBottom: '4px' }}>
+                      Grid Pattern
+                    </div>
+                    <div style={{ display: 'flex', gap: '4px' }}>
+                      {[
+                        { id: 'dots', label: 'Dots', title: 'Dots Pattern Grid' },
+                        { id: 'lines', label: 'Lines', title: 'Lines Pattern Grid' },
+                        { id: 'none', label: 'None', title: 'Blank Canvas (No Grid)' },
+                      ].map(opt => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          title={opt.title}
+                          onClick={() => setCanvasGrid(opt.id)}
+                          style={{
+                            flex: 1,
+                            height: '22px',
+                            border: canvasGrid === opt.id ? '1px solid var(--color-accent)' : '1px solid var(--color-border-subtle)',
+                            background: canvasGrid === opt.id ? 'var(--color-accent-subtle)' : 'var(--color-bg-base)',
+                            color: canvasGrid === opt.id ? 'var(--color-accent)' : 'var(--color-text-primary)',
+                            borderRadius: '4px',
+                            fontSize: '11px',
+                            fontWeight: canvasGrid === opt.id ? 600 : 400,
+                            cursor: 'pointer',
+                            padding: 0,
+                          }}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="canvas-ctx-divider" />
+
+                  {/* Canvas Background Color Options */}
+                  <div style={{ padding: '4px 8px' }}>
+                    <div style={{ fontSize: '10px', fontWeight: 600, color: 'var(--color-text-hint)', textTransform: 'uppercase', marginBottom: '4px' }}>
+                      Background Color
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                      {[
+                        { id: '', bg: theme === 'dark' ? '#0f172a' : '#ffffff', title: 'Default Canvas Background' },
+                        { id: theme === 'dark' ? '#1e293b' : '#f8fafc', bg: theme === 'dark' ? '#1e293b' : '#f8fafc', title: 'Soft Contrast Background' },
+                      ].map(opt => (
+                        <button
+                          key={opt.title}
+                          type="button"
+                          title={opt.title}
+                          onClick={() => setCanvasBgColor(opt.id)}
+                          style={{
+                            width: '20px',
+                            height: '20px',
+                            borderRadius: '50%',
+                            background: opt.bg,
+                            border: canvasBgColor.toLowerCase() === opt.id.toLowerCase() ? '2px solid var(--color-accent)' : '1px solid rgba(0,0,0,0.2)',
+                            boxShadow: canvasBgColor.toLowerCase() === opt.id.toLowerCase() ? '0 0 0 2px var(--color-accent-subtle)' : 'none',
+                            cursor: 'pointer',
+                            flexShrink: 0,
+                          }}
+                        />
+                      ))}
+                      {/* Custom color picker */}
+                      <label
+                        title="Custom Background Color"
+                        style={{
+                          width: '20px',
+                          height: '20px',
+                          borderRadius: '50%',
+                          background: 'transparent',
+                          border: '1px dashed var(--color-border-subtle)',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: 'var(--color-text-secondary)',
+                          position: 'relative',
+                          cursor: 'pointer',
+                          flexShrink: 0,
+                        }}
+                      >
+                        <span style={{ fontSize: '12px', lineHeight: 1 }}>+</span>
+                        <input
+                          type="color"
+                          title="Custom Canvas Color"
+                          value={canvasBgColor || (theme === 'dark' ? '#0f172a' : '#ffffff')}
+                          onChange={(e) => setCanvasBgColor(e.target.value)}
+                          style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            width: '100%',
+                            height: '100%',
+                            opacity: 0,
+                            cursor: 'pointer',
+                          }}
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="canvas-ctx-divider" />
+
+                  <div
+                    className="canvas-ctx-item"
+                    title="Revert canvas layout and styles to default"
+                    onClick={() => {
+                      setContextMenuPos(null);
+                      handleRevertToDefault();
+                    }}
+                  >
+                    <RotateCcw size={15} style={{ color: 'var(--color-text-secondary)' }} />
+                    <span style={{ flex: 1 }}>Revert to Default</span>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Floating Toast Notification */}
+            {toastMsg && (
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: '72px',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  backgroundColor: 'var(--color-bg-elevated)',
+                  color: 'var(--color-text-primary)',
+                  border: '1px solid var(--color-border-default)',
+                  borderRadius: 'var(--radius-xl, 20px)',
+                  boxShadow: 'var(--shadow-float, 0 8px 24px rgba(15, 23, 42, 0.12))',
+                  padding: '8px 16px',
+                  fontSize: '12px',
+                  fontWeight: 500,
+                  zIndex: 100,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  pointerEvents: 'none',
+                  backdropFilter: 'blur(12px)',
+                }}
+              >
+                <RotateCcw size={14} style={{ color: 'var(--color-accent)' }} />
+                <span>{toastMsg}</span>
+              </div>
+            )}
 
             {/* Interactive SVG Renderer */}
             {(() => {
@@ -1844,41 +2741,92 @@ export const SnapshotView: React.FC = () => {
                   width="100%"
                   height="100%"
                   style={{ display: 'block', width: '100%', height: '100%' }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setContextMenuPos({ x: e.clientX, y: e.clientY });
+                  }}
                 >
                   <defs>
                     <pattern id="dot-grid-snap" width={20} height={20} patternUnits="userSpaceOnUse">
-                      <circle cx={2} cy={2} r={1} fill="var(--canvas-dot-color, rgba(100, 116, 139, 0.25))" />
+                      <circle cx={2} cy={2} r={1.2} fill={gridColors.dot} />
                     </pattern>
-                    <marker id="snap-arrowhead" markerWidth={10} markerHeight={7} refX={9} refY="3.5" orient="auto">
-                      <polygon points="0 0, 10 3.5, 0 7" fill="var(--canvas-edge-stroke, #64748b)" />
+                    <pattern id="line-grid-snap" width={20} height={20} patternUnits="userSpaceOnUse">
+                      <path d="M 20 0 L 0 0 0 20" fill="none" stroke={gridColors.line} strokeWidth="1" />
+                    </pattern>
+                    <marker id="snap-arrowhead" markerWidth={9} markerHeight={7} refX={7.5} refY={3.5} orient="auto">
+                      <polygon points="1 1, 7.5 3.5, 1 6" fill="var(--canvas-edge-stroke, #64748b)" />
                     </marker>
                   </defs>
-                  <rect width="100%" height="100%" fill="url(#dot-grid-snap)" />
+                  <rect width="100%" height="100%" fill={canvasBgColor || 'transparent'} />
+                  <rect width="100%" height="100%" fill={canvasGrid === 'none' ? 'transparent' : canvasGrid === 'lines' ? 'url(#line-grid-snap)' : 'url(#dot-grid-snap)'} />
 
                   <g transform={`translate(${panOffset.x}, ${panOffset.y}) scale(${zoomLevel})`}>
                     {/* 1. Measurement Indicator Lines (Parent Latent to Indicator) */}
-                    {displayNodes.filter((n: any) => !n.isLatent && n.parentId).map((indNode: any) => {
-                      const parentNode = displayNodes.find((n: any) => n.id === indNode.parentId);
-                      if (!parentNode) return null;
-                      const isFormative = parentNode.type === 'formative';
-                      const x1 = isFormative ? indNode.x : parentNode.x;
-                      const y1 = isFormative ? indNode.y : parentNode.y;
-                      const x2 = isFormative ? parentNode.x : indNode.x;
-                      const y2 = isFormative ? parentNode.y : indNode.y;
-                      return (
-                        <g key={`ind-link-${indNode.id}`}>
-                          <line
-                            x1={x1}
-                            y1={y1}
-                            x2={x2}
-                            y2={y2}
-                            stroke="var(--canvas-edge-stroke, #64748b)"
-                            strokeWidth="1.5"
-                            markerEnd="url(#snap-arrowhead)"
-                          />
-                        </g>
-                      );
-                    })}
+                    {displayNodes
+                      .filter((n: any) => !n.isLatent && n.parentId)
+                      .filter((indNode: any) => {
+                        const parentNode = displayNodes.find((n: any) => n.id === indNode.parentId);
+                        return parentNode && !parentNode.indicatorsHidden;
+                      })
+                      .map((indNode: any) => {
+                        const parentNode = displayNodes.find((n: any) => n.id === indNode.parentId);
+                        if (!parentNode) return null;
+                        const isFormative = parentNode.type === 'formative';
+                        const source = isFormative ? indNode : parentNode;
+                        const target = isFormative ? parentNode : indNode;
+
+                        const srcOff = getNodeIntersectionOffset(source, target.x, target.y);
+                        const tgtOff = getNodeIntersectionOffset(target, source.x, source.y);
+                        const x1 = source.x + srcOff.x;
+                        const y1 = source.y + srcOff.y;
+                        const x2 = target.x + tgtOff.x;
+                        const y2 = target.y + tgtOff.y;
+
+                        const indMidX = (x1 + x2) / 2;
+                        const indMidY = (y1 + y2) / 2;
+                        const loading = getOuterLoading(parentNode, indNode);
+                        const pillW = loading !== null ? Math.max(30, loading.toFixed(3).length * 6.5 + 8) : 32;
+                        const pillH = 15;
+
+                        return (
+                          <g key={`ind-link-${indNode.id}`}>
+                            <title>{isFormative ? `${indNode.label} → ${parentNode.label} (Formative weight${loading !== null ? `: ${loading.toFixed(3)}` : ''})` : `${parentNode.label} → ${indNode.label} (Reflective loading${loading !== null ? `: ${loading.toFixed(3)}` : ''})`}</title>
+                            <line
+                              x1={x1}
+                              y1={y1}
+                              x2={x2}
+                              y2={y2}
+                              stroke="var(--canvas-edge-stroke, #64748b)"
+                              strokeWidth="1.5"
+                              markerEnd="url(#snap-arrowhead)"
+                            />
+                            {loading !== null && (
+                              <g transform={`translate(${indMidX}, ${indMidY})`} pointerEvents="none">
+                                <rect
+                                  x={-pillW / 2}
+                                  y={-pillH / 2}
+                                  width={pillW}
+                                  height={pillH}
+                                  rx="3"
+                                  fill="var(--canvas-badge-bg, #ffffff)"
+                                  stroke="var(--canvas-badge-border, #cbd5e1)"
+                                  strokeWidth="0.75"
+                                />
+                                <text
+                                  textAnchor="middle"
+                                  dominantBaseline="central"
+                                  fontSize="9.5"
+                                  fontFamily="var(--font-mono, monospace)"
+                                  fontWeight="500"
+                                  fill="var(--canvas-badge-text, #0f172a)"
+                                >
+                                  {loading.toFixed(3)}
+                                </text>
+                              </g>
+                            )}
+                          </g>
+                        );
+                      })}
 
                     {/* 2. Structural Paths (Latent to Latent Edges) */}
                     {layout?.edges?.map((edge: any) => {
@@ -1886,49 +2834,67 @@ export const SnapshotView: React.FC = () => {
                       const tgtNode = displayNodes.find((n: any) => n.id === edge.targetId);
                       if (!srcNode || !tgtNode) return null;
 
-                      const x1 = srcNode.x;
-                      const y1 = srcNode.y;
-                      const x2 = tgtNode.x;
-                      const y2 = tgtNode.y;
-                      const midX = (x1 + x2) / 2;
-                      const midY = (y1 + y2) / 2;
+                      const srcOff = getNodeIntersectionOffset(srcNode, tgtNode.x, tgtNode.y);
+                      const tgtOff = getNodeIntersectionOffset(tgtNode, srcNode.x, srcNode.y);
+                      const x1 = srcNode.x + srcOff.x;
+                      const y1 = srcNode.y + srcOff.y;
+                      const x2 = tgtNode.x + tgtOff.x;
+                      const y2 = tgtNode.y + tgtOff.y;
 
-                      // Find beta coefficient if structural
-                      const beta = results?.structural?.path_coefficients?.[tgtNode.label]?.[srcNode.label] ??
-                        results?.structural?.path_coefficients?.[tgtNode.id]?.[srcNode.id];
+                      let d = `M ${x1} ${y1}`;
+                      let midX = (x1 + x2) / 2;
+                      let midY = (y1 + y2) / 2;
+
+                      if (edge.curved) {
+                        const mx = (x1 + x2) / 2;
+                        const my = (y1 + y2) / 2;
+                        const dx = x2 - x1;
+                        const dy = y2 - y1;
+                        const len = Math.hypot(dx, dy) || 1;
+                        const cx = mx + (-dy / len) * 40;
+                        const cy = my + (dx / len) * 40;
+                        d += ` Q ${cx} ${cy} ${x2} ${y2}`;
+                        midX = 0.25 * x1 + 0.5 * cx + 0.25 * x2;
+                        midY = 0.25 * y1 + 0.5 * cy + 0.25 * y2;
+                      } else {
+                        d += ` L ${x2} ${y2}`;
+                      }
+
+                      const coef = getPathCoefficient(srcNode, tgtNode);
+                      const pillW = coef !== null ? Math.max(34, coef.toFixed(3).length * 7.5 + 10) : 34;
+                      const pillH = 18;
 
                       return (
                         <g key={edge.id || `${edge.sourceId}-${edge.targetId}`}>
-                          <line
-                            x1={x1}
-                            y1={y1}
-                            x2={x2}
-                            y2={y2}
+                          <title>{srcNode.label} → {tgtNode.label}{coef !== null ? ` (Path Coefficient β = ${coef.toFixed(3)})` : ''}</title>
+                          <path
+                            d={d}
+                            fill="none"
                             stroke="var(--canvas-edge-stroke, #64748b)"
-                            strokeWidth="1.8"
+                            strokeWidth="2"
                             markerEnd="url(#snap-arrowhead)"
                           />
-                          {beta !== undefined && (
-                            <g transform={`translate(${midX}, ${midY - 8})`}>
+                          {coef !== null && (
+                            <g transform={`translate(${midX}, ${midY})`} pointerEvents="none">
                               <rect
-                                x="-22"
-                                y="-10"
-                                width="44"
-                                height="18"
+                                x={-pillW / 2}
+                                y={-pillH / 2}
+                                width={pillW}
+                                height={pillH}
                                 rx="4"
                                 fill="var(--canvas-badge-bg, #ffffff)"
                                 stroke="var(--canvas-badge-border, #cbd5e1)"
                                 strokeWidth="1"
                               />
                               <text
-                                x="0"
-                                y="3"
                                 textAnchor="middle"
-                                fontSize="11"
+                                dominantBaseline="central"
+                                fontSize="10.5"
+                                fontFamily="var(--font-mono, monospace)"
                                 fontWeight="600"
-                                fill="var(--color-accent, #6366f1)"
+                                fill="var(--canvas-badge-text, #0f172a)"
                               >
-                                {fmt(beta, 3)}
+                                {coef.toFixed(3)}
                               </text>
                             </g>
                           )}
@@ -1937,104 +2903,274 @@ export const SnapshotView: React.FC = () => {
                     })}
 
                     {/* 3. Nodes */}
-                    {displayNodes.map((node: any) => {
-                      const isLatent = node.isLatent !== false && !node.isText;
-                      const isText = !!node.isText;
-                      const r2 = results?.structural?.r_squared?.[node.label] ?? results?.structural?.r_squared?.[node.id];
+                    {displayNodes
+                      .filter((node: any) => {
+                        if (!node.isLatent && node.parentId) {
+                          const parent = displayNodes.find((p: any) => p.id === node.parentId);
+                          if (parent && parent.indicatorsHidden) return false;
+                        }
+                        return true;
+                      })
+                      .map((node: any) => {
+                        const isLatent = node.isLatent !== false && !node.isText;
+                        const isText = !!node.isText;
+                        const r2 = results?.structural?.r_squared?.[node.label] ?? results?.structural?.r_squared?.[node.id] ?? results?.r_squared?.[node.label];
 
-                      if (isText) {
-                        return (
-                          <g
-                            key={node.id}
-                            transform={`translate(${node.x}, ${node.y})`}
-                            onMouseDown={(e) => handleNodeMouseDown(e, node.id)}
-                            style={{ cursor: 'move', pointerEvents: 'all' }}
-                          >
-                            <text
-                              fontSize={node.fontSize || 13}
-                              fill="var(--color-text-primary)"
-                              style={{ userSelect: 'none' }}
+                        if (isText) {
+                          return (
+                            <g
+                              key={node.id}
+                              transform={`translate(${node.x}, ${node.y})`}
+                              onMouseDown={(e) => handleNodeMouseDown(e, node.id)}
+                              style={{ cursor: 'move', pointerEvents: 'all' }}
                             >
-                              {node.label || node.text}
-                            </text>
-                          </g>
-                        );
-                      }
-
-                      if (isLatent) {
-                        return (
-                          <g
-                            key={node.id}
-                            transform={`translate(${node.x}, ${node.y})`}
-                            onMouseDown={(e) => handleNodeMouseDown(e, node.id)}
-                            style={{ cursor: 'move', pointerEvents: 'all' }}
-                          >
-                            <circle
-                              r={node.r || 36}
-                              fill={node.fill || "var(--canvas-latent-fill, #334155)"}
-                              stroke={node.stroke || "var(--canvas-latent-stroke, #1e293b)"}
-                              strokeWidth="2"
-                            />
-                            <text
-                              textAnchor="middle"
-                              y={r2 !== undefined ? -4 : 4}
-                              fontSize="12"
-                              fontWeight="600"
-                              fill={node.textColor || "var(--canvas-latent-text, #ffffff)"}
-                              style={{ userSelect: 'none' }}
-                            >
-                              {node.label}
-                            </text>
-                            {r2 !== undefined && (
+                              <title>Text Note: {node.label || node.text}</title>
                               <text
-                                textAnchor="middle"
-                                y="14"
-                                fontSize="10"
-                                fontWeight="500"
-                                fill="var(--color-accent, #6366f1)"
+                                fontSize={node.fontSize || 13}
+                                fill="var(--color-text-primary)"
                                 style={{ userSelect: 'none' }}
                               >
-                                R² = {fmt(r2, 3)}
+                                {node.label || node.text}
+                              </text>
+                            </g>
+                          );
+                        }
+
+                        if (isLatent) {
+                          return (
+                            <g
+                              key={node.id}
+                              transform={`translate(${node.x}, ${node.y})`}
+                              onMouseDown={(e) => handleNodeMouseDown(e, node.id)}
+                              onContextMenu={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setHoveredLatent(null);
+                                setContextMenuPos({ x: e.clientX, y: e.clientY, targetNodeId: node.id });
+                              }}
+                              onPointerEnter={() => {
+                                const r2Val = results?.structural?.r_squared?.[node.label] ?? results?.structural?.r_squared?.[node.id] ?? results?.r_squared?.[node.label];
+                                const r2AdjVal = results?.structural?.r_squared_adj?.[node.label] ?? results?.structural?.r_squared_adj?.[node.id] ?? results?.r_squared_adj?.[node.label];
+                                const rel = results?.reliability_and_validity || {};
+                                const crVal = rel.composite_reliability?.[node.label] ?? results?.composite_reliability?.[node.label];
+                                const aveVal = rel.ave?.[node.label] ?? results?.ave?.[node.label];
+                                const alphaVal = rel.cronbachs_alpha?.[node.label] ?? results?.cronbachs_alpha?.[node.label];
+
+                                const screenX = panOffset.x + node.x * zoomLevel;
+                                const screenY = panOffset.y + (node.y - (node.r || 36)) * zoomLevel;
+
+                                setHoveredLatent({
+                                  name: node.label,
+                                  r2: (r2Val !== undefined && r2Val !== null && !isNaN(Number(r2Val))) ? Number(r2Val) : null,
+                                  r2Adj: (r2AdjVal !== undefined && r2AdjVal !== null && !isNaN(Number(r2AdjVal))) ? Number(r2AdjVal) : null,
+                                  cr: (crVal !== undefined && crVal !== null && !isNaN(Number(crVal))) ? Number(crVal) : null,
+                                  ave: (aveVal !== undefined && aveVal !== null && !isNaN(Number(aveVal))) ? Number(aveVal) : null,
+                                  alpha: (alphaVal !== undefined && alphaVal !== null && !isNaN(Number(alphaVal))) ? Number(alphaVal) : null,
+                                  x: screenX,
+                                  y: screenY,
+                                });
+                              }}
+                              onPointerLeave={() => setHoveredLatent(null)}
+                              style={{ cursor: 'move', pointerEvents: 'all' }}
+                            >
+                              <title>{node.label} ({node.type === 'formative' ? 'Formative' : 'Reflective'} Construct{r2 !== undefined ? `, R² = ${fmt(r2, 3)}` : ''})</title>
+                              <circle
+                                r={node.r || 36}
+                                fill={node.fill || "var(--canvas-latent-fill, #334155)"}
+                                stroke={node.stroke || "var(--canvas-latent-stroke, #1e293b)"}
+                                strokeWidth="2"
+                              />
+                              {node.textInside ? (
+                                <>
+                                  <text
+                                    textAnchor="middle"
+                                    y={r2 !== undefined ? -4 : 4}
+                                    fontSize="12"
+                                    fontWeight="600"
+                                    fill={node.textColor || "var(--canvas-latent-text, #ffffff)"}
+                                    style={{ userSelect: 'none' }}
+                                  >
+                                    {node.label}
+                                  </text>
+                                  {r2 !== undefined && (
+                                    <text
+                                      textAnchor="middle"
+                                      y="14"
+                                      fontSize="10"
+                                      fontWeight="500"
+                                      fill="var(--color-accent, #6366f1)"
+                                      style={{ userSelect: 'none' }}
+                                    >
+                                      R² = {fmt(r2, 3)}
+                                    </text>
+                                  )}
+                                </>
+                              ) : (
+                                <>
+                                  <text
+                                    textAnchor="middle"
+                                    y={(node.r || 36) + 18}
+                                    fontSize="12"
+                                    fontWeight="600"
+                                    fill="var(--color-text-primary, #0f172a)"
+                                    style={{ userSelect: 'none' }}
+                                  >
+                                    {node.label}
+                                  </text>
+                                  {r2 !== undefined && (
+                                    <text
+                                      textAnchor="middle"
+                                      y="4"
+                                      fontSize="11"
+                                      fontWeight="600"
+                                      fill="var(--color-accent, #6366f1)"
+                                      style={{ userSelect: 'none' }}
+                                    >
+                                      R² = {fmt(r2, 3)}
+                                    </text>
+                                  )}
+                                </>
+                              )}
+
+                              {/* If indicators are hidden, render a clean purple eye icon beside the label */}
+                              {node.indicatorsHidden && (() => {
+                                const childInds = displayNodes.filter((n: any) => n.parentId === node.id && !n.isLatent);
+                                if (childInds.length === 0) return null;
+                                const labelLen = (node.label || '').length * 8;
+                                const eyeX = (labelLen / 2) + 12;
+                                const eyeY = node.textInside ? (r2 !== undefined ? -4 : 4) : ((node.r || 36) + 18);
+                                return (
+                                  <g
+                                    className="canvas-hidden-indicators-icon-btn"
+                                    transform={`translate(${eyeX}, ${eyeY - 9})`}
+                                    style={{ cursor: 'pointer', pointerEvents: 'all' }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setLayoutNodes(prev => prev.map(n => n.id === node.id ? { ...n, indicatorsHidden: false } : n));
+                                      setToastMsg('Indicators visible');
+                                      setTimeout(() => setToastMsg(null), 2000);
+                                    }}
+                                  >
+                                    <title>{childInds.length} indicators hidden. Click to show.</title>
+                                    <rect x="-4" y="-3" width="24" height="20" fill="transparent" />
+                                    <g transform="scale(0.7) translate(-2, 0)">
+                                      <path
+                                        d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"
+                                        fill="var(--color-accent, #6B4EE6)"
+                                        fillRule="evenodd"
+                                      />
+                                    </g>
+                                  </g>
+                                );
+                              })()}
+                            </g>
+                          );
+                        }
+
+                        // Indicator (Manifest variable)
+                        const parentNode = displayNodes.find((n: any) => n.id === node.parentId);
+                        const isIndInside = node.textInside !== undefined ? node.textInside : true;
+                        return (
+                          <g
+                            key={node.id}
+                            transform={`translate(${node.x - 35}, ${node.y - 14})`}
+                            onMouseDown={(e) => handleNodeMouseDown(e, node.id)}
+                            onContextMenu={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setHoveredLatent(null);
+                              setContextMenuPos({ x: e.clientX, y: e.clientY, targetNodeId: node.id });
+                            }}
+                            style={{ cursor: 'move', pointerEvents: 'all' }}
+                          >
+                            <title>{node.label} (Indicator of {parentNode?.label || 'construct'})</title>
+                            <rect
+                              width="70"
+                              height="28"
+                              rx="4"
+                              fill={node.fill || "var(--canvas-manifest-fill, #fef08a)"}
+                              stroke={node.stroke || "var(--canvas-manifest-stroke, #ca8a04)"}
+                              strokeWidth="1.5"
+                            />
+                            {isIndInside ? (
+                              <text
+                                x="35"
+                                y="18"
+                                textAnchor="middle"
+                                fontSize="11"
+                                fontWeight="500"
+                                fill={node.textColor || "var(--canvas-manifest-text, #422006)"}
+                                style={{ userSelect: 'none' }}
+                              >
+                                {node.label}
+                              </text>
+                            ) : (
+                              <text
+                                x="35"
+                                y="42"
+                                textAnchor="middle"
+                                fontSize="11"
+                                fontWeight="500"
+                                fill="var(--color-text-primary, #0f172a)"
+                                style={{ userSelect: 'none' }}
+                              >
+                                {node.label}
                               </text>
                             )}
                           </g>
                         );
-                      }
-
-                      // Indicator (Manifest variable)
-                      return (
-                        <g
-                          key={node.id}
-                          transform={`translate(${node.x - 35}, ${node.y - 14})`}
-                          onMouseDown={(e) => handleNodeMouseDown(e, node.id)}
-                          style={{ cursor: 'move', pointerEvents: 'all' }}
-                        >
-                          <rect
-                            width="70"
-                            height="28"
-                            rx="4"
-                            fill={node.fill || "var(--canvas-manifest-fill, #fef08a)"}
-                            stroke={node.stroke || "var(--canvas-manifest-stroke, #ca8a04)"}
-                            strokeWidth="1.5"
-                          />
-                          <text
-                            x="35"
-                            y="18"
-                            textAnchor="middle"
-                            fontSize="11"
-                            fontWeight="500"
-                            fill={node.textColor || "var(--canvas-manifest-text, #422006)"}
-                            style={{ userSelect: 'none' }}
-                          >
-                            {node.label}
-                          </text>
-                        </g>
-                      );
-                    })}
+                      })}
                   </g>
                 </svg>
               );
             })()}
+
+            {/* Hovered Latent Variable Metrics Popup matching model-canvas */}
+            {hoveredLatent && (
+              <div
+                className="canvas-latent-popup visible"
+                style={{
+                  position: 'absolute',
+                  left: `${hoveredLatent.x}px`,
+                  top: `${hoveredLatent.y - 8}px`,
+                  transform: 'translate(-50%, -100%) scale(1)',
+                  display: 'block',
+                  zIndex: 9000,
+                  pointerEvents: 'none'
+                }}
+              >
+                <div className="canvas-latent-popup__header">
+                  <span className="canvas-latent-popup__badge">LATENT</span>
+                  <span className="canvas-latent-popup__title">{hoveredLatent.name}</span>
+                </div>
+                <div className="canvas-latent-popup__grid">
+                  {hoveredLatent.r2 !== null && (
+                    <>
+                      <div className="canvas-latent-popup__item">
+                        <span className="canvas-latent-popup__label">R²</span>
+                        <span className="canvas-latent-popup__val highlight">{hoveredLatent.r2.toFixed(4)}</span>
+                      </div>
+                      <div className="canvas-latent-popup__item">
+                        <span className="canvas-latent-popup__label">R² Adjusted</span>
+                        <span className="canvas-latent-popup__val">{hoveredLatent.r2Adj !== null ? hoveredLatent.r2Adj.toFixed(4) : '—'}</span>
+                      </div>
+                    </>
+                  )}
+                  <div className="canvas-latent-popup__item">
+                    <span className="canvas-latent-popup__label">Composite Reliability</span>
+                    <span className="canvas-latent-popup__val">{hoveredLatent.cr !== null ? hoveredLatent.cr.toFixed(4) : '—'}</span>
+                  </div>
+                  <div className="canvas-latent-popup__item">
+                    <span className="canvas-latent-popup__label">Avg Variance Extracted</span>
+                    <span className="canvas-latent-popup__val">{hoveredLatent.ave !== null ? hoveredLatent.ave.toFixed(4) : '—'}</span>
+                  </div>
+                  <div className="canvas-latent-popup__item">
+                    <span className="canvas-latent-popup__label">Cronbach's Alpha (α)</span>
+                    <span className="canvas-latent-popup__val">{hoveredLatent.alpha !== null ? hoveredLatent.alpha.toFixed(4) : '—'}</span>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
