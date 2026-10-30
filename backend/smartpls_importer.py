@@ -160,19 +160,37 @@ def convert_smartpls_model(splsm_dict: Dict[str, Any]) -> Tuple[Dict[str, Any], 
             })
 
     # 2. Convert Connections
+    conn_by_id = {c.get("id"): c for c in splsm_dict.get("connections", []) if c.get("id")}
+    moderating_effects = []
+
     for conn in splsm_dict.get("connections", []):
         ctype = conn.get("modelType")
         cid = conn.get("id") or f"edge_{len(edges)}"
         sid = conn.get("sourceId")
         tid = conn.get("targetId")
 
-        if ctype in ("CONNECTION_BETWEEN_LV_AND_LV", "CONNECTION_FOR_PLS_MODERATION"):
+        if ctype == "CONNECTION_BETWEEN_LV_AND_LV":
             if sid and tid:
                 edges.append({
                     "id": cid,
                     "sourceId": sid,
                     "targetId": tid,
                 })
+        elif ctype == "CONNECTION_FOR_PLS_MODERATION":
+            # sid is moderator construct; tid is target connection ID
+            target_conn = conn_by_id.get(tid)
+            if target_conn and sid:
+                pred_id = target_conn.get("sourceId")
+                out_id = target_conn.get("targetId")
+                if pred_id and out_id:
+                    moderating_effects.append({
+                        "id": cid,
+                        "moderator": sid,
+                        "source": pred_id,
+                        "target": out_id,
+                        "method": "two_stage",
+                        "standardize": True,
+                    })
 
     # 3. Build ModelSpec
     latent_nodes = [n for n in nodes if n.get("isLatent") is True]
@@ -203,11 +221,13 @@ def convert_smartpls_model(splsm_dict: Dict[str, Any]) -> Tuple[Dict[str, Any], 
         "constructs": constructs,
         "indicators": indicators,
         "paths": paths,
+        "moderating_effects": moderating_effects,
     }
 
     diagram_layout = {
         "nodes": nodes,
         "edges": edges,
+        "moderating_effects": moderating_effects,
         "transform": {"x": 0, "y": 0, "k": 1},
     }
 

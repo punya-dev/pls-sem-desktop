@@ -478,20 +478,87 @@ export const SnapshotView: React.FC = () => {
     }
   }, [activeResultTab, snapshot?.name]);
 
+  const isInteractionConstruct = (cid: string): boolean => {
+    if (!cid) return false;
+    if (cid.includes(' x ')) return true;
+    if (Array.isArray(results?.latent_variables)) {
+      const lv = results.latent_variables.find((v: any) => v.id === cid || v.name === cid);
+      if (lv?.is_interaction) return true;
+    }
+    return false;
+  };
+
+  const getConstructName = (key: string) => {
+    if (!key) return '';
+    if (results?.construct_names?.[key]) return results.construct_names[key];
+    if (key.includes(' x ')) {
+      const parts = key.split(' x ');
+      const mName = results?.construct_names?.[parts[0]] || parts[0];
+      const pName = results?.construct_names?.[parts[1]] || parts[1];
+      return `${mName} x ${pName}`;
+    }
+    return key;
+  };
+
+  const renderConstructLabel = (cid: string) => {
+    const isInt = isInteractionConstruct(cid);
+    const label = getConstructName(cid);
+    return (
+      <div className="construct-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+        <div className="construct-dot" style={{ background: isInt ? '#ec4899' : (constructPalette[cid] || '#6366f1') }} />
+        <span className="construct-name">{label}</span>
+        {isInt && (
+          <span
+            className="interaction-badge"
+            style={{
+              fontSize: '10px',
+              fontWeight: 600,
+              padding: '1px 5px',
+              borderRadius: '4px',
+              background: 'rgba(236, 72, 153, 0.12)',
+              color: '#db2777',
+              border: '1px solid rgba(236, 72, 153, 0.25)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.04em',
+              lineHeight: 1.3,
+            }}
+          >
+            interaction
+          </span>
+        )}
+      </div>
+    );
+  };
+
   const resultConstructs = useMemo(() => {
     if (!results) return [];
-    const struct = results.structural || {};
-    const fromR2 = Object.keys(struct.r_squared || {});
-    const fromPaths: string[] = [];
-    if (struct.path_coefficients) {
-      Object.keys(struct.path_coefficients).forEach(target => {
-        fromPaths.push(target);
-        Object.keys(struct.path_coefficients[target] || {}).forEach(src => fromPaths.push(src));
+    const set = new Set<string>();
+
+    if (Array.isArray(results.latent_variables)) {
+      results.latent_variables.forEach((lv: any) => {
+        if (lv?.id) set.add(String(lv.id));
       });
     }
-    const combined = Array.from(new Set([...fromR2, ...fromPaths]));
-    return combined.sort();
+
+    const struct = results.structural || {};
+    Object.keys(struct.r_squared || {}).forEach(c => set.add(c));
+    if (struct.path_coefficients) {
+      Object.keys(struct.path_coefficients).forEach(target => {
+        set.add(target);
+        Object.keys(struct.path_coefficients[target] || {}).forEach(src => set.add(src));
+      });
+    }
+
+    Object.keys(results.measurement?.outer_loadings || {}).forEach(c => set.add(c));
+    Object.keys(results.measurement?.outer_weights || {}).forEach(c => set.add(c));
+    Object.keys(results.construct_scores || {}).forEach(c => set.add(c));
+
+    return Array.from(set).sort();
   }, [results]);
+
+  const targetConstructs = useMemo(() => {
+    return resultConstructs.filter(c => !isInteractionConstruct(c));
+  }, [resultConstructs]);
 
   const constructPalette: Record<string, string> = useMemo(() => {
     const defaultColors = ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6'];
@@ -501,12 +568,6 @@ export const SnapshotView: React.FC = () => {
     });
     return p;
   }, [resultConstructs]);
-
-  const getConstructName = (key: string) => {
-    if (!key) return '';
-    if (results?.construct_names?.[key]) return results.construct_names[key];
-    return key;
-  };
 
   const handleCreateModel = async () => {
     if (!activeStudy?.path || !snapshot?.id) return;
