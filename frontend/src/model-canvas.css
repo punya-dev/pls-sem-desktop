@@ -511,6 +511,20 @@
   color: var(--color-text-secondary);
 }
 
+.tb-dropdown-item.active-edge-option {
+  background: var(--color-accent-subtle) !important;
+  color: var(--color-accent) !important;
+  border-color: var(--color-accent) !important;
+}
+
+.tb-dropdown-item.active-edge-option .edge-stroke-preview {
+  stroke: var(--color-accent) !important;
+}
+
+.tb-dropdown-item.active-edge-option .edge-fill-preview {
+  fill: var(--color-accent) !important;
+}
+
 /* ─── Zoom HUD (bottom-right) ────────────────────────────────────────────── */
 
 .canvas-hud {

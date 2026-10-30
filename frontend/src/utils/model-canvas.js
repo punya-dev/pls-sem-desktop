@@ -693,7 +693,7 @@ export function initModelCanvas() {
     input.style.boxShadow = 'none';
     input.style.padding = '0';
     input.style.margin = '0';
-    input.style.textAlign = 'center';
+    input.style.textAlign = node.isText ? (node.textAlign === 'left' ? 'left' : (node.textAlign === 'right' ? 'right' : (node.textAlign === 'justify' ? 'justify' : 'center'))) : 'center';
     input.style.lineHeight = '1';
     input.style.caretColor = 'var(--color-accent, #6B4EE6)';
 
@@ -1122,6 +1122,42 @@ export function initModelCanvas() {
     }
   }, { signal });
 
+  document.addEventListener('border-weight-change', (e) => {
+    const weight = e.detail?.weight;
+    if (weight !== undefined) {
+      nodes.filter(n => selectedIds.has(n.id)).forEach(n => {
+        n.strokeWidth = weight;
+      });
+      render();
+      pushHistory();
+      window.dispatchEvent(new CustomEvent('canvas-changed'));
+    }
+  }, { signal });
+
+  document.addEventListener('textbox-align-change', (e) => {
+    const align = e.detail?.align;
+    if (align) {
+      nodes.filter(n => selectedIds.has(n.id) && n.isText).forEach(n => {
+        n.textAlign = align;
+      });
+      render();
+      pushHistory();
+      window.dispatchEvent(new CustomEvent('canvas-changed'));
+    }
+  }, { signal });
+
+  document.addEventListener('textbox-valign-change', (e) => {
+    const valign = e.detail?.valign;
+    if (valign) {
+      nodes.filter(n => selectedIds.has(n.id) && n.isText).forEach(n => {
+        n.verticalAlign = valign;
+      });
+      render();
+      pushHistory();
+      window.dispatchEvent(new CustomEvent('canvas-changed'));
+    }
+  }, { signal });
+
   // Alignment, Style, and Text Format Dropdown Actions
   document.addEventListener('click', (e) => {
     // Handle item clicks globally
@@ -1200,9 +1236,12 @@ export function initModelCanvas() {
           window.dispatchEvent(new CustomEvent('canvas-changed'));
         }
         
-        // Edge styling
+        // Edge styling (structural, moderation, and indicator edges)
         else if (action.startsWith('arrowhead-')) {
-          edges.filter(edge => selectedIds.has(edge.id)).forEach(edge => edge.arrowhead = action.replace('arrowhead-', ''));
+          const arrowType = action.replace('arrowhead-', '');
+          edges.filter(edge => selectedIds.has(edge.id)).forEach(edge => edge.arrowhead = arrowType);
+          moderatingEffects.filter(m => selectedIds.has(m.id)).forEach(m => m.arrowhead = arrowType);
+          nodes.filter(n => selectedIds.has(`edge_ind_${n.id}`)).forEach(n => n.edgeArrowhead = arrowType);
           render();
           pushHistory();
           window.dispatchEvent(new CustomEvent('canvas-changed'));
@@ -1218,11 +1257,34 @@ export function initModelCanvas() {
               edge.curved = true;
             }
           });
+          moderatingEffects.filter(m => selectedIds.has(m.id)).forEach(m => {
+            m.curved = false;
+            if (style === 'solid') m.strokeDasharray = '';
+            if (style === 'dashed') m.strokeDasharray = '8 8';
+            if (style === 'dotted') m.strokeDasharray = '2 4';
+            if (style === 'curved') {
+              m.strokeDasharray = '';
+              m.curved = true;
+            }
+          });
+          nodes.filter(n => selectedIds.has(`edge_ind_${n.id}`)).forEach(n => {
+            n.edgeCurved = false;
+            if (style === 'solid') n.edgeStrokeDasharray = '';
+            if (style === 'dashed') n.edgeStrokeDasharray = '8 8';
+            if (style === 'dotted') n.edgeStrokeDasharray = '2 4';
+            if (style === 'curved') {
+              n.edgeStrokeDasharray = '';
+              n.edgeCurved = true;
+            }
+          });
           render();
           pushHistory();
           window.dispatchEvent(new CustomEvent('canvas-changed'));
         } else if (action.startsWith('weight-')) {
-          edges.filter(edge => selectedIds.has(edge.id)).forEach(edge => edge.strokeWidth = parseFloat(action.replace('weight-', '')));
+          const w = parseFloat(action.replace('weight-', ''));
+          edges.filter(edge => selectedIds.has(edge.id)).forEach(edge => edge.strokeWidth = w);
+          moderatingEffects.filter(m => selectedIds.has(m.id)).forEach(m => m.strokeWidth = w);
+          nodes.filter(n => selectedIds.has(`edge_ind_${n.id}`)).forEach(n => n.edgeStrokeWidth = w);
           render();
           pushHistory();
           window.dispatchEvent(new CustomEvent('canvas-changed'));
@@ -1548,7 +1610,7 @@ export function initModelCanvas() {
       fill = node.fill || defaultFill;
       stroke = node.stroke || defaultStroke;
     }
-    let strokeW = '1.5';
+    let strokeW = node.strokeWidth !== undefined ? String(node.strokeWidth) : '1.5';
     let el;
     
     if (shape === 'rect') {
@@ -1594,6 +1656,7 @@ export function initModelCanvas() {
       el.setAttribute('stroke', isSelected ? 'var(--color-accent)' : stroke);
       el.style.stroke = isSelected ? 'var(--color-accent)' : stroke;
       el.setAttribute('stroke-width', strokeW);
+      el.style.strokeWidth = strokeW;
     }
     return el;
   }
@@ -2786,10 +2849,44 @@ export function initModelCanvas() {
         // Text Note Rendering
         const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         text.textContent = node.label;
-        text.setAttribute('text-anchor', 'middle');
-        text.setAttribute('dominant-baseline', 'central');
+
+        const textAlign = node.textAlign || 'center';
+        const verticalAlign = node.verticalAlign || 'middle';
+        const padX = 8;
+        const padY = 8;
+
+        if (textAlign === 'left') {
+          text.setAttribute('x', -rectBox.width / 2 + padX);
+          text.setAttribute('text-anchor', 'start');
+        } else if (textAlign === 'right') {
+          text.setAttribute('x', rectBox.width / 2 - padX);
+          text.setAttribute('text-anchor', 'end');
+        } else if (textAlign === 'justify') {
+          text.setAttribute('x', -rectBox.width / 2 + padX);
+          text.setAttribute('text-anchor', 'start');
+          text.setAttribute('textLength', Math.max(10, rectBox.width - padX * 2));
+          text.setAttribute('lengthAdjust', 'spacing');
+        } else {
+          // center
+          text.setAttribute('x', '0');
+          text.setAttribute('text-anchor', 'middle');
+        }
+
+        const fontSizeNum = Number(node.fontSize) || 14;
+        if (verticalAlign === 'top') {
+          text.setAttribute('y', -rectBox.height / 2 + padY + fontSizeNum * 0.85);
+          text.setAttribute('dominant-baseline', 'alphabetic');
+        } else if (verticalAlign === 'bottom') {
+          text.setAttribute('y', rectBox.height / 2 - padY);
+          text.setAttribute('dominant-baseline', 'alphabetic');
+        } else {
+          // middle
+          text.setAttribute('y', '0');
+          text.setAttribute('dominant-baseline', 'central');
+        }
+
         text.setAttribute('fill', node.color || 'var(--color-text-primary)');
-        text.setAttribute('font-size', node.fontSize || '14');
+        text.setAttribute('font-size', String(fontSizeNum));
         if (node.bold) text.setAttribute('font-weight', 'bold');
         if (node.italic) text.setAttribute('font-style', 'italic');
         if (node.underline) text.setAttribute('text-decoration', 'underline');
@@ -2951,19 +3048,36 @@ export function initModelCanvas() {
             const { x1, y1, x2, y2 } = getEdgeCoordinates(source, target, indEdgeObj);
 
             let d = `M ${x1} ${y1}`;
-            if (indEdgeObj.waypoints && indEdgeObj.waypoints.length > 0) {
-              indEdgeObj.waypoints.forEach(wp => {
-                d += ` L ${wp.x} ${wp.y}`;
-              });
+            if (node.edgeCurved) {
+              const mx = (x1 + x2) / 2;
+              const my = (y1 + y2) / 2;
+              const dx = x2 - x1;
+              const dy = y2 - y1;
+              const len = Math.sqrt(dx*dx + dy*dy) || 1;
+              const cx = mx + (-dy / len) * 30;
+              const cy = my + (dx / len) * 30;
+              d += ` Q ${cx} ${cy} ${x2} ${y2}`;
+            } else {
+              if (indEdgeObj.waypoints && indEdgeObj.waypoints.length > 0) {
+                indEdgeObj.waypoints.forEach(wp => {
+                  d += ` L ${wp.x} ${wp.y}`;
+                });
+              }
+              d += ` L ${x2} ${y2}`;
             }
-            d += ` L ${x2} ${y2}`;
 
             const isIndEdgeSelected = selectedIds.has(indEdgeId) || isSelected;
             const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
             path.setAttribute('d', d);
             path.setAttribute('stroke', isIndEdgeSelected ? 'var(--color-accent, #6B4EE6)' : 'var(--canvas-edge-stroke)');
-            path.setAttribute('stroke-width', '1.5');
-            path.setAttribute('marker-end', isIndEdgeSelected ? 'url(#arrow-solid-selected)' : 'url(#arrow-solid)');
+            path.setAttribute('stroke-width', node.edgeStrokeWidth || '1.5');
+            if (node.edgeStrokeDasharray) {
+              path.style.strokeDasharray = node.edgeStrokeDasharray;
+            }
+            const indArrow = node.edgeArrowhead || 'solid';
+            if (indArrow !== 'none') {
+              path.setAttribute('marker-end', isIndEdgeSelected ? `url(#arrow-${indArrow}-selected)` : `url(#arrow-${indArrow})`);
+            }
             path.style.fill = 'none';
             edgesLayer.appendChild(path);
 
@@ -3106,6 +3220,7 @@ export function initModelCanvas() {
     const edgeFormattingTools = document.getElementById('edge-formatting-tools');
     const formattingDivider = document.getElementById('formatting-divider');
     const containerAlign = document.getElementById('container-align');
+    const containerTextboxAlign = document.getElementById('container-textbox-align');
     const containerStyle = document.getElementById('container-style');
     const containerColors = document.getElementById('container-colors');
     const containerText = document.getElementById('container-text');
@@ -3125,18 +3240,21 @@ export function initModelCanvas() {
         if (selectedNode.isLatent && !selectedNode.isText) {
           // Latent Variable selected: extend toolbar with Align, Style/Shape, Colors, Typography
           if (containerAlign) containerAlign.style.display = 'block';
+          if (containerTextboxAlign) containerTextboxAlign.style.display = 'none';
           if (containerStyle) containerStyle.style.display = 'block';
           if (containerColors) containerColors.style.display = 'block';
           if (containerText) containerText.style.display = 'block';
         } else if (selectedNode.isText) {
-          // Text Note selected: extend toolbar with Align, Colors, Typography (hide shape)
-          if (containerAlign) containerAlign.style.display = 'block';
+          // Text Note selected: hide indicator align, show textbox text align, hide shape
+          if (containerAlign) containerAlign.style.display = 'none';
+          if (containerTextboxAlign) containerTextboxAlign.style.display = 'block';
           if (containerStyle) containerStyle.style.display = 'none';
           if (containerColors) containerColors.style.display = 'block';
           if (containerText) containerText.style.display = 'block';
         } else {
           // Indicator selected: extend toolbar with Align, Colors, Typography (hide shape)
           if (containerAlign) containerAlign.style.display = 'block';
+          if (containerTextboxAlign) containerTextboxAlign.style.display = 'none';
           if (containerStyle) containerStyle.style.display = 'none';
           if (containerColors) containerColors.style.display = 'block';
           if (containerText) containerText.style.display = 'block';
@@ -3146,7 +3264,8 @@ export function initModelCanvas() {
         const pickerBorder = document.getElementById('picker-border');
         const pickerText = document.getElementById('picker-text');
         const inputFont = document.getElementById('input-font-size');
-        const btnTextInside = document.querySelector('.tb-dropdown-item[data-action="text-inside"]');
+        const rowTextInside = document.getElementById('row-text-inside');
+        const textInsideLabel = document.getElementById('text-inside-label');
         
         if (pickerFill) {
           let defFill = '#334155';
@@ -3163,12 +3282,14 @@ export function initModelCanvas() {
         if (pickerText) pickerText.value = selectedNode.color || '#1e293b';
         if (inputFont) inputFont.value = selectedNode.fontSize || 14;
         
-        if (btnTextInside) {
+        if (rowTextInside) {
           if (selectedNode.isLatent !== false && !selectedNode.isText) {
-            btnTextInside.style.display = 'flex';
-            btnTextInside.innerHTML = `<span class="material-symbols-outlined">vertical_align_center</span> ${selectedNode.labelInside ? 'Move Outside' : 'Move Inside'}`;
+            rowTextInside.style.display = 'block';
+            if (textInsideLabel) {
+              textInsideLabel.textContent = selectedNode.labelInside ? 'Move Outside' : 'Move Inside';
+            }
           } else {
-            btnTextInside.style.display = 'none';
+            rowTextInside.style.display = 'none';
           }
         }
         
@@ -3200,51 +3321,49 @@ export function initModelCanvas() {
         if (window.syncColorPickers) {
           window.syncColorPickers(pickerFill?.value, pickerBorder?.value, pickerText?.value);
         }
+        document.dispatchEvent(new CustomEvent('selectionChange'));
       } else if (selectedEdge) {
         if (formattingDivider) formattingDivider.style.display = 'block';
         if (nodeFormattingTools) nodeFormattingTools.style.display = 'none';
         if (edgeFormattingTools) edgeFormattingTools.style.display = 'flex';
         
         // Update active states
-        const activeStyle = selectedEdge.curved ? 'curved' : (selectedEdge.strokeDasharray === '8 8' ? 'dashed' : (selectedEdge.strokeDasharray === '2 4' ? 'dotted' : 'solid'));
-        const activeArrowhead = selectedEdge.arrowhead || 'solid';
+        let activeStyle = 'solid';
+        let activeArrowhead = 'solid';
+        if (selectedId.startsWith('edge_ind_')) {
+          const indNode = nodes.find(n => `edge_ind_${n.id}` === selectedId);
+          if (indNode) {
+            activeStyle = indNode.edgeCurved ? 'curved' : (indNode.edgeStrokeDasharray === '8 8' ? 'dashed' : (indNode.edgeStrokeDasharray === '2 4' ? 'dotted' : 'solid'));
+            activeArrowhead = indNode.edgeArrowhead || 'solid';
+          }
+        } else if (selectedEdge.source && selectedEdge.target) {
+          activeStyle = selectedEdge.curved ? 'curved' : (selectedEdge.strokeDasharray === '8 8' ? 'dashed' : (selectedEdge.strokeDasharray === '2 4' ? 'dotted' : (selectedEdge.strokeDasharray === '4 4' ? 'dashed' : 'solid')));
+          activeArrowhead = selectedEdge.arrowhead || 'open';
+        } else {
+          activeStyle = selectedEdge.curved ? 'curved' : (selectedEdge.strokeDasharray === '8 8' ? 'dashed' : (selectedEdge.strokeDasharray === '2 4' ? 'dotted' : 'solid'));
+          activeArrowhead = selectedEdge.arrowhead || 'solid';
+        }
         
         document.querySelectorAll('#edge-formatting-tools .tb-dropdown-item').forEach(item => {
           item.style.background = 'transparent';
           item.style.border = '1px solid transparent';
-          item.style.color = '#334155';
-          const spans = item.querySelectorAll('span');
-          if (spans.length > 0) spans[0].style.color = '#1e293b';
-          if (spans.length > 1) spans[1].style.color = '#64748b';
-          
-          // hide checkmarks
-          const checkmark = item.querySelector('.edge-checkmark');
-          if (checkmark) checkmark.style.display = 'none';
+          item.style.color = 'var(--color-text-primary, #334155)';
         });
 
         const activeLineBtn = document.querySelector(`.tb-dropdown-item[data-edge-action="line-${activeStyle}"]`);
         const activeArrowBtn = document.querySelector(`.tb-dropdown-item[data-edge-action="arrowhead-${activeArrowhead}"]`);
         
         if (activeLineBtn) {
-          activeLineBtn.style.background = '#f5f3ff';
-          activeLineBtn.style.border = '1px solid #ddd6fe';
-          activeLineBtn.style.color = '#4f46e5';
-          const spans = activeLineBtn.querySelectorAll('span');
-          if (spans.length > 0) spans[0].style.color = '#1e1b4b';
-          if (spans.length > 1) spans[1].style.color = '#6366f1';
-          const checkmark = activeLineBtn.querySelector('.edge-checkmark');
-          if (checkmark) checkmark.style.display = 'block';
+          activeLineBtn.style.background = 'var(--color-accent-subtle, #f5f3ff)';
+          activeLineBtn.style.border = '1px solid var(--color-accent, #4f46e5)';
+          activeLineBtn.style.color = 'var(--color-accent, #4f46e5)';
         }
         if (activeArrowBtn) {
-          activeArrowBtn.style.background = '#f5f3ff';
-          activeArrowBtn.style.border = '1px solid #ddd6fe';
-          activeArrowBtn.style.color = '#4f46e5';
-          const spans = activeArrowBtn.querySelectorAll('span');
-          if (spans.length > 0) spans[0].style.color = '#1e1b4b';
-          if (spans.length > 1) spans[1].style.color = '#6366f1';
-          const checkmark = activeArrowBtn.querySelector('.edge-checkmark');
-          if (checkmark) checkmark.style.display = 'block';
+          activeArrowBtn.style.background = 'var(--color-accent-subtle, #f5f3ff)';
+          activeArrowBtn.style.border = '1px solid var(--color-accent, #4f46e5)';
+          activeArrowBtn.style.color = 'var(--color-accent, #4f46e5)';
         }
+        document.dispatchEvent(new CustomEvent('selectionChange'));
       }
     } else if (selectedIds.size > 1) {
       const selectedNodes = nodes.filter(n => selectedIds.has(n.id));
@@ -3253,7 +3372,9 @@ export function initModelCanvas() {
         if (formattingDivider) formattingDivider.style.display = 'block';
         if (nodeFormattingTools) nodeFormattingTools.style.display = 'flex';
         if (edgeFormattingTools) edgeFormattingTools.style.display = 'none';
-        if (containerAlign) containerAlign.style.display = 'block';
+        const allText = selectedNodes.every(n => n.isText);
+        if (containerAlign) containerAlign.style.display = allText ? 'none' : 'block';
+        if (containerTextboxAlign) containerTextboxAlign.style.display = allText ? 'block' : 'none';
         const hasLatent = selectedNodes.some(n => n.isLatent && !n.isText);
         if (containerStyle) containerStyle.style.display = hasLatent ? 'block' : 'none';
         if (containerColors) containerColors.style.display = 'block';
@@ -3351,6 +3472,8 @@ export function initModelCanvas() {
   let tempConnecting = false;
   let tempLine = null;
   let connectStartNode = null;
+  let lastNodeClickTime = 0;
+  let lastNodeClickId = null;
 
   function handleNodeMouseDown(e, node) {
     const activeRenameInput = document.getElementById('canvas-direct-inline-rename');
@@ -3374,6 +3497,22 @@ export function initModelCanvas() {
     }
     
     e.preventDefault();
+
+    // Double click detection (timestamp based across DOM re-renders)
+    const now = Date.now();
+    if (lastNodeClickId === node.id && (now - lastNodeClickTime) < 400 && e.button === 0) {
+      lastNodeClickTime = 0;
+      lastNodeClickId = null;
+      draggingNode = null;
+      e.stopPropagation();
+      e.preventDefault();
+      setTimeout(() => {
+        startInlineNodeRename(node);
+      }, 10);
+      return;
+    }
+    lastNodeClickTime = now;
+    lastNodeClickId = node.id;
     
     if (mode === 'erase') {
       selectedIds.clear();
@@ -4809,6 +4948,55 @@ export function initModelCanvas() {
   window.createAndEditNewLatentNode = createAndEditNewLatentNode;
   window.selectCanvasNodesByVarNames = selectCanvasNodesByVarNames;
   window.startInlineNodeRename = startInlineNodeRename;
+  window.getSelectedEdgeInfo = function() {
+    if (selectedIds.size !== 1) return null;
+    const selId = Array.from(selectedIds)[0];
+    const edge = edges.find(e => e.id === selId);
+    if (edge) {
+      const lineStyle = edge.curved ? 'curved' : (edge.strokeDasharray === '8 8' ? 'dashed' : (edge.strokeDasharray === '2 4' ? 'dotted' : 'solid'));
+      const arrowhead = edge.arrowhead || 'solid';
+      return { lineStyle, arrowhead };
+    }
+    const mod = moderatingEffects.find(m => m.id === selId);
+    if (mod) {
+      const lineStyle = mod.curved ? 'curved' : (mod.strokeDasharray === '8 8' ? 'dashed' : (mod.strokeDasharray === '2 4' ? 'dotted' : (mod.strokeDasharray === '4 4' ? 'dashed' : 'solid')));
+      const arrowhead = mod.arrowhead || 'open';
+      return { lineStyle, arrowhead };
+    }
+    if (typeof selId === 'string' && selId.startsWith('edge_ind_')) {
+      const node = nodes.find(n => `edge_ind_${n.id}` === selId);
+      if (node) {
+        const lineStyle = node.edgeCurved ? 'curved' : (node.edgeStrokeDasharray === '8 8' ? 'dashed' : (node.edgeStrokeDasharray === '2 4' ? 'dotted' : 'solid'));
+        const arrowhead = node.edgeArrowhead || 'solid';
+        return { lineStyle, arrowhead };
+      }
+    }
+    return null;
+  };
+  window.getSelectedNodeInfo = function() {
+    if (selectedIds.size !== 1) return null;
+    const selId = Array.from(selectedIds)[0];
+    const node = nodes.find(n => n.id === selId);
+    if (node) {
+      return {
+        strokeWidth: node.strokeWidth !== undefined ? node.strokeWidth : 1.5,
+        textAlign: node.textAlign || 'center',
+        verticalAlign: node.verticalAlign || 'middle',
+        fill: node.fill,
+        stroke: node.stroke,
+        color: node.color,
+        fontSize: node.fontSize || 14,
+        fontFamily: node.fontFamily || 'Inter',
+        bold: !!node.bold,
+        italic: !!node.italic,
+        underline: !!node.underline,
+        labelInside: !!node.labelInside,
+        isText: !!node.isText,
+        isLatent: !!node.isLatent
+      };
+    }
+    return null;
+  };
 
   try {
     if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined') {
