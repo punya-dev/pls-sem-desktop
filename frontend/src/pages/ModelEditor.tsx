@@ -283,8 +283,19 @@ const ModelEditor = () => {
   const [textboxValign, setTextboxValign] = useState<'top' | 'middle' | 'bottom'>('middle');
   const [edgeLineStyle, setEdgeLineStyle] = useState<'solid' | 'dashed' | 'dotted' | 'curved'>('solid');
   const [edgeArrowhead, setEdgeArrowhead] = useState<'solid' | 'open' | 'diamond' | 'circle'>('solid');
-
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+
+  const fixedArrowColors = ['#0f172a', '#334155', '#ffffff'];
+  const [recentArrowColors, setRecentArrowColors] = useState<string[]>([]);
+  const [activeArrowColor, setActiveArrowColor] = useState<string>('#0f172a');
+
+  const handleArrowColorSelect = (color: string) => {
+    setActiveArrowColor(color);
+    if (!fixedArrowColors.some(c => c.toLowerCase() === color.toLowerCase())) {
+      setRecentArrowColors(prev => [color, ...prev.filter(c => c.toLowerCase() !== color.toLowerCase())].slice(0, 3));
+    }
+    document.dispatchEvent(new CustomEvent('edge-color-change', { detail: { color } }));
+  };
 
   const handleFillColorSelect = (color: string) => {
     setActiveFill(color);
@@ -331,6 +342,12 @@ const ModelEditor = () => {
         if (info) {
           if (info.lineStyle) setEdgeLineStyle(info.lineStyle);
           if (info.arrowhead) setEdgeArrowhead(info.arrowhead);
+          if (info.color) {
+            setActiveArrowColor(info.color);
+            if (!fixedArrowColors.some(c => c.toLowerCase() === info.color.toLowerCase())) {
+              setRecentArrowColors(prev => [info.color, ...prev.filter(c => c.toLowerCase() !== info.color.toLowerCase())].slice(0, 3));
+            }
+          }
         }
       }
       if (typeof window !== 'undefined' && (window as any).getSelectedNodeInfo) {
@@ -2895,6 +2912,7 @@ const ModelEditor = () => {
                     data-edge-action={`line-${opt.id}`}
                     onClick={() => {
                       setEdgeLineStyle(opt.id as any);
+                      document.dispatchEvent(new CustomEvent('edge-line-style-change', { detail: { style: opt.id } }));
                     }}
                     style={{
                       display: 'flex',
@@ -2997,6 +3015,7 @@ const ModelEditor = () => {
                     data-edge-action={`arrowhead-${opt.id}`}
                     onClick={() => {
                       setEdgeArrowhead(opt.id as any);
+                      document.dispatchEvent(new CustomEvent('edge-arrowhead-change', { detail: { arrowhead: opt.id } }));
                     }}
                     style={{
                       display: 'flex',
@@ -3021,6 +3040,70 @@ const ModelEditor = () => {
                     )}
                   </div>
                 ))}
+              </div>
+            </div>
+
+            {/* Arrow Color Dropdown */}
+            <div className="tb-dropdown-container">
+              <button
+                className={`tb-dropdown-btn ${openDropdown === 'arrow-color' ? 'active' : ''}`}
+                type="button"
+                title="Arrow Color"
+                id="btn-arrow-color"
+                onClick={(e) => { e.stopPropagation(); setOpenDropdown(prev => prev === 'arrow-color' ? null : 'arrow-color'); }}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>palette</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{width: 14, height: 14, marginLeft: '2px'}}><polyline points="6 9 12 15 18 9" /></svg>
+              </button>
+              
+              <div
+                className={`tb-dropdown-menu ${openDropdown === 'arrow-color' ? 'show' : ''}`}
+                id="menu-arrow-color"
+                style={{
+                  width: '180px',
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  boxShadow: 'var(--shadow-float, 0 8px 24px rgba(15, 23, 42, 0.12))',
+                  border: '1px solid var(--color-border-default, #e2e8f0)',
+                  left: 0,
+                  display: openDropdown === 'arrow-color' ? 'flex' : 'none',
+                  flexDirection: 'column'
+                }}
+              >
+                <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '6px'}}>
+                  Arrow Color
+                </div>
+                <div style={{display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center'}}>
+                  {[...fixedArrowColors, ...recentArrowColors].map((color, i) => (
+                    <button
+                      key={'arrow-color-'+i}
+                      type="button"
+                      style={{
+                        width: '20px',
+                        height: '20px',
+                        borderRadius: '50%',
+                        background: color,
+                        border: activeArrowColor?.toLowerCase() === color.toLowerCase() ? '2px solid var(--color-accent)' : '1px solid rgba(0,0,0,0.12)',
+                        boxShadow: activeArrowColor?.toLowerCase() === color.toLowerCase() ? '0 0 0 2px var(--color-accent-subtle)' : 'none',
+                        cursor: 'pointer'
+                      }}
+                      onClick={() => handleArrowColorSelect(color)}
+                      title={color}
+                    />
+                  ))}
+                  <button type="button" style={{width: '20px', height: '20px', borderRadius: '50%', background: 'transparent', border: '1px dashed var(--color-border-subtle, #cbd5e1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', position: 'relative', cursor: 'pointer'}} title="Custom Color">
+                    <span style={{fontSize: '12px', lineHeight: 1}}>+</span>
+                    <input
+                      type="color"
+                      id="picker-arrow-color"
+                      title="Arrow Color"
+                      defaultValue="#0f172a"
+                      style={{position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer'}}
+                      onInput={(e: any) => handleArrowColorSelect(e.target.value)}
+                      onChange={(e: any) => handleArrowColorSelect(e.target.value)}
+                    />
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -3219,23 +3302,29 @@ const ModelEditor = () => {
             <marker id="arrowhead-selected" markerWidth={10} markerHeight={7} refX={9} refY="3.5" orient="auto">
               <polygon points="0 0, 10 3.5, 0 7" fill="var(--color-accent)" style={{pointerEvents: 'none'}} />
             </marker>
-            <marker id="arrow-solid" markerWidth={10} markerHeight={10} refX={8} refY={5} orient="auto">
-              <polygon points="1 2, 9 5, 1 8" fill="var(--color-text-primary)" />
+            <marker id="arrow-solid" markerWidth={10} markerHeight={10} refX={9} refY={5} orient="auto">
+              <polygon points="0 1.5, 9 5, 0 8.5" fill="currentColor" />
             </marker>
-            <marker id="arrow-solid-selected" markerWidth={10} markerHeight={10} refX={8} refY={5} orient="auto">
-              <polygon points="1 2, 9 5, 1 8" fill="var(--color-accent)" />
+            <marker id="arrow-solid-selected" markerWidth={10} markerHeight={10} refX={9} refY={5} orient="auto">
+              <polygon points="0 1.5, 9 5, 0 8.5" fill="var(--color-accent)" />
             </marker>
-            <marker id="arrow-open" markerWidth={10} markerHeight={10} refX={7} refY={5} orient="auto">
-              <path d="M 2 2 L 8 5 L 2 8" fill="none" stroke="var(--color-text-primary)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            <marker id="arrow-open" markerWidth={10} markerHeight={10} refX={8.5} refY={5} orient="auto">
+              <path d="M 1 1.5 L 8.5 5 L 1 8.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
             </marker>
-            <marker id="arrow-open-selected" markerWidth={10} markerHeight={10} refX={7} refY={5} orient="auto">
-              <path d="M 2 2 L 8 5 L 2 8" fill="none" stroke="var(--color-accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            <marker id="arrow-open-selected" markerWidth={10} markerHeight={10} refX={8.5} refY={5} orient="auto">
+              <path d="M 1 1.5 L 8.5 5 L 1 8.5" fill="none" stroke="var(--color-accent)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
             </marker>
-            <marker id="arrow-diamond" markerWidth={10} markerHeight={10} refX={5} refY={5} orient="auto">
-              <polygon points="5 1.5, 8.5 5, 5 8.5, 1.5 5" fill="var(--color-text-primary)" />
+            <marker id="arrow-diamond" markerWidth={10} markerHeight={10} refX={9} refY={5} orient="auto">
+              <polygon points="1 5, 5 1.8, 9 5, 5 8.2" fill="currentColor" />
             </marker>
-            <marker id="arrow-diamond-selected" markerWidth={10} markerHeight={10} refX={5} refY={5} orient="auto">
-              <polygon points="5 1.5, 8.5 5, 5 8.5, 1.5 5" fill="var(--color-accent)" />
+            <marker id="arrow-diamond-selected" markerWidth={10} markerHeight={10} refX={9} refY={5} orient="auto">
+              <polygon points="1 5, 5 1.8, 9 5, 5 8.2" fill="var(--color-accent)" />
+            </marker>
+            <marker id="arrow-circle" markerWidth={10} markerHeight={10} refX={8.5} refY={5} orient="auto">
+              <circle cx={5} cy={5} r={3.5} fill="currentColor" />
+            </marker>
+            <marker id="arrow-circle-selected" markerWidth={10} markerHeight={10} refX={8.5} refY={5} orient="auto">
+              <circle cx={5} cy={5} r={3.5} fill="var(--color-accent)" />
             </marker>
           </defs>
           <rect id="bg-rect" width="100%" height="100%" fill="url(#dot-grid)" />

@@ -1311,6 +1311,75 @@ export function initModelCanvas() {
     }
   }, { signal });
 
+  document.addEventListener('edge-color-change', (e) => {
+    const color = e.detail?.color;
+    if (color !== undefined) {
+      edges.filter(edge => selectedIds.has(edge.id)).forEach(edge => edge.color = color);
+      moderatingEffects.filter(m => selectedIds.has(m.id)).forEach(m => m.color = color);
+      nodes.filter(n => selectedIds.has(`edge_ind_${n.id}`)).forEach(n => n.edgeColor = color);
+      render();
+      pushHistory();
+      window.dispatchEvent(new CustomEvent('canvas-changed'));
+      document.dispatchEvent(new CustomEvent('selectionChange'));
+      window.dispatchEvent(new CustomEvent('selectionChange'));
+    }
+  }, { signal });
+
+  document.addEventListener('edge-line-style-change', (e) => {
+    const style = e.detail?.style;
+    if (style) {
+      edges.filter(edge => selectedIds.has(edge.id)).forEach(edge => {
+        edge.curved = false;
+        if (style === 'solid') edge.strokeDasharray = '';
+        if (style === 'dashed') edge.strokeDasharray = '8 8';
+        if (style === 'dotted') edge.strokeDasharray = '2 4';
+        if (style === 'curved') {
+          edge.strokeDasharray = '';
+          edge.curved = true;
+        }
+      });
+      moderatingEffects.filter(m => selectedIds.has(m.id)).forEach(m => {
+        m.curved = false;
+        if (style === 'solid') m.strokeDasharray = '';
+        if (style === 'dashed') m.strokeDasharray = '8 8';
+        if (style === 'dotted') m.strokeDasharray = '2 4';
+        if (style === 'curved') {
+          m.strokeDasharray = '';
+          m.curved = true;
+        }
+      });
+      nodes.filter(n => selectedIds.has(`edge_ind_${n.id}`)).forEach(n => {
+        n.edgeCurved = false;
+        if (style === 'solid') n.edgeStrokeDasharray = '';
+        if (style === 'dashed') n.edgeStrokeDasharray = '8 8';
+        if (style === 'dotted') n.edgeStrokeDasharray = '2 4';
+        if (style === 'curved') {
+          n.edgeStrokeDasharray = '';
+          n.edgeCurved = true;
+        }
+      });
+      render();
+      pushHistory();
+      window.dispatchEvent(new CustomEvent('canvas-changed'));
+      document.dispatchEvent(new CustomEvent('selectionChange'));
+      window.dispatchEvent(new CustomEvent('selectionChange'));
+    }
+  }, { signal });
+
+  document.addEventListener('edge-arrowhead-change', (e) => {
+    const arrowType = e.detail?.arrowhead;
+    if (arrowType) {
+      edges.filter(edge => selectedIds.has(edge.id)).forEach(edge => edge.arrowhead = arrowType);
+      moderatingEffects.filter(m => selectedIds.has(m.id)).forEach(m => m.arrowhead = arrowType);
+      nodes.filter(n => selectedIds.has(`edge_ind_${n.id}`)).forEach(n => n.edgeArrowhead = arrowType);
+      render();
+      pushHistory();
+      window.dispatchEvent(new CustomEvent('canvas-changed'));
+      document.dispatchEvent(new CustomEvent('selectionChange'));
+      window.dispatchEvent(new CustomEvent('selectionChange'));
+    }
+  }, { signal });
+
   // Global change listener for inputs that might be re-rendered
   document.addEventListener('change', (e) => {
     if (e.target.id === 'input-font-size') {
@@ -2257,7 +2326,11 @@ export function initModelCanvas() {
         path.removeAttribute('marker-end');
       }
 
-      path.style.stroke = selectedIds.has(edge.id) ? 'var(--color-accent)' : 'var(--color-text-primary)';
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      const defEdgeColor = isDark ? '#ffffff' : '#0f172a';
+      const edgeColor = selectedIds.has(edge.id) ? 'var(--color-accent)' : (edge.color || defEdgeColor);
+      path.style.stroke = edgeColor;
+      path.style.color = edgeColor;
       path.style.strokeWidth = edge.strokeWidth || '2';
       if (edge.strokeDasharray) {
         path.style.strokeDasharray = edge.strokeDasharray;
@@ -2494,17 +2567,22 @@ export function initModelCanvas() {
       const startY = modNode.y + (mdy / mlen) * modR;
 
       const isSelected = selectedIds.has(mod.id);
+      let modMarker = `arrow-${mod.arrowhead || 'open'}`;
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      const defModColor = isDark ? '#cbd5e1' : 'rgba(107, 78, 230, 0.75)';
+      const modColor = isSelected ? 'var(--color-accent, #6B4EE6)' : (mod.color || defModColor);
 
       // 1. Dashed line from moderator to midpoint
       const dashLine = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       dashLine.setAttribute('d', `M ${startX} ${startY} L ${mx} ${my}`);
       dashLine.setAttribute('class', isSelected ? 'moderation-line selected' : 'moderation-line');
-      dashLine.style.stroke = isSelected ? 'var(--color-accent, #6B4EE6)' : 'rgba(107, 78, 230, 0.75)';
-      dashLine.style.strokeWidth = '1.5';
-      dashLine.style.strokeDasharray = '4 4';
+      dashLine.style.stroke = modColor;
+      dashLine.style.color = modColor;
+      dashLine.style.strokeWidth = mod.strokeWidth ? String(mod.strokeWidth) : '1.5';
+      dashLine.style.strokeDasharray = mod.strokeDasharray !== undefined ? mod.strokeDasharray : '4 4';
       dashLine.style.fill = 'none';
       dashLine.style.cursor = 'pointer';
-      dashLine.setAttribute('marker-end', isSelected ? 'url(#arrow-open-selected)' : 'url(#arrow-open)');
+      dashLine.setAttribute('marker-end', isSelected ? `url(#${modMarker}-selected)` : `url(#${modMarker})`);
       edgesLayer.appendChild(dashLine);
 
       // 2. Midpoint Dot (small circle where dashed line lands on the path)
@@ -2512,7 +2590,7 @@ export function initModelCanvas() {
       dot.setAttribute('cx', mx);
       dot.setAttribute('cy', my);
       dot.setAttribute('r', '4');
-      dot.setAttribute('fill', isSelected ? 'var(--color-accent, #6B4EE6)' : '#6B4EE6');
+      dot.setAttribute('fill', isSelected ? 'var(--color-accent, #6B4EE6)' : (mod.color || '#6B4EE6'));
       dot.setAttribute('stroke', '#ffffff');
       dot.setAttribute('stroke-width', '1.5');
       dot.style.cursor = 'pointer';
@@ -3109,7 +3187,12 @@ export function initModelCanvas() {
             const isIndEdgeSelected = selectedIds.has(indEdgeId) || isSelected;
             const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
             path.setAttribute('d', d);
-            path.setAttribute('stroke', isIndEdgeSelected ? 'var(--color-accent, #6B4EE6)' : 'var(--canvas-edge-stroke)');
+            const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+            const defIndColor = isDark ? '#cbd5e1' : 'var(--canvas-edge-stroke)';
+            const indColor = isIndEdgeSelected ? 'var(--color-accent, #6B4EE6)' : (node.edgeColor || defIndColor);
+            path.setAttribute('stroke', indColor);
+            path.style.stroke = indColor;
+            path.style.color = indColor;
             path.setAttribute('stroke-width', node.edgeStrokeWidth || '1.5');
             if (node.edgeStrokeDasharray) {
               path.style.strokeDasharray = node.edgeStrokeDasharray;
@@ -3399,43 +3482,6 @@ export function initModelCanvas() {
         if (formattingDivider) formattingDivider.style.display = 'block';
         if (nodeFormattingTools) nodeFormattingTools.style.display = 'none';
         if (edgeFormattingTools) edgeFormattingTools.style.display = 'flex';
-        
-        // Update active states
-        let activeStyle = 'solid';
-        let activeArrowhead = 'solid';
-        if (selectedId.startsWith('edge_ind_')) {
-          const indNode = nodes.find(n => `edge_ind_${n.id}` === selectedId);
-          if (indNode) {
-            activeStyle = indNode.edgeCurved ? 'curved' : (indNode.edgeStrokeDasharray === '8 8' ? 'dashed' : (indNode.edgeStrokeDasharray === '2 4' ? 'dotted' : 'solid'));
-            activeArrowhead = indNode.edgeArrowhead || 'solid';
-          }
-        } else if (selectedEdge.source && selectedEdge.target) {
-          activeStyle = selectedEdge.curved ? 'curved' : (selectedEdge.strokeDasharray === '8 8' ? 'dashed' : (selectedEdge.strokeDasharray === '2 4' ? 'dotted' : (selectedEdge.strokeDasharray === '4 4' ? 'dashed' : 'solid')));
-          activeArrowhead = selectedEdge.arrowhead || 'open';
-        } else {
-          activeStyle = selectedEdge.curved ? 'curved' : (selectedEdge.strokeDasharray === '8 8' ? 'dashed' : (selectedEdge.strokeDasharray === '2 4' ? 'dotted' : 'solid'));
-          activeArrowhead = selectedEdge.arrowhead || 'solid';
-        }
-        
-        document.querySelectorAll('#edge-formatting-tools .tb-dropdown-item').forEach(item => {
-          item.style.background = 'transparent';
-          item.style.border = '1px solid transparent';
-          item.style.color = 'var(--color-text-primary, #334155)';
-        });
-
-        const activeLineBtn = document.querySelector(`.tb-dropdown-item[data-edge-action="line-${activeStyle}"]`);
-        const activeArrowBtn = document.querySelector(`.tb-dropdown-item[data-edge-action="arrowhead-${activeArrowhead}"]`);
-        
-        if (activeLineBtn) {
-          activeLineBtn.style.background = 'var(--color-accent-subtle, #f5f3ff)';
-          activeLineBtn.style.border = '1px solid var(--color-accent, #4f46e5)';
-          activeLineBtn.style.color = 'var(--color-accent, #4f46e5)';
-        }
-        if (activeArrowBtn) {
-          activeArrowBtn.style.background = 'var(--color-accent-subtle, #f5f3ff)';
-          activeArrowBtn.style.border = '1px solid var(--color-accent, #4f46e5)';
-          activeArrowBtn.style.color = 'var(--color-accent, #4f46e5)';
-        }
         document.dispatchEvent(new CustomEvent('selectionChange'));
         window.dispatchEvent(new CustomEvent('selectionChange'));
       }
@@ -5027,24 +5073,33 @@ export function initModelCanvas() {
   window.getSelectedEdgeInfo = function() {
     if (selectedIds.size !== 1) return null;
     const selId = Array.from(selectedIds)[0];
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const defEdgeColor = isDark ? '#ffffff' : '#0f172a';
+
     const edge = edges.find(e => e.id === selId);
     if (edge) {
       const lineStyle = edge.curved ? 'curved' : (edge.strokeDasharray === '8 8' ? 'dashed' : (edge.strokeDasharray === '2 4' ? 'dotted' : 'solid'));
       const arrowhead = edge.arrowhead || 'solid';
-      return { lineStyle, arrowhead };
+      const color = edge.color || defEdgeColor;
+      const strokeWidth = edge.strokeWidth !== undefined ? edge.strokeWidth : 2;
+      return { lineStyle, arrowhead, color, strokeWidth };
     }
     const mod = moderatingEffects.find(m => m.id === selId);
     if (mod) {
       const lineStyle = mod.curved ? 'curved' : (mod.strokeDasharray === '8 8' ? 'dashed' : (mod.strokeDasharray === '2 4' ? 'dotted' : (mod.strokeDasharray === '4 4' ? 'dashed' : 'solid')));
       const arrowhead = mod.arrowhead || 'open';
-      return { lineStyle, arrowhead };
+      const color = mod.color || (isDark ? '#cbd5e1' : 'rgba(107, 78, 230, 0.75)');
+      const strokeWidth = mod.strokeWidth !== undefined ? mod.strokeWidth : 1.5;
+      return { lineStyle, arrowhead, color, strokeWidth };
     }
     if (typeof selId === 'string' && selId.startsWith('edge_ind_')) {
       const node = nodes.find(n => `edge_ind_${n.id}` === selId);
       if (node) {
         const lineStyle = node.edgeCurved ? 'curved' : (node.edgeStrokeDasharray === '8 8' ? 'dashed' : (node.edgeStrokeDasharray === '2 4' ? 'dotted' : 'solid'));
         const arrowhead = node.edgeArrowhead || 'solid';
-        return { lineStyle, arrowhead };
+        const color = node.edgeColor || (isDark ? '#cbd5e1' : '#64748b');
+        const strokeWidth = node.edgeStrokeWidth !== undefined ? node.edgeStrokeWidth : 1.5;
+        return { lineStyle, arrowhead, color, strokeWidth };
       }
     }
     return null;
