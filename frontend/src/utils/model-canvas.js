@@ -3402,7 +3402,13 @@ export function initModelCanvas() {
           else if (selectedNode.isLatent === false) defStroke = '#ca8a04';
           pickerBorder.value = selectedNode.stroke || defStroke;
         }
-        if (pickerText) pickerText.value = selectedNode.color || '#1e293b';
+        if (pickerText) {
+          let defText = '#1e293b';
+          if (selectedNode.isText) defText = '#0f172a';
+          else if (selectedNode.isLatent === false) defText = '#422006';
+          else if (selectedNode.isLatent) defText = '#ffffff';
+          pickerText.value = selectedNode.color || defText;
+        }
         if (inputFont) inputFont.value = selectedNode.fontSize || 14;
         
         if (rowTextInside) {

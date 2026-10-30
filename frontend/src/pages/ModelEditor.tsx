@@ -266,9 +266,19 @@ const ModelEditor = () => {
     }
   }, []);
 
-  const fixedFills = ['transparent', '#334155', '#ffffff'];
-  const fixedBorders = ['transparent', '#1e293b', '#ffffff'];
-  const fixedTexts = ['#0f172a', '#334155', '#ffffff'];
+  const [selectedNodeType, setSelectedNodeType] = useState<'latent' | 'indicator' | 'text'>('latent');
+
+  const fixedFills = selectedNodeType === 'indicator'
+    ? ['transparent', '#fef08a', '#ffffff']
+    : ['transparent', '#334155', '#ffffff'];
+
+  const fixedBorders = selectedNodeType === 'indicator'
+    ? ['transparent', '#ca8a04', '#1e293b']
+    : ['transparent', '#1e293b', '#ffffff'];
+
+  const fixedTexts = selectedNodeType === 'indicator'
+    ? ['#422006', '#0f172a', '#ffffff']
+    : (selectedNodeType === 'latent' ? ['#ffffff', '#0f172a', '#334155'] : ['#0f172a', '#334155', '#ffffff']);
 
   const [recentFills, setRecentFills] = useState<string[]>([]);
   const [recentBorders, setRecentBorders] = useState<string[]>([]);
@@ -289,18 +299,28 @@ const ModelEditor = () => {
   const [recentArrowColors, setRecentArrowColors] = useState<string[]>([]);
   const [activeArrowColor, setActiveArrowColor] = useState<string>('#0f172a');
 
+  const isDefaultColor = (color: string) => {
+    if (!color) return true;
+    const defaults = [
+      'transparent',
+      '#334155', '#1e293b', '#ffffff', '#0f172a', '#64748b',
+      '#fef08a', '#ca8a04', '#422006', '#451a03', '#b45309'
+    ];
+    return defaults.some(d => d.toLowerCase() === color.toLowerCase());
+  };
+
   const handleArrowColorSelect = (color: string) => {
     setActiveArrowColor(color);
-    if (!fixedArrowColors.some(c => c.toLowerCase() === color.toLowerCase())) {
-      setRecentArrowColors(prev => [color, ...prev.filter(c => c.toLowerCase() !== color.toLowerCase())].slice(0, 3));
+    if (!isDefaultColor(color)) {
+      setRecentArrowColors(prev => [...prev.filter(c => c.toLowerCase() !== color.toLowerCase()), color].slice(-3));
     }
     document.dispatchEvent(new CustomEvent('edge-color-change', { detail: { color } }));
   };
 
   const handleFillColorSelect = (color: string) => {
     setActiveFill(color);
-    if (!fixedFills.some(f => f.toLowerCase() === color.toLowerCase())) {
-      setRecentFills(prev => [color, ...prev.filter(c => c.toLowerCase() !== color.toLowerCase())].slice(0, 3));
+    if (!isDefaultColor(color)) {
+      setRecentFills(prev => [...prev.filter(c => c.toLowerCase() !== color.toLowerCase()), color].slice(-3));
     }
     document.dispatchEvent(new CustomEvent('color-picker-input', { detail: { id: 'picker-fill', color } }));
     document.dispatchEvent(new CustomEvent('color-picker-closed', { detail: { id: 'picker-fill', color } }));
@@ -308,8 +328,8 @@ const ModelEditor = () => {
 
   const handleBorderColorSelect = (color: string) => {
     setActiveBorder(color);
-    if (!fixedBorders.some(b => b.toLowerCase() === color.toLowerCase())) {
-      setRecentBorders(prev => [color, ...prev.filter(c => c.toLowerCase() !== color.toLowerCase())].slice(0, 3));
+    if (!isDefaultColor(color)) {
+      setRecentBorders(prev => [...prev.filter(c => c.toLowerCase() !== color.toLowerCase()), color].slice(-3));
     }
     document.dispatchEvent(new CustomEvent('color-picker-input', { detail: { id: 'picker-border', color } }));
     document.dispatchEvent(new CustomEvent('color-picker-closed', { detail: { id: 'picker-border', color } }));
@@ -317,8 +337,8 @@ const ModelEditor = () => {
 
   const handleTextColorSelect = (color: string) => {
     setActiveText(color);
-    if (!fixedTexts.some(t => t.toLowerCase() === color.toLowerCase())) {
-      setRecentTextColors(prev => [color, ...prev.filter(c => c.toLowerCase() !== color.toLowerCase())].slice(0, 3));
+    if (!isDefaultColor(color)) {
+      setRecentTextColors(prev => [...prev.filter(c => c.toLowerCase() !== color.toLowerCase()), color].slice(-3));
     }
     document.dispatchEvent(new CustomEvent('color-picker-input', { detail: { id: 'picker-text', color } }));
     document.dispatchEvent(new CustomEvent('color-picker-closed', { detail: { id: 'picker-text', color } }));
@@ -342,38 +362,19 @@ const ModelEditor = () => {
         if (info) {
           if (info.lineStyle) setEdgeLineStyle(info.lineStyle);
           if (info.arrowhead) setEdgeArrowhead(info.arrowhead);
-          if (info.color) {
-            setActiveArrowColor(info.color);
-            if (!fixedArrowColors.some(c => c.toLowerCase() === info.color.toLowerCase())) {
-              setRecentArrowColors(prev => [info.color, ...prev.filter(c => c.toLowerCase() !== info.color.toLowerCase())].slice(0, 3));
-            }
-          }
+          if (info.color) setActiveArrowColor(info.color);
         }
       }
       if (typeof window !== 'undefined' && (window as any).getSelectedNodeInfo) {
         const nInfo = (window as any).getSelectedNodeInfo();
         if (nInfo) {
+          setSelectedNodeType(nInfo.isText ? 'text' : (nInfo.isLatent ? 'latent' : 'indicator'));
           if (nInfo.strokeWidth !== undefined) setActiveBorderWeight(nInfo.strokeWidth);
           if (nInfo.textAlign) setTextboxAlign(nInfo.textAlign);
           if (nInfo.verticalAlign) setTextboxValign(nInfo.verticalAlign);
-          if (nInfo.fill) {
-            setActiveFill(nInfo.fill);
-            if (!fixedFills.some(f => f.toLowerCase() === nInfo.fill.toLowerCase())) {
-              setRecentFills(prev => [nInfo.fill, ...prev.filter(c => c.toLowerCase() !== nInfo.fill.toLowerCase())].slice(0, 3));
-            }
-          }
-          if (nInfo.stroke) {
-            setActiveBorder(nInfo.stroke);
-            if (!fixedBorders.some(b => b.toLowerCase() === nInfo.stroke.toLowerCase())) {
-              setRecentBorders(prev => [nInfo.stroke, ...prev.filter(c => c.toLowerCase() !== nInfo.stroke.toLowerCase())].slice(0, 3));
-            }
-          }
-          if (nInfo.color) {
-            setActiveText(nInfo.color);
-            if (!fixedTexts.some(t => t.toLowerCase() === nInfo.color.toLowerCase())) {
-              setRecentTextColors(prev => [nInfo.color, ...prev.filter(c => c.toLowerCase() !== nInfo.color.toLowerCase())].slice(0, 3));
-            }
-          }
+          if (nInfo.fill) setActiveFill(nInfo.fill);
+          if (nInfo.stroke) setActiveBorder(nInfo.stroke);
+          if (nInfo.color) setActiveText(nInfo.color);
         }
       }
     };
@@ -2617,7 +2618,7 @@ const ModelEditor = () => {
             <div
               className={`tb-dropdown-menu ${openDropdown === 'colors' ? 'show' : ''}`}
               id="menu-colors"
-              style={{ width: '190px', padding: '10px 12px', display: openDropdown === 'colors' ? 'flex' : 'none', flexDirection: 'column' }}
+              style={{ width: '236px', padding: '10px 12px', display: openDropdown === 'colors' ? 'flex' : 'none', flexDirection: 'column' }}
             >
               <div style={{marginBottom: '10px'}}>
                 <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '6px'}}>Fill Color</div>
@@ -2740,7 +2741,7 @@ const ModelEditor = () => {
             <div
               className={`tb-dropdown-menu ${openDropdown === 'text' ? 'show' : ''}`}
               id="menu-text"
-              style={{ width: '200px', padding: '10px 12px', display: openDropdown === 'text' ? 'flex' : 'none', flexDirection: 'column' }}
+              style={{ width: '236px', padding: '10px 12px', display: openDropdown === 'text' ? 'flex' : 'none', flexDirection: 'column' }}
             >
               <div style={{marginBottom: '10px'}}>
                 <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '5px'}}>Font Family</div>
@@ -3060,7 +3061,7 @@ const ModelEditor = () => {
                 className={`tb-dropdown-menu ${openDropdown === 'arrow-color' ? 'show' : ''}`}
                 id="menu-arrow-color"
                 style={{
-                  width: '180px',
+                  width: '236px',
                   padding: '10px 12px',
                   borderRadius: '8px',
                   boxShadow: 'var(--shadow-float, 0 8px 24px rgba(15, 23, 42, 0.12))',
