@@ -309,3 +309,31 @@ def build_fit_summary(results: Dict[str, Any], decimals: int = 3) -> Dict[str, A
             "GoF is provided for historical comparison only (Henseler & Sarstedt, 2013).",
         ],
     }
+
+
+def build_copula_summary(results: Dict[str, Any], decimals: int = 3) -> Dict[str, Any]:
+    gc = results.get("gaussian_copula", {})
+    if not gc or not gc.get("endogeneity_tests"):
+        return {"title": "Gaussian Copula Endogeneity Tests", "columns": [], "rows": []}
+
+    rows = []
+    for t in gc.get("endogeneity_tests", []):
+        rows.append([
+            str(t.get("path", "")),
+            str(t.get("gc_construct", "")),
+            _fmt(t.get("original"), decimals),
+            _fmt(t.get("se"), decimals) if t.get("se") is not None else "-",
+            _fmt(t.get("t_stat"), decimals) if t.get("t_stat") is not None else "-",
+            _fmt(t.get("p_value"), decimals) if t.get("p_value") is not None else "-",
+            "Yes (p < 0.05)" if t.get("is_significant") else "No (p >= 0.05)",
+        ])
+
+    return {
+        "title": "Gaussian Copula Endogeneity Assessment (Liengaard et al., 2025)",
+        "columns": ["Relationship", "Copula Construct", "Original Coef", "Std Error", "t-statistic", "p-value", "Significant"],
+        "rows": rows,
+        "footnotes": [
+            "Significant copula term indicates potential endogeneity / omitted variable bias.",
+            "Estimates follow Liengaard et al. (2025) and Park & Gupta (2012).",
+        ],
+    }

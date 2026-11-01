@@ -271,10 +271,17 @@ def validate_model_spec(
         add_issue("CYCLE_DETECTED", "error", "model", "model", f"Cycle detected in structural model: {cycle_chain}. Recursive models are not supported in standard PLS-SEM.")
 
     # 6. Exogenous / Endogenous classification (MOD-13)
-    mod_construct_ids = {
-        str(getattr(me, "moderator", None) or getattr(me, "moderator_lv", "")).strip()
-        for me in (spec.moderating_effects or [])
-    }
+    name_to_cid = {cname: cid for cid, cname in construct_id_to_name.items()}
+    mod_construct_ids = set()
+    for me in (spec.moderating_effects or []):
+        m_val = str(getattr(me, "moderator", None) or getattr(me, "moderator_lv", "")).strip()
+        if m_val:
+            mod_construct_ids.add(m_val)
+            if m_val in name_to_cid:
+                mod_construct_ids.add(name_to_cid[m_val])
+            if m_val in construct_id_to_name:
+                mod_construct_ids.add(construct_id_to_name[m_val])
+
     exogenous = [cid for cid in construct_ids if (in_degrees.get(cid, 0) == 0 and out_degrees.get(cid, 0) > 0) or (cid in mod_construct_ids and in_degrees.get(cid, 0) == 0)]
     endogenous = [cid for cid in construct_ids if in_degrees.get(cid, 0) > 0]
     isolated = [cid for cid in construct_ids if in_degrees.get(cid, 0) == 0 and out_degrees.get(cid, 0) == 0 and cid not in mod_construct_ids]
@@ -284,12 +291,20 @@ def validate_model_spec(
         add_issue("ISOLATED_CONSTRUCT", "warning", "model", "model", f"Isolated construct(s) without any structural paths: {', '.join(isolated_names)}.")
 
     # 7. Moderating effects validation (MOD-M01..M03)
-    seen_moderations: Set[Tuple[str, str, str]] = set()
+    seen_moderations: Set[Tuple[Any, ...]] = set()
     for me in spec.moderating_effects:
         me_id = str(me.id)
         mod_c = str(getattr(me, "moderator", None) or getattr(me, "moderator_lv", "")).strip()
         src_c = str(getattr(me, "source", None) or getattr(me, "predictor", "") or getattr(me, "predictor_lv", "")).strip()
         tgt_c = str(getattr(me, "target", None) or getattr(me, "outcome", "") or getattr(me, "outcome_lv", "")).strip()
+
+        # Map construct names to IDs if needed
+        if mod_c not in construct_ids and mod_c in name_to_cid:
+            mod_c = name_to_cid[mod_c]
+        if src_c not in construct_ids and src_c in name_to_cid:
+            src_c = name_to_cid[src_c]
+        if tgt_c not in construct_ids and tgt_c in name_to_cid:
+            tgt_c = name_to_cid[tgt_c]
 
         if mod_c not in construct_ids:
             add_issue("UNKNOWN_MODERATOR", "error", "moderator", me_id, f"Moderator '{mod_c}' not found in constructs.")
@@ -307,8 +322,9 @@ def validate_model_spec(
                 f"Moderator '{mod_c}' cannot be the predictor or outcome of the moderated path.",
             )
 
-        triple = (mod_c, src_c, tgt_c)
-        if triple in seen_moderations:
+        attach_id = getattr(me, "attach_to_mod_id", None) or getattr(me, "attachToModId", None)
+        key = (mod_c, src_c, tgt_c, attach_id)
+        if key in seen_moderations:
             add_issue(
                 "DUPLICATE_MODERATING_EFFECT",
                 "error",
@@ -317,7 +333,7 @@ def validate_model_spec(
                 f"Duplicate moderating effect: moderator '{mod_c}' on path '{src_c}' -> '{tgt_c}' already exists.",
             )
         else:
-            seen_moderations.add(triple)
+            seen_moderations.add(key)
 
         if src_c in construct_ids and tgt_c in construct_ids:
             if (src_c, tgt_c) not in path_pairs:
@@ -331,6 +347,10 @@ def validate_model_spec(
             mod_c = str(getattr(me, "moderator", None) or getattr(me, "moderator_lv", "")).strip()
             src_c = str(getattr(me, "source", None) or getattr(me, "predictor", "") or getattr(me, "predictor_lv", "")).strip()
             tgt_c = str(getattr(me, "target", None) or getattr(me, "outcome", "") or getattr(me, "outcome_lv", "")).strip()
+            if mod_c not in construct_ids and mod_c in name_to_cid:
+                mod_c = name_to_cid[mod_c]
+            if tgt_c not in construct_ids and tgt_c in name_to_cid:
+                tgt_c = name_to_cid[tgt_c]
             if mod_c in construct_ids and tgt_c in construct_ids:
                 if (mod_c, tgt_c) not in path_pairs:
                     expanded_paths.append(Path(**{"from": mod_c, "to": tgt_c}))
@@ -345,6 +365,77 @@ def validate_model_spec(
                 "model",
                 f"Moderation creates a cycle in the fully expanded model via implied direct path: {exp_cycle_chain}.",
             )
+
+    # 7b. Gaussian Copula checks
+    seen_gc_paths: Set[Tuple[str, str]] = set()
+    for gc in getattr(spec, "gaussian_copulas", []):
+        gc_id = str(gc.id)
+        src = str(gc.source_construct).strip()
+        tgt = str(gc.target_construct).strip()
+
+        if src not in construct_ids and src in name_to_cid:
+            src = name_to_cid[src]
+        if tgt not in construct_ids and tgt in name_to_cid:
+            tgt = name_to_cid[tgt]
+
+        if src not in construct_ids:
+            add_issue("GC_INVALID_SOURCE", "error", "gaussian_copula", gc_id, f"Gaussian copula source construct '{gc.source_construct}' does not exist in model.")
+            continue
+        if tgt not in construct_ids:
+            add_issue("GC_INVALID_TARGET", "error", "gaussian_copula", gc_id, f"Gaussian copula target construct '{gc.target_construct}' does not exist in model.")
+            continue
+
+        src_c = next((c for c in spec.constructs if c.id == src), None)
+        if src_c and (getattr(src_c, "is_interaction", False) or getattr(src_c, "order", "first") == "higher"):
+            add_issue("GC_INVALID_SOURCE_TYPE", "error", "gaussian_copula", gc_id, f"Gaussian copula source construct '{src_c.name or src}' cannot be an interaction or higher-order construct.")
+
+        if (src, tgt) not in path_pairs:
+            add_issue("GC_PATH_NOT_FOUND", "error", "gaussian_copula", gc_id, f"Gaussian copula must attach to an existing structural path from '{src}' to '{tgt}'.")
+
+        if (src, tgt) in seen_gc_paths:
+            add_issue("GC_DUPLICATE", "error", "gaussian_copula", gc_id, f"Duplicate Gaussian copula on path from '{src}' to '{tgt}'.")
+        else:
+            seen_gc_paths.add((src, tgt))
+
+        if data_df is not None and src_c and len(src_c.indicators) == 1:
+            iid = src_c.indicators[0]
+            col = indicator_id_to_col.get(iid)
+            if col and col in data_df.columns:
+                n_distinct = data_df[col].dropna().nunique()
+                if n_distinct < 3:
+                    add_issue("GC_TOO_FEW_DISTINCT_VALUES", "error", "gaussian_copula", gc_id, f"Source construct '{src_c.name or src}' has fewer than 3 distinct values ({n_distinct}). Gaussian copula estimation blocked.")
+                elif n_distinct < 10:
+                    add_issue("GC_FEW_DISTINCT_VALUES", "warning", "gaussian_copula", gc_id, f"Source construct '{src_c.name or src}' has fewer than 10 distinct values ({n_distinct}). Caution advised for ties.")
+
+    # 7c. Quadratic Effects checks
+    seen_quad_paths: Set[Tuple[str, str]] = set()
+    for qe in getattr(spec, "quadratic_effects", []):
+        qe_id = str(qe.id)
+        pred = str(qe.predictor_construct).strip()
+        tgt = str(qe.target_construct).strip()
+
+        if pred not in construct_ids and pred in name_to_cid:
+            pred = name_to_cid[pred]
+        if tgt not in construct_ids and tgt in name_to_cid:
+            tgt = name_to_cid[tgt]
+
+        if pred not in construct_ids:
+            add_issue("QUADRATIC_INVALID_PREDICTOR", "error", "quadratic", qe_id, f"Quadratic effect predictor construct '{qe.predictor_construct}' not found in constructs.")
+            continue
+        if tgt not in construct_ids:
+            add_issue("QUADRATIC_INVALID_TARGET", "error", "quadratic", qe_id, f"Quadratic effect target construct '{qe.target_construct}' not found in constructs.")
+            continue
+
+        if (pred, tgt) not in path_pairs:
+            add_issue("QUADRATIC_PATH_NOT_FOUND", "error", "quadratic", qe_id, f"Quadratic effect must attach to an existing structural path from '{pred}' to '{tgt}'.")
+
+        if (pred, tgt) in seen_quad_paths:
+            add_issue("QUADRATIC_DUPLICATE", "error", "quadratic", qe_id, f"Duplicate quadratic effect on path from '{pred}' to '{tgt}'.")
+        else:
+            seen_quad_paths.add((pred, tgt))
+
+    if getattr(spec, "gaussian_copulas", None) and n_samples is not None and n_samples < 200:
+        add_issue("GC_SMALL_SAMPLE_SIZE", "warning", "dataset", "sample_size", f"Sample size ({n_samples}) is under 200. Copula estimates can be biased in small samples.")
 
     # 8. Sample size / 10-times rule check (VAL-02 / SAM-01)
     max_formative = 0

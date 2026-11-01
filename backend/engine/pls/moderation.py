@@ -144,6 +144,8 @@ def normalize_moderation_spec(
 ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
     """
     Extracts and standardizes the moderation list from a ModelSpec or dictionary.
+    Supports single moderations, multiple moderations, and chained/higher-order moderations
+    (e.g., moderators attaching to other moderation arrows via attach_to_mod_id).
     Returns (spec_dict, list_of_moderations).
     """
     if hasattr(model_spec, "model_dump"):
@@ -154,9 +156,21 @@ def normalize_moderation_spec(
         raise TypeError("model_spec must be a ModelSpec instance or dictionary")
 
     raw_mods = spec_dict.get("moderating_effects", [])
-    moderations = []
-    seen = set()
+    c_list = spec_dict.get("constructs", [])
+    name_to_cid = {}
+    id_to_cname = {}
+    for c in c_list:
+        if isinstance(c, dict):
+            cid = str(c.get("id") or "")
+            cname = str(c.get("name") or "")
+            if cid:
+                id_to_cname[cid] = cname or cid
+                if cname:
+                    name_to_cid[cname] = cid
 
+    # Pass 1: Parse and normalize individual moderations
+    raw_parsed = []
+    mod_by_id = {}
     for idx, m in enumerate(raw_mods):
         if hasattr(m, "model_dump"):
             m_dict = m.model_dump(mode="json", by_alias=True)
@@ -170,6 +184,7 @@ def normalize_moderation_spec(
                 "method": getattr(m, "method", "two_stage"),
                 "standardize": getattr(m, "standardize", True),
                 "id": getattr(m, "id", f"mod_{idx}"),
+                "attach_to_mod_id": getattr(m, "attach_to_mod_id", getattr(m, "attachToModId", None)),
             }
 
         mod_lv = str(m_dict.get("moderator") or m_dict.get("moderator_lv") or "").strip()
@@ -177,25 +192,70 @@ def normalize_moderation_spec(
         out_lv = str(m_dict.get("target") or m_dict.get("outcome") or m_dict.get("outcome_lv") or "").strip()
         method = str(m_dict.get("method") or "two_stage").lower()
         standardize = bool(m_dict.get("standardize", True))
-        mod_id = str(m_dict.get("id") or f"mod_{pred_lv}_{mod_lv}_{out_lv}")
+        mod_id = str(m_dict.get("id") or f"mod_{pred_lv}_{mod_lv}_{out_lv}_{idx}")
 
-        triple = (mod_lv, pred_lv, out_lv)
+        attach_id = m_dict.get("attachToModId") or m_dict.get("attach_to_mod_id")
+        if mod_lv not in id_to_cname and mod_lv in name_to_cid:
+            mod_lv = name_to_cid[mod_lv]
+        if pred_lv not in id_to_cname and pred_lv in name_to_cid:
+            pred_lv = name_to_cid[pred_lv]
+        if out_lv not in id_to_cname and out_lv in name_to_cid:
+            out_lv = name_to_cid[out_lv]
+
         if not mod_lv or not pred_lv or not out_lv:
             continue
-        if triple in seen:
-            continue
-        seen.add(triple)
 
-        int_name = f"{mod_lv} x {pred_lv}"
-        moderations.append({
+        entry = {
             "id": mod_id,
             "moderator": mod_lv,
             "source": pred_lv,
             "target": out_lv,
             "method": method,
             "standardize": standardize,
-            "interaction_term": int_name,
-        })
+            "attach_to_mod_id": attach_id,
+        }
+        raw_parsed.append(entry)
+        mod_by_id[mod_id] = entry
+
+    # Pass 2: Resolve chains and construct interaction term names
+    moderations = []
+    seen = set()
+
+    for m in raw_parsed:
+        chain_mods = [m["moderator"]]
+        curr_id = m.get("attach_to_mod_id")
+        visited_ids = {m["id"]}
+        root_pred = m["source"]
+        root_out = m["target"]
+
+        while curr_id and curr_id in mod_by_id:
+            if curr_id in visited_ids:
+                break
+            visited_ids.add(curr_id)
+            parent = mod_by_id[curr_id]
+            chain_mods.append(parent["moderator"])
+            root_pred = parent["source"]
+            root_out = parent["target"]
+            curr_id = parent.get("attach_to_mod_id")
+
+        chain_mods.reverse()  # Root moderator first, descendants follow
+        # Sort canonically by display name so interaction names are consistent and deduplicated
+        sorted_chain = sorted(chain_mods, key=lambda cid: id_to_cname.get(cid, cid))
+
+        m["source"] = root_pred
+        m["target"] = root_out
+        m["chain"] = sorted_chain
+
+        chain_disps = [id_to_cname.get(w, w) for w in sorted_chain]
+        pred_disp = id_to_cname.get(root_pred, root_pred)
+        int_name = f"{' x '.join(chain_disps)} x {pred_disp}"
+        m["interaction_term"] = int_name
+
+        key = (tuple(sorted_chain), root_pred, root_out)
+        if key in seen:
+            continue
+        seen.add(key)
+        moderations.append(m)
 
     return spec_dict, moderations
 
@@ -482,38 +542,53 @@ def run_expanded_pls_estimation(
     moderations: List[Dict[str, Any]],
     settings: Optional[PipelineSettings] = None,
     save_stage1_meas: bool = True,
+    quadratics: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
-    Executes model expansion and estimation for single or multiple moderations.
-    Supports Two-Stage, Product-Indicator, and Orthogonalizing methods.
+    Executes model expansion and estimation for single or multiple moderations,
+    as well as non-linear quadratic effects (shared two-stage interaction pipeline).
+    Supports Two-Stage (default, SmartPLS 4), Product-Indicator, and Orthogonalizing methods.
     """
     from engine.pls.algorithm import run_pipeline, parse_model_spec
 
     cfg = settings or PipelineSettings()
 
-    if not moderations:
-        # Standard estimation without moderation
+    if not moderations and not quadratics:
+        # Standard estimation without moderation or quadratic terms
         return run_pipeline(df, spec_dict, cfg)
 
     # Determine predominant method across moderations (or per-moderation)
-    has_two_stage = any(m.get("method") == "two_stage" for m in moderations)
+    has_two_stage = any(m.get("method") == "two_stage" for m in moderations) if moderations else False
+    if quadratics and len(quadratics) > 0:
+        has_two_stage = True
 
     if has_two_stage:
         # --- TWO-STAGE APPROACH ---
         # Stage 1: Main effects model (including all implied moderator -> outcome paths)
         stage1_spec = copy.deepcopy(spec_dict)
+        stage1_spec["moderating_effects"] = []
+        stage1_spec["moderatingEffects"] = []
+        stage1_spec["quadratic_effects"] = []
+        stage1_spec["quadraticEffects"] = []
+
         stage1_paths = list(stage1_spec.get("paths", []))
         existing_path_pairs = set(
             ((p.get("from") or p.get("from_node")), (p.get("to") or p.get("to_node")))
             for p in stage1_paths
         )
 
+        id_to_cname = {
+            str(c.get("id") or ""): str(c.get("name") or c.get("id") or "")
+            for c in spec_dict.get("constructs", []) if isinstance(c, dict) and c.get("id")
+        }
+
         # Silently add all moderator -> outcome direct paths
-        for m in moderations:
-            pair = (m["moderator"], m["target"])
-            if pair not in existing_path_pairs:
-                stage1_paths.append({"from": m["moderator"], "to": m["target"]})
-                existing_path_pairs.add(pair)
+        for m in (moderations or []):
+            for w in m.get("chain", [m["moderator"]]):
+                pair = (w, m["target"])
+                if pair not in existing_path_pairs:
+                    stage1_paths.append({"from": w, "to": m["target"]})
+                    existing_path_pairs.add(pair)
         stage1_spec["paths"] = stage1_paths
 
         # Estimate Stage 1
@@ -521,49 +596,40 @@ def run_expanded_pls_estimation(
         scores_stage1 = res_stage1.get("construct_scores", {})
         n_obs = len(df)
 
-        # Stage 2: Build single-item data & specification from Stage 1 latent scores
-        df_stage2 = pd.DataFrame(index=df.index)
-        stage2_constructs = []
-        stage2_indicators = []
-
-        # All stage 1 constructs become single-item constructs measured by their stage-1 score
-        for c in stage1_spec.get("constructs", []):
-            cid = c["id"]
-            c_score = np.asarray(scores_stage1.get(cid, np.zeros(n_obs)), dtype=float)
-            col_name = f"lv_{cid}"
-            df_stage2[col_name] = c_score
-            stage2_constructs.append({
-                "id": cid,
-                "name": c.get("name", cid),
-                "type": "reflective",
-                "indicators": [col_name],
-                "outer_mode": "A",
-            })
-            stage2_indicators.append({
-                "id": col_name,
-                "column": col_name,
-                "construct_id": cid,
-            })
+        # Stage 2: Full PLS-SEM on original model plus single-item interaction constructs.
+        # Original constructs preserve their indicators, outer modes, and measurement types.
+        df_stage2 = df.copy()
+        stage2_constructs = list(copy.deepcopy(stage1_spec.get("constructs", [])))
+        stage2_indicators = list(copy.deepcopy(stage1_spec.get("indicators", [])))
 
         # Build interaction constructs from stage-1 scores
         stage2_paths = list(stage1_paths)
         existing_stage2_pairs = set(existing_path_pairs)
 
         int_std_scales = {}
-        for m in moderations:
+        quad_scales = {}
+
+        # 1. User interaction terms
+        for m in (moderations or []):
             int_name = m["interaction_term"]
             p_score = np.asarray(scores_stage1.get(m["source"], np.zeros(n_obs)), dtype=float)
-            m_score = np.asarray(scores_stage1.get(m["moderator"], np.zeros(n_obs)), dtype=float)
-            int_raw = p_score * m_score
-            int_std = standardize_series(int_raw, ddof=1) if m.get("standardize", True) else int_raw
-            col_int = f"int_{m['source']}_{m['moderator']}"
-            df_stage2[col_int] = int_std
+            int_raw = p_score.copy()
+            for w in m.get("chain", [m["moderator"]]):
+                w_score = np.asarray(scores_stage1.get(w, np.zeros(n_obs)), dtype=float)
+                int_raw = int_raw * w_score
 
-            # Compute standard deviation of the interaction term to scale coefficients to unstandardized interaction scale
-            # (Hair et al., SmartPLS 4 standard: latent variables are standardized Z-scores, but the product term
-            # is not divided by its own standard deviation).
-            int_sd = float(np.std(int_raw, ddof=1))
-            int_std_scales[int_name] = int_sd if int_sd > 1e-12 else 1.0
+            # Mean-center interaction term before scaling (Hair et al., SmartPLS standard)
+            int_centered = int_raw - np.nanmean(int_raw)
+            int_sd = float(np.nanstd(int_centered, ddof=1))
+            int_scale = int_sd if int_sd > 1e-12 else 1.0
+            int_std_scales[int_name] = int_scale
+
+            int_std = (int_centered / int_scale) if m.get("standardize", True) else int_centered
+            if len(m.get("chain", [m["moderator"]])) <= 1:
+                col_int = f"int_{m['source']}_{m['moderator']}"
+            else:
+                col_int = f"int_{int_name.replace(' ', '_')}"
+            df_stage2[col_int] = int_std
 
             stage2_constructs.append({
                 "id": int_name,
@@ -574,6 +640,7 @@ def run_expanded_pls_estimation(
                 "is_interaction": True,
                 "metadata": {
                     "moderator": m["moderator"],
+                    "chain": m.get("chain", [m["moderator"]]),
                     "predictor": m["source"],
                     "outcome": m["target"],
                     "method": m["method"],
@@ -590,6 +657,107 @@ def run_expanded_pls_estimation(
                 stage2_paths.append({"from": int_name, "to": m["target"]})
                 existing_stage2_pairs.add(int_path_pair)
 
+        # 2. Constituent lower-order interactions among moderators
+        # When any higher-order moderations (chain length >= 2) exist for target Y,
+        # all combinations of the moderators (size >= 2) must be included (Becker et al. 2018, Hair et al. 2022)
+        import itertools
+        target_outcomes = set(m["target"] for m in (moderations or []))
+        for tgt in target_outcomes:
+            mods_for_tgt = [m for m in moderations if m["target"] == tgt]
+            has_higher_order = any(len(m.get("chain", [])) >= 2 for m in mods_for_tgt)
+            if not has_higher_order:
+                continue
+
+            constituent_subsets = set()
+            for m in mods_for_tgt:
+                chain = m.get("chain", [])
+                if len(chain) >= 2:
+                    for k in range(2, len(chain) + 1):
+                        for combo in itertools.combinations(chain, k):
+                            constituent_subsets.add(tuple(sorted(combo, key=lambda cid: id_to_cname.get(cid, cid))))
+
+            for combo in sorted(constituent_subsets, key=lambda c: (len(c), c)):
+                const_name = f"{' x '.join([id_to_cname.get(w, w) for w in combo])}"
+                if const_name in df_stage2.columns or any(c["id"] == const_name for c in stage2_constructs):
+                    continue
+
+                prod = np.ones(n_obs, dtype=float)
+                for w in combo:
+                    w_score = np.asarray(scores_stage1.get(w, np.zeros(n_obs)), dtype=float)
+                    prod = prod * w_score
+
+                centered = prod - np.nanmean(prod)
+                sd = float(np.nanstd(centered, ddof=1))
+                scale = sd if sd > 1e-12 else 1.0
+                int_std_scales[const_name] = scale
+
+                col_const = f"const_{const_name.replace(' ', '_')}"
+                df_stage2[col_const] = centered / scale
+
+                stage2_constructs.append({
+                    "id": const_name,
+                    "name": const_name,
+                    "type": "reflective",
+                    "indicators": [col_const],
+                    "outer_mode": "A",
+                    "is_interaction": True,
+                    "is_constituent": True,
+                })
+                stage2_indicators.append({
+                    "id": col_const,
+                    "column": col_const,
+                    "construct_id": const_name,
+                })
+
+                const_path_pair = (const_name, tgt)
+                if const_path_pair not in existing_stage2_pairs:
+                    stage2_paths.append({"from": const_name, "to": tgt})
+                    existing_stage2_pairs.add(const_path_pair)
+
+        # 3. Quadratic terms from stage-1 scores (self-moderation: predictor x predictor)
+        for q in (quadratics or []):
+            q_name = q["quad_construct_name"]
+            p_score = np.asarray(scores_stage1.get(q["predictor"], np.zeros(n_obs)), dtype=float)
+            q_raw = p_score ** 2
+            q_mean = float(np.nanmean(q_raw))
+            q_centered = q_raw - q_mean
+            q_sd = float(np.nanstd(q_centered, ddof=0))
+            q_scale = q_sd if q_sd > 1e-12 else 1.0
+            int_std_scales[q_name] = q_scale
+            quad_scales[q_name] = {"mean": q_mean, "scale": q_scale}
+
+            q_std = q_centered / q_scale
+            col_quad = q["indicator_name"]
+            df_stage2[col_quad] = q_std
+
+            stage2_constructs.append({
+                "id": q_name,
+                "name": q_name,
+                "type": "reflective",
+                "indicators": [col_quad],
+                "outer_mode": "A",
+                "is_interaction": True,
+                "is_quadratic": True,
+                "metadata": {
+                    "predictor": q["predictor"],
+                    "outcome": q["target"],
+                    "target": q["target"],
+                    "method": q.get("method", "two_stage"),
+                    "mean": q_mean,
+                    "scale": q_scale,
+                },
+            })
+            stage2_indicators.append({
+                "id": col_quad,
+                "column": col_quad,
+                "construct_id": q_name,
+            })
+
+            q_path_pair = (q_name, q["target"])
+            if q_path_pair not in existing_stage2_pairs:
+                stage2_paths.append({"from": q_name, "to": q["target"]})
+                existing_stage2_pairs.add(q_path_pair)
+
         stage2_spec = {
             "constructs": stage2_constructs,
             "indicators": stage2_indicators,
@@ -599,42 +767,32 @@ def run_expanded_pls_estimation(
         # Estimate Stage 2
         res_stage2 = run_pipeline(df_stage2, stage2_spec, cfg)
 
-        # Rescale interaction path coefficients back to unstandardized interaction scale
+        # Rescale interaction, constituent, and quadratic path coefficients back to unstandardized interaction scale
         # (Hair et al., SmartPLS 4 standard: beta_unstd = beta_std / std(INT))
         if "structural" in res_stage2 and "path_coefficients" in res_stage2["structural"]:
-            for m in moderations:
-                int_name = m["interaction_term"]
-                tgt = m["target"]
-                scale = int_std_scales.get(int_name, 1.0)
+            for term_name, scale in int_std_scales.items():
                 if scale > 1e-12:
-                    tgt_paths = res_stage2["structural"]["path_coefficients"].get(tgt, {})
-                    if int_name in tgt_paths:
-                        tgt_paths[int_name] = float(tgt_paths[int_name]) / scale
+                    for tgt, tgt_paths in res_stage2["structural"]["path_coefficients"].items():
+                        if term_name in tgt_paths:
+                            tgt_paths[term_name] = float(tgt_paths[term_name]) / scale
                     if "original_coefficients" in res_stage2["structural"]:
-                        orig_paths = res_stage2["structural"]["original_coefficients"].get(tgt, {})
-                        if int_name in orig_paths:
-                            orig_paths[int_name] = float(orig_paths[int_name]) / scale
+                        for tgt, orig_paths in res_stage2["structural"]["original_coefficients"].items():
+                            if term_name in orig_paths:
+                                orig_paths[term_name] = float(orig_paths[term_name]) / scale
+                    if "total_effects" in res_stage2["structural"]:
+                        for tgt, orig_tot in res_stage2["structural"]["total_effects"].items():
+                            if term_name in orig_tot:
+                                orig_tot[term_name] = float(orig_tot[term_name]) / scale
                     if "paths" in res_stage2 and isinstance(res_stage2["paths"], list):
                         for p in res_stage2["paths"]:
-                            if p.get("from") == int_name and p.get("to") == tgt:
+                            if p.get("from") == term_name:
                                 p["beta"] = float(p.get("beta", 0.0)) / scale
 
-        # Merge results: measurement results from Stage 1, structural results from Stage 2
         final_res = copy.deepcopy(res_stage2)
-        if save_stage1_meas:
-            final_res["measurement"] = copy.deepcopy(res_stage1.get("measurement", {}))
-            final_res["reliability_and_validity"] = copy.deepcopy(res_stage1.get("reliability_and_validity", {}))
-            # Preserve measurement entries (outer loadings and weights) for interaction constructs from Stage 2
-            for m in moderations:
-                int_name = m["interaction_term"]
-                if int_name in res_stage2.get("measurement", {}).get("outer_loadings", {}):
-                    final_res["measurement"].setdefault("outer_loadings", {})[int_name] = res_stage2["measurement"]["outer_loadings"][int_name]
-                    final_res["measurement"].setdefault("outer_weights", {})[int_name] = res_stage2["measurement"]["outer_weights"][int_name]
-                    final_res["measurement"].setdefault("indicator_reliability", {})[int_name] = res_stage2["measurement"]["indicator_reliability"].get(int_name, {})
-
         final_res["_stage1_results"] = res_stage1
         final_res["_expanded_spec"] = stage2_spec
         final_res["_expanded_df"] = df_stage2
+        final_res["_quad_scales"] = quad_scales
         return final_res
 
     else:
@@ -650,11 +808,12 @@ def run_expanded_pls_estimation(
 
         for m in moderations:
             int_name = m["interaction_term"]
-            # Auto-include direct path moderator -> outcome
-            dir_pair = (m["moderator"], m["target"])
-            if dir_pair not in existing_path_pairs:
-                expanded_paths.append({"from": m["moderator"], "to": m["target"]})
-                existing_path_pairs.add(dir_pair)
+            # Auto-include direct paths moderator -> outcome
+            for w in m.get("chain", [m["moderator"]]):
+                dir_pair = (w, m["target"])
+                if dir_pair not in existing_path_pairs:
+                    expanded_paths.append({"from": w, "to": m["target"]})
+                    existing_path_pairs.add(dir_pair)
 
             # Generate indicators for this interaction
             df_mod, int_ind_cols = build_interaction_indicators_for_df(df_mod, spec_dict, m)

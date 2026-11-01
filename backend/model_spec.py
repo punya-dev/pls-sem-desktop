@@ -50,6 +50,7 @@ class ModeratingEffect(BaseModel):
     target: str
     method: Optional[Literal["two_stage", "product_indicator", "orthogonalizing"]] = "two_stage"
     standardize: bool = True
+    attach_to_mod_id: Optional[str] = Field(default=None, alias="attachToModId")
 
     @model_validator(mode="before")
     @classmethod
@@ -66,6 +67,10 @@ class ModeratingEffect(BaseModel):
                 d["target"] = d["outcome_lv"]
             elif "outcome" in d and "target" not in d:
                 d["target"] = d["outcome"]
+            if "attachToModId" in d and "attach_to_mod_id" not in d:
+                d["attach_to_mod_id"] = d["attachToModId"]
+            elif "attach_to_mod_id" in d and "attachToModId" not in d:
+                d["attachToModId"] = d["attach_to_mod_id"]
             return d
         return data
 
@@ -94,8 +99,115 @@ class QuadraticEffect(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     id: str
-    construct_id: str = Field(..., alias="construct")
-    target: str
+    predictor_construct: str = Field(..., alias="predictorConstruct")
+    target_construct: str = Field(..., alias="targetConstruct")
+    node_x: Optional[float] = Field(default=None, alias="nodeX")
+    node_y: Optional[float] = Field(default=None, alias="nodeY")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            d = dict(data)
+            pred = (
+                d.get("predictor_construct")
+                or d.get("predictorConstruct")
+                or d.get("construct_id")
+                or d.get("construct")
+                or d.get("predictor")
+                or d.get("source")
+                or d.get("source_construct")
+                or d.get("sourceConstruct")
+            )
+            tgt = (
+                d.get("target_construct")
+                or d.get("targetConstruct")
+                or d.get("target")
+                or d.get("outcome")
+            )
+            if pred:
+                d["predictor_construct"] = pred
+                d["predictorConstruct"] = pred
+            if tgt:
+                d["target_construct"] = tgt
+                d["targetConstruct"] = tgt
+            if "nodeX" in d and "node_x" not in d:
+                d["node_x"] = d["nodeX"]
+            elif "node_x" in d and "nodeX" not in d:
+                d["nodeX"] = d["node_x"]
+            if "nodeY" in d and "node_y" not in d:
+                d["node_y"] = d["nodeY"]
+            elif "node_y" in d and "nodeY" not in d:
+                d["nodeY"] = d["node_y"]
+            return d
+        return data
+
+    @property
+    def construct_id(self) -> str:
+        return self.predictor_construct
+
+    @property
+    def source(self) -> str:
+        return self.predictor_construct
+
+    @property
+    def predictor(self) -> str:
+        return self.predictor_construct
+
+    @property
+    def target(self) -> str:
+        return self.target_construct
+
+    @property
+    def outcome(self) -> str:
+        return self.target_construct
+
+
+
+class GaussianCopula(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str
+    source_construct: str = Field(..., alias="sourceConstruct")
+    target_construct: str = Field(..., alias="targetConstruct")
+    node_x: Optional[float] = Field(default=None, alias="nodeX")
+    node_y: Optional[float] = Field(default=None, alias="nodeY")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            d = dict(data)
+            if "source" in d and "source_construct" not in d and "sourceConstruct" not in d:
+                d["source_construct"] = d["source"]
+            if "target" in d and "target_construct" not in d and "targetConstruct" not in d:
+                d["target_construct"] = d["target"]
+            if "sourceConstruct" in d and "source_construct" not in d:
+                d["source_construct"] = d["sourceConstruct"]
+            elif "source_construct" in d and "sourceConstruct" not in d:
+                d["sourceConstruct"] = d["source_construct"]
+            if "targetConstruct" in d and "target_construct" not in d:
+                d["target_construct"] = d["targetConstruct"]
+            elif "target_construct" in d and "targetConstruct" not in d:
+                d["targetConstruct"] = d["target_construct"]
+            if "nodeX" in d and "node_x" not in d:
+                d["node_x"] = d["nodeX"]
+            elif "node_x" in d and "nodeX" not in d:
+                d["nodeX"] = d["node_x"]
+            if "nodeY" in d and "node_y" not in d:
+                d["node_y"] = d["nodeY"]
+            elif "node_y" in d and "nodeY" not in d:
+                d["nodeY"] = d["node_y"]
+            return d
+        return data
+
+    @property
+    def source(self) -> str:
+        return self.source_construct
+
+    @property
+    def target(self) -> str:
+        return self.target_construct
 
 
 class ModelSpec(BaseModel):
@@ -107,8 +219,29 @@ class ModelSpec(BaseModel):
     dataset_id: Optional[str] = None
     moderating_effects: List[ModeratingEffect] = Field(default_factory=list)
     quadratic_effects: List[QuadraticEffect] = Field(default_factory=list)
+    gaussian_copulas: List[GaussianCopula] = Field(default_factory=list)
     spec_version: str = "2.0"
     settings: Optional[Dict[str, Any]] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_spec_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            d = dict(data)
+            if "gaussianCopulas" in d and "gaussian_copulas" not in d:
+                d["gaussian_copulas"] = d["gaussianCopulas"]
+            elif "gaussian_copulas" in d and "gaussianCopulas" not in d:
+                d["gaussianCopulas"] = d["gaussian_copulas"]
+            if "moderatingEffects" in d and "moderating_effects" not in d:
+                d["moderating_effects"] = d["moderatingEffects"]
+            elif "moderating_effects" in d and "moderatingEffects" not in d:
+                d["moderatingEffects"] = d["moderating_effects"]
+            if "quadraticEffects" in d and "quadratic_effects" not in d:
+                d["quadratic_effects"] = d["quadraticEffects"]
+            elif "quadratic_effects" in d and "quadraticEffects" not in d:
+                d["quadraticEffects"] = d["quadratic_effects"]
+            return d
+        return data
 
 
 class ValidateModelRequest(BaseModel):
@@ -147,6 +280,7 @@ class RunPlsRequest(BaseModel):
     missing_values: Optional[List[str]] = None
     model_id: Optional[str] = None
     diagram_layout: Optional[Dict[str, Any]] = None
+    settings: Optional[Dict[str, Any]] = None
 
 
 class BootstrapStartRequest(BaseModel):
@@ -168,3 +302,4 @@ class BootstrapStartRequest(BaseModel):
     missing_values: Optional[List[str]] = None
     model_id: Optional[str] = None
     diagram_layout: Optional[Dict[str, Any]] = None
+    settings: Optional[Dict[str, Any]] = None

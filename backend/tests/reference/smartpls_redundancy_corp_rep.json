@@ -1,0 +1,50 @@
+{
+  "case": "redundancy_analysis_corporate_reputation",
+  "data": "backend/tests/data/Corporate reputation data.csv",
+  "settings": {
+    "inner_weighting": "path",
+    "max_iterations": 3000,
+    "stop_criterion": 1e-7,
+    "missing_treatment": "mean",
+    "initial_weights": 1.0
+  },
+  "models": {
+    "ATTR": {
+      "formative_construct": "ATTR_F",
+      "global_construct": "ATTR_G",
+      "formative_indicators": ["attr_1", "attr_2", "attr_3"],
+      "global_item": "attr_global",
+      "path_coefficient": 0.874,
+      "r_squared": 0.764,
+      "converged_iterations": 2
+    },
+    "CSOR": {
+      "formative_construct": "CSOR_F",
+      "global_construct": "CSOR_G",
+      "formative_indicators": ["csor_1", "csor_2", "csor_3", "csor_4", "csor_5"],
+      "global_item": "csor_global",
+      "path_coefficient": 0.857,
+      "r_squared": 0.735,
+      "converged_iterations": 2
+    },
+    "PERF": {
+      "formative_construct": "PERF_F",
+      "global_construct": "PERF_G",
+      "formative_indicators": ["perf_1", "perf_2", "perf_3", "perf_4", "perf_5"],
+      "global_item": "perf_global",
+      "path_coefficient": 0.811,
+      "r_squared": 0.657,
+      "converged_iterations": 2
+    },
+    "QUAL": {
+      "formative_construct": "QUAL_F",
+      "global_construct": "QUAL_G",
+      "formative_indicators": ["qual_1", "qual_2", "qual_3", "qual_4", "qual_5", "qual_6", "qual_7", "qual_8"],
+      "global_item": "qual_global",
+      "path_coefficient": 0.805,
+      "r_squared": 0.648,
+      "converged_iterations": 2
+    }
+  }
+}
+

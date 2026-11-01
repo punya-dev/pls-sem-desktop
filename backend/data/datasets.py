@@ -36,22 +36,118 @@ def sanitize_table_name(dataset_id: str) -> str:
 
 
 def init_datasets_schema(conn: sqlite3.Connection):
-    """Creates the multi-dataset tables in SQLite if they don't already exist."""
+    """Creates the multi-dataset tables in SQLite if they don't already exist, and migrates old schemas."""
     cur = conn.cursor()
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS datasets (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            parent_id TEXT,
-            kind TEXT NOT NULL DEFAULT 'imported', -- 'imported' or 'derived'
-            derivation_json TEXT,
-            n_rows INTEGER NOT NULL,
-            n_cols INTEGER NOT NULL,
-            hash TEXT NOT NULL,
-            settings_json TEXT,
-            created_at TEXT NOT NULL
-        )
-    """)
+
+    # Check if datasets table already exists and what columns it has
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='datasets'")
+    if cur.fetchone():
+        cur.execute("PRAGMA table_info(datasets)")
+        existing_cols = {r[1]: r for r in cur.fetchall()}
+        if "kind" not in existing_cols:
+            # Old schema migration!
+            cur.execute("ALTER TABLE datasets RENAME TO _datasets_legacy_old")
+            cur.execute("""
+                CREATE TABLE datasets (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    parent_id TEXT,
+                    kind TEXT NOT NULL DEFAULT 'imported', -- 'imported' or 'derived'
+                    derivation_json TEXT,
+                    n_rows INTEGER NOT NULL,
+                    n_cols INTEGER NOT NULL,
+                    hash TEXT NOT NULL,
+                    settings_json TEXT,
+                    created_at TEXT NOT NULL
+                )
+            """)
+            cur.execute("SELECT * FROM _datasets_legacy_old")
+            old_rows = cur.fetchall()
+            old_col_names = [r[0] for r in cur.description]
+
+            for row in old_rows:
+                row_dict = dict(zip(old_col_names, row))
+                ds_id = str(row_dict.get("id") or "1")
+                ds_name = str(row_dict.get("name") or "Imported data")
+                parent_id = row_dict.get("parent_id")
+                op = row_dict.get("operation")
+                kind = "imported" if (not op or op in ("import", "imported")) else "derived"
+                derivation_json = row_dict.get("lineage_json") or row_dict.get("derivation_json")
+                created_at = row_dict.get("created_at") or datetime.now(timezone.utc).isoformat()
+
+                table_name = sanitize_table_name(ds_id)
+                cur.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}'")
+                has_data_table = cur.fetchone() is not None
+
+                df = None
+                if not has_data_table:
+                    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='raw_data'")
+                    if cur.fetchone():
+                        cur.execute("PRAGMA table_info(raw_data)")
+                        raw_cols = [r[1] for r in cur.fetchall()]
+                        if raw_cols:
+                            cur.execute("SELECT * FROM raw_data")
+                            raw_rows = cur.fetchall()
+                            df = pd.DataFrame(raw_rows, columns=raw_cols)
+
+                    if df is None and row_dict.get("columns_json") and row_dict.get("rows_json"):
+                        try:
+                            c_json = json.loads(row_dict["columns_json"])
+                            r_json = json.loads(row_dict["rows_json"])
+                            df = pd.DataFrame(r_json, columns=c_json)
+                        except Exception:
+                            pass
+
+                    if df is not None:
+                        def sql_type(col_name: str) -> str:
+                            s = df[col_name]
+                            if pd.api.types.is_numeric_dtype(s):
+                                return "REAL"
+                            return "TEXT"
+
+                        def escape_col(c: Any) -> str:
+                            return '"' + str(c).replace('"', '""') + '"'
+
+                        col_defs = ", ".join(f"{escape_col(c)} {sql_type(c)}" for c in df.columns)
+                        cur.execute(f"CREATE TABLE {table_name} ({col_defs})")
+                        placeholders = ", ".join("?" for _ in df.columns)
+                        col_names_quoted = ", ".join(escape_col(c) for c in df.columns)
+                        clean_records = df.astype(object).where(pd.notnull(df), None).values.tolist()
+                        cur.executemany(f"INSERT INTO {table_name} ({col_names_quoted}) VALUES ({placeholders})", clean_records)
+
+                if df is not None:
+                    n_rows, n_cols = df.shape
+                    df_hash = compute_dataframe_hash(df)
+                else:
+                    n_rows = int(row_dict.get("row_count") or row_dict.get("n_rows") or 0)
+                    n_cols = int(row_dict.get("n_cols") or 0)
+                    df_hash = str(row_dict.get("hash") or "legacy_hash")
+
+                cur.execute(
+                    """
+                    INSERT OR REPLACE INTO datasets (id, name, parent_id, kind, derivation_json, n_rows, n_cols, hash, settings_json, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (ds_id, ds_name, parent_id, kind, derivation_json, n_rows, n_cols, df_hash, None, created_at)
+                )
+
+            cur.execute("DROP TABLE _datasets_legacy_old")
+    else:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS datasets (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                parent_id TEXT,
+                kind TEXT NOT NULL DEFAULT 'imported', -- 'imported' or 'derived'
+                derivation_json TEXT,
+                n_rows INTEGER NOT NULL,
+                n_cols INTEGER NOT NULL,
+                hash TEXT NOT NULL,
+                settings_json TEXT,
+                created_at TEXT NOT NULL
+            )
+        """)
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS dataset_columns (
             dataset_id TEXT NOT NULL,
@@ -370,7 +466,7 @@ def update_column_metadata(
     cur.execute("UPDATE metadata SET value = ? WHERE key = 'modified_at'", (now,))
     conn.commit()
 
-    return {
+    return{
         "dataset_id": dataset_id,
         "name": column,
         "role": role if role is not None else (row[0] if row else "indicator"),

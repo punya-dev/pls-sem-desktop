@@ -243,6 +243,208 @@ def extract_bootstrap_table(results: Dict[str, Any], decimals: int = 3) -> Dict[
     }
 
 
+def extract_gaussian_copula_table(results: Dict[str, Any], decimals: int = 3) -> Dict[str, Any]:
+    gc = results.get("gaussian_copula", {})
+    rows = []
+    for test in gc.get("endogeneity_tests", []):
+        ci = f"[{_format_cell(test.get('ci_lower'), decimals)}, {_format_cell(test.get('ci_upper'), decimals)}]"
+        rows.append([
+            test.get("relationship", ""),
+            test.get("gc_construct", ""),
+            _format_cell(test.get("original"), decimals),
+            _format_cell(test.get("mean"), decimals),
+            _format_cell(test.get("se"), decimals),
+            _format_cell(test.get("t_stat"), decimals),
+            _format_cell(test.get("p_value"), 4),
+            ci,
+            "Yes" if test.get("is_significant") else "No",
+        ])
+    return {
+        "title": "Gaussian Copula Endogeneity Tests",
+        "columns": ["Relationship", "Copula Construct", "Original", "Sample Mean", "SE", "t-statistic", "p-value", "95% CI", "Significant (p < .05)"],
+        "rows": rows,
+    }
+
+
+def extract_copula_wald_table(results: Dict[str, Any], decimals: int = 3) -> Dict[str, Any]:
+    gc = results.get("gaussian_copula", {})
+    wald = gc.get("wald_tests", {})
+    rows = []
+    for tgt, stats_dict in wald.get("per_target", {}).items():
+        rows.append([
+            f"Target: {tgt}",
+            _format_cell(stats_dict.get("statistic"), decimals),
+            str(stats_dict.get("df", "")),
+            _format_cell(stats_dict.get("p_value"), 4),
+            "Significant" if stats_dict.get("significant") else "Not Significant",
+        ])
+    ov = wald.get("overall", {})
+    if ov:
+        rows.append([
+            "Overall Model",
+            _format_cell(ov.get("statistic"), decimals),
+            str(ov.get("df", "")),
+            _format_cell(ov.get("p_value"), 4),
+            "Significant" if ov.get("significant") else "Not Significant",
+        ])
+    return {
+        "title": "Joint Wald Tests (Endogeneity)",
+        "columns": ["Scope", "Chi-Square (W)", "df", "p-value", "Interpretation"],
+        "rows": rows,
+    }
+
+
+def extract_copula_diagnostics_table(results: Dict[str, Any], decimals: int = 3) -> Dict[str, Any]:
+    gc = results.get("gaussian_copula", {})
+    rows = []
+    for diag in gc.get("regressor_diagnostics", []):
+        ad = diag.get("anderson_darling", {})
+        cvm = diag.get("cramer_von_mises", {})
+        ad_str = f"{_format_cell(ad.get('statistic'), decimals)} (p={_format_cell(ad.get('p_value'), 3)})"
+        cvm_str = f"{_format_cell(cvm.get('statistic'), decimals)} (p={_format_cell(cvm.get('p_value'), 3)})"
+        warnings_str = "; ".join(diag.get("warnings", [])) or "OK (Non-normal supported)"
+        rows.append([
+            diag.get("construct", ""),
+            diag.get("role", ""),
+            _format_cell(diag.get("skewness"), decimals),
+            _format_cell(diag.get("excess_kurtosis"), decimals),
+            ad_str,
+            cvm_str,
+            _format_cell(diag.get("corr_p_cp"), decimals),
+            warnings_str,
+        ])
+    return {
+        "title": "Copula Regressor Diagnostics",
+        "columns": ["Construct", "Role", "Skewness", "Excess Kurtosis", "Anderson-Darling (p)", "Cramer-von Mises (p)", "Corr(P, C(P))", "Assessment"],
+        "rows": rows,
+    }
+
+
+def extract_copula_correction_table(results: Dict[str, Any], decimals: int = 3) -> Dict[str, Any]:
+    gc = results.get("gaussian_copula", {})
+    rows = []
+    for eff in gc.get("effects_of_correction", []):
+        ci = f"[{_format_cell(eff.get('diff_ci_lower'), decimals)}, {_format_cell(eff.get('diff_ci_upper'), decimals)}]"
+        rows.append([
+            eff.get("relationship", ""),
+            _format_cell(eff.get("stage1_coefficient"), decimals),
+            _format_cell(eff.get("stage2_coefficient"), decimals),
+            _format_cell(eff.get("difference"), decimals),
+            _format_cell(eff.get("diff_se"), decimals),
+            ci,
+            _format_cell(eff.get("diff_pvalue"), 4),
+        ])
+    return {
+        "title": "Effect of Copula Correction",
+        "columns": ["Relationship", "Stage 1 (without GC)", "Stage 2 (with GC)", "Difference", "Diff SE", "Diff 95% CI", "Diff p-value"],
+        "rows": rows,
+    }
+
+
+def extract_redundancy_table(results: Dict[str, Any], decimals: int = 3) -> Dict[str, Any]:
+    red_rows = results.get("convergent_validity_redundancy", [])
+    has_bootstrap = any("bootstrap" in r for r in red_rows)
+
+    if has_bootstrap:
+        columns = [
+            "Formative Construct",
+            "Global Item Construct",
+            "Path Coefficient",
+            "Mean",
+            "SE",
+            "t Value",
+            "p Value",
+            "95% CI",
+            "R-squared of Global Item",
+            "Threshold",
+            "Result",
+        ]
+        rows = []
+        for r in red_rows:
+            b = r.get("bootstrap", {})
+            ci_str = f"[{_format_cell(b.get('ci_low'), decimals)}, {_format_cell(b.get('ci_high'), decimals)}]" if b.get("ci_low") is not None else "-"
+            rows.append([
+                str(r.get("formative_construct", "")),
+                str(r.get("global_construct", "")),
+                _format_cell(r.get("path_coefficient"), decimals),
+                _format_cell(b.get("mean"), decimals),
+                _format_cell(b.get("se"), decimals),
+                _format_cell(b.get("t_stat"), decimals),
+                _format_cell(b.get("p_value"), 4),
+                ci_str,
+                _format_cell(r.get("r_squared"), decimals),
+                str(r.get("threshold", "0.70")),
+                str(r.get("result", "")),
+            ])
+    else:
+        columns = [
+            "Formative Construct",
+            "Global Item Construct",
+            "Path Coefficient",
+            "R-squared of Global Item",
+            "Threshold",
+            "Result",
+        ]
+        rows = []
+        for r in red_rows:
+            rows.append([
+                str(r.get("formative_construct", "")),
+                str(r.get("global_construct", "")),
+                _format_cell(r.get("path_coefficient"), decimals),
+                _format_cell(r.get("r_squared"), decimals),
+                str(r.get("threshold", "0.70")),
+                str(r.get("result", "")),
+            ])
+
+    return {
+        "title": "Convergent Validity (Redundancy Analysis)",
+        "columns": columns,
+        "rows": rows,
+    }
+
+
+def extract_nonlinear_effects_table(results: Dict[str, Any], decimals: int = 3) -> Dict[str, Any]:
+    nl_rows = results.get("nonlinear_effects", [])
+    columns = [
+        "Predictor",
+        "Target",
+        "Linear Effect (b1)",
+        "Quadratic Effect (b2)",
+        "SE",
+        "t Value",
+        "p Value",
+        "95% CI",
+        "f²",
+        "f² Rating",
+        "Turning Point (SD)",
+        "Shape",
+    ]
+    rows = []
+    for r in nl_rows:
+        ci_str = f"[{_format_cell(r.get('ci_lower'), decimals)}, {_format_cell(r.get('ci_upper'), decimals)}]" if r.get("ci_lower") is not None else "-"
+        tp_str = f"{_format_cell(r.get('turning_point'), decimals)} ({'inside' if r.get('turning_point_in_range') else 'outside'})" if r.get("turning_point") is not None else "-"
+        rows.append([
+            str(r.get("predictor_name") or r.get("predictor", "")),
+            str(r.get("target_name") or r.get("target", "")),
+            _format_cell(r.get("linear_effect"), decimals),
+            _format_cell(r.get("quadratic_effect"), decimals),
+            _format_cell(r.get("standard_error"), decimals),
+            _format_cell(r.get("t_statistic"), decimals),
+            _format_cell(r.get("p_value"), decimals),
+            ci_str,
+            _format_cell(r.get("f_squared"), decimals),
+            str(r.get("f_squared_rating", "-")),
+            tp_str,
+            str(r.get("shape", "-")),
+        ])
+
+    return {
+        "title": "Nonlinear (Quadratic) Effects",
+        "columns": columns,
+        "rows": rows,
+    }
+
+
 TABLE_EXTRACTORS = {
     "path_coefficients": extract_path_coefficients_table,
     "outer_loadings": extract_outer_loadings_table,
@@ -255,7 +457,19 @@ TABLE_EXTRACTORS = {
     "vif": extract_vif_table,
     "effects": extract_effects_table,
     "bootstrap": extract_bootstrap_table,
+    "gaussian_copula": extract_gaussian_copula_table,
+    "copula": extract_gaussian_copula_table,
+    "copula_endogeneity": extract_gaussian_copula_table,
+    "copula_wald": extract_copula_wald_table,
+    "copula_diagnostics": extract_copula_diagnostics_table,
+    "copula_correction": extract_copula_correction_table,
+    "convergent_validity_redundancy": extract_redundancy_table,
+    "redundancy": extract_redundancy_table,
+    "convergent_validity": extract_redundancy_table,
+    "nonlinear_effects": extract_nonlinear_effects_table,
+    "quadratic": extract_nonlinear_effects_table,
 }
+
 
 
 def export_table_to_format(

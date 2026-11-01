@@ -7,6 +7,31 @@ from typing import Optional, List, Dict, Any, Literal
 from pydantic import BaseModel, Field, ConfigDict
 
 
+class GCSettings(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    ecdf: Literal["F4", "F3"] = Field(
+        default="F4",
+        description="Empirical CDF method: 'F4' (adjusted, default) or 'F3' (endpoint clipped).",
+    )
+    copula_transform: Literal["raw", "eq17"] = Field(
+        default="raw",
+        description="Copula transform: 'raw' (SmartPLS 4 calibrated default) or 'eq17' (correlated exogenous transform).",
+    )
+    stage2_method: Literal["pls", "ols"] = Field(
+        default="pls",
+        description="Stage 2 estimation method: full PLS with single-indicator GC constructs (default) or OLS structural regression.",
+    )
+    round_decimals: Optional[int] = Field(
+        default=12,
+        description="Floating-point rounding precision before ranking/ECDF to avoid false split ties (default: 12).",
+    )
+    scale_normalization: Literal["unscaled", "standardized"] = Field(
+        default="unscaled",
+        description="Scale normalization for copula path coefficients: 'unscaled' (SmartPLS calibrated default) or 'standardized'.",
+    )
+
+
 class PipelineSettings(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -16,10 +41,10 @@ class PipelineSettings(BaseModel):
         description="Inner weighting scheme: 'path' (recommended), 'factor', or 'centroid'",
     )
     max_iter: int = Field(
-        default=300,
+        default=3000,
         ge=0,
         le=5000,
-        description="Maximum iterations for Wold algorithm. Set to 0 for sum scores.",
+        description="Maximum iterations for Wold algorithm. Set to 0 for sum scores (SmartPLS default: 3000).",
     )
     tolerance: float = Field(
         default=1e-7,
@@ -100,4 +125,10 @@ class PipelineSettings(BaseModel):
     dataset_id: Optional[str] = Field(
         default=None,
         description="Identifier of the dataset inside the project.",
+    )
+
+    # Gaussian Copula
+    gc: GCSettings = Field(
+        default_factory=GCSettings,
+        description="Gaussian copula endogeneity settings.",
     )

@@ -18,7 +18,9 @@ export const AdvancedResultPanels: React.FC<AdvancedResultPanelsProps> = ({
   const [activeSubTab, setActiveSubTab] = useState<string>('overview');
   const [selectedKpi, setSelectedKpi] = useState<string>('');
   const [selectedModIndex, setSelectedModIndex] = useState<number>(0);
+  const [selectedQeIndex, setSelectedQeIndex] = useState<number>(0);
   const [modSubTab, setModSubTab] = useState<'interactions' | 'simple_slopes' | 'conditional_indirect'>('interactions');
+  const [gcSubTab, setGcSubTab] = useState<'endogeneity' | 'wald' | 'diagnostics' | 'correction'>('endogeneity');
 
   // Extract analysis specific result or check if stored in main results
   const analysisData = analysisResults[activeTab] || results?.[activeTab] || results?.analysis?.[activeTab];
@@ -1195,16 +1197,329 @@ export const AdvancedResultPanels: React.FC<AdvancedResultPanelsProps> = ({
   }
 
   // 8. NONLINEAR & QUADRATIC EFFECTS
-  if (activeTab === 'quadratic') {
-    if (!analysisData) {
+  if (activeTab === 'quadratic' || activeTab === 'nonlinear_effects') {
+    const rawNl = results?.nonlinear_effects || analysisResults?.nonlinear_effects || results?.quadratic_effects;
+    const hasNlArray = Array.isArray(rawNl) && rawNl.length > 0;
+
+    if (!hasNlArray && !analysisData) {
       return (
         <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--color-text-muted)' }}>
           <h4 style={{ margin: '0 0 8px', fontSize: 16, fontWeight: 600, color: 'var(--color-text-primary)' }}>No Quadratic Effect Results</h4>
-          <p style={{ margin: 0, fontSize: 13 }}>Click <strong>Calculate → Non-linear &amp; Quadratic Effects...</strong> to test polynomial interaction effects.</p>
+          <p style={{ margin: 0, fontSize: 13 }}>Click <strong>Calculate → Non-linear &amp; Quadratic Effects...</strong> or add a quadratic effect on a path in the editor.</p>
         </div>
       );
     }
 
+    if (hasNlArray) {
+      const activeQe = rawNl[selectedQeIndex] || rawNl[0];
+      const source = activeQe.predictor || 'X';
+      const target = activeQe.target || 'Y';
+      const betaLin = Number(activeQe.linear_effect ?? activeQe.b1_linear ?? 0);
+      const betaQuad = Number(activeQe.quadratic_effect ?? activeQe.b2_quadratic ?? activeQe.b2_unstandardized ?? 0);
+      const pQuad = activeQe.p_value !== undefined ? Number(activeQe.p_value) : 1;
+      const f2Val = Number(activeQe.f2 ?? activeQe.f_squared ?? 0);
+      const f2Rating = activeQe.f2_rating || (f2Val >= 0.1 ? 'large' : (f2Val >= 0.05 ? 'medium' : (f2Val >= 0.01 ? 'small' : 'none')));
+      const isQuadSig = activeQe.is_significant ?? (pQuad < 0.05 && f2Val >= 0.01);
+      const turningPoint = activeQe.turning_point !== null && activeQe.turning_point !== undefined ? Number(activeQe.turning_point) : null;
+      const turningInRange = activeQe.turning_in_range ?? false;
+      const shape = activeQe.shape || (betaQuad < 0 ? 'Inverted U-shape (diminishing returns)' : 'U-shape (accelerating returns)');
+      const interpretation = activeQe.interpretation || (
+        isQuadSig
+          ? `A statistically significant quadratic effect is observed (${shape}). The impact of ${source} on ${target} changes nonlinearly across the observed levels of ${source}.`
+          : `The quadratic term (${source} x ${source} → ${target}) is not statistically significant. The linear relationship is supported.`
+      );
+
+      // SVG Curve generation from curve_points or analytical formula
+      const pts = activeQe.curve_points || [];
+      const xs = pts.map((p: any) => p.x);
+      const ysNonlin = pts.map((p: any) => p.y_nonlinear);
+      const ysLin = pts.map((p: any) => p.y_linear);
+      const allYs = [...ysNonlin, ...ysLin];
+      const minX = xs.length > 0 ? Math.min(...xs) : -2.5;
+      const maxX = xs.length > 0 ? Math.max(...xs) : 2.5;
+      const minY = allYs.length > 0 ? Math.min(...allYs) : -1.2;
+      const maxY = allYs.length > 0 ? Math.max(...allYs) : 1.2;
+      const padY = (maxY - minY) * 0.15 || 0.4;
+      const y0 = minY - padY;
+      const y1 = maxY + padY;
+
+      const toPx = (x: number) => 50 + ((x - minX) / (maxX - minX || 1)) * 320;
+      const toPy = (y: number) => 180 - ((y - y0) / (y1 - y0 || 1)) * 140;
+
+      const quadPoints = pts.map((p: any) => `${toPx(p.x).toFixed(1)},${toPy(p.y_nonlinear).toFixed(1)}`).join(' ');
+      const linPoints = pts.map((p: any) => `${toPx(p.x).toFixed(1)},${toPy(p.y_linear).toFixed(1)}`).join(' ');
+
+      const tpX = turningPoint !== null ? toPx(turningPoint) : null;
+
+      return (
+        <div className="results-content-pane">
+          <div style={{ marginBottom: 20 }}>
+            <h3 style={{ margin: '0 0 4px', fontSize: 18, fontWeight: 600, color: 'var(--color-text-primary)' }}>
+              Nonlinear &amp; Quadratic Effects
+            </h3>
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--color-text-muted)' }}>
+              Two-stage quadratic polynomial estimation matching SmartPLS 4, Hair et al. (2024), and Kenny (2015) effect sizes.
+            </p>
+          </div>
+
+          {/* Model Summary Table across all quadratic terms */}
+          <div style={{ border: '1px solid var(--color-border-subtle)', borderRadius: 8, overflow: 'hidden', marginBottom: 24, backgroundColor: 'var(--color-bg-surface)' }}>
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--color-border-subtle)', fontWeight: 600, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>Quadratic Effects Summary Table</span>
+              <span style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 400 }}>Kenny (2015) criteria: f² ≥ 0.01 small, ≥ 0.05 med, ≥ 0.10 large</span>
+            </div>
+            <table className="results-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ backgroundColor: 'var(--color-bg-surface)', borderBottom: '1px solid var(--color-border-subtle)', textAlign: 'left' }}>
+                  <th style={{ padding: '10px 14px', fontSize: 12, fontWeight: 600 }}>Path</th>
+                  <th style={{ padding: '10px 14px', fontSize: 12, fontWeight: 600 }}>Linear (β₁)</th>
+                  <th style={{ padding: '10px 14px', fontSize: 12, fontWeight: 600 }}>Quadratic (β₂)</th>
+                  <th style={{ padding: '10px 14px', fontSize: 12, fontWeight: 600 }}>f² (Kenny)</th>
+                  <th style={{ padding: '10px 14px', fontSize: 12, fontWeight: 600 }}>Rating</th>
+                  <th style={{ padding: '10px 14px', fontSize: 12, fontWeight: 600 }}>t-statistic</th>
+                  <th style={{ padding: '10px 14px', fontSize: 12, fontWeight: 600 }}>p-value</th>
+                  <th style={{ padding: '10px 14px', fontSize: 12, fontWeight: 600 }}>95% CI</th>
+                  <th style={{ padding: '10px 14px', fontSize: 12, fontWeight: 600 }}>Turning Point x*</th>
+                  <th style={{ padding: '10px 14px', fontSize: 12, fontWeight: 600 }}>Shape</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rawNl.map((qe: any, idx: number) => {
+                  const isSel = idx === selectedQeIndex;
+                  const b1 = Number(qe.linear_effect ?? qe.b1_linear ?? 0);
+                  const b2 = Number(qe.quadratic_effect ?? qe.b2_quadratic ?? qe.b2_unstandardized ?? 0);
+                  const f2 = Number(qe.f2 ?? qe.f_squared ?? 0);
+                  const pVal = qe.p_value !== undefined ? Number(qe.p_value) : null;
+                  const tStat = qe.t_statistic ?? qe.t_stat;
+                  const tp = qe.turning_point !== null && qe.turning_point !== undefined ? Number(qe.turning_point) : null;
+                  const tpRange = qe.turning_in_range;
+
+                  return (
+                    <tr
+                      key={idx}
+                      onClick={() => setSelectedQeIndex(idx)}
+                      style={{
+                        cursor: 'pointer',
+                        backgroundColor: isSel ? 'rgba(16, 185, 129, 0.08)' : undefined,
+                        borderBottom: '1px solid var(--color-border-subtle)'
+                      }}
+                    >
+                      <td style={{ padding: '10px 14px', fontWeight: 600 }}>
+                        <span style={{ color: '#10b981', marginRight: 6 }}>●</span>
+                        {qe.predictor} → {qe.target}
+                      </td>
+                      <td style={{ padding: '10px 14px' }}>{fmt(b1)}</td>
+                      <td style={{ padding: '10px 14px', fontWeight: 600, color: b2 < 0 ? '#ef4444' : '#10b981' }}>{fmt(b2)}</td>
+                      <td style={{ padding: '10px 14px' }}>{fmt(f2)}</td>
+                      <td style={{ padding: '10px 14px', textTransform: 'capitalize' }}>
+                        <span style={{
+                          padding: '2px 6px',
+                          borderRadius: 4,
+                          fontSize: 11,
+                          fontWeight: 600,
+                          backgroundColor: f2 >= 0.05 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(217, 119, 6, 0.15)',
+                          color: f2 >= 0.05 ? '#059669' : '#d97706'
+                        }}>
+                          {qe.f2_rating || (f2 >= 0.1 ? 'large' : (f2 >= 0.05 ? 'medium' : (f2 >= 0.01 ? 'small' : 'none')))}
+                        </span>
+                      </td>
+                      <td style={{ padding: '10px 14px' }}>{tStat !== undefined ? fmt(tStat) : '—'}</td>
+                      <td style={{ padding: '10px 14px' }}>{pVal !== null ? getSigBadge(pVal) : '—'}</td>
+                      <td style={{ padding: '10px 14px', fontSize: 11, color: 'var(--color-text-muted)' }}>
+                        {qe.ci_lower !== undefined && qe.ci_upper !== undefined
+                          ? `[${fmt(qe.ci_lower)}, ${fmt(qe.ci_upper)}]`
+                          : '—'}
+                      </td>
+                      <td style={{ padding: '10px 14px' }}>
+                        {tp !== null ? (
+                          <span>
+                            {fmt(tp)} SD{' '}
+                            <span style={{ fontSize: 10, color: tpRange ? '#10b981' : 'var(--color-text-muted)' }}>
+                              ({tpRange ? 'in range' : 'outside'})
+                            </span>
+                          </span>
+                        ) : '—'}
+                      </td>
+                      <td style={{ padding: '10px 14px', fontSize: 12 }}>
+                        {qe.shape || (b2 < 0 ? 'Inverted U' : 'U-shape')}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Selector pills if multiple quadratic effects */}
+          {rawNl.length > 1 && (
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+              {rawNl.map((qe: any, idx: number) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => setSelectedQeIndex(idx)}
+                  className={`btn-pill ${idx === selectedQeIndex ? 'active' : ''}`}
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: 20,
+                    border: '1px solid',
+                    borderColor: idx === selectedQeIndex ? '#10b981' : 'var(--color-border-subtle)',
+                    backgroundColor: idx === selectedQeIndex ? 'rgba(16, 185, 129, 0.12)' : 'transparent',
+                    color: idx === selectedQeIndex ? '#059669' : 'var(--color-text-secondary)',
+                    fontWeight: idx === selectedQeIndex ? 600 : 400,
+                    cursor: 'pointer',
+                    fontSize: 12
+                  }}
+                >
+                  {qe.predictor} → {qe.target}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Metric Cards for the Selected Term */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14, marginBottom: 24 }}>
+            <div style={{ padding: 16, borderRadius: 10, backgroundColor: 'var(--color-bg-surface)', border: '1px solid var(--color-border-subtle)' }}>
+              <span style={{ fontSize: 12, color: 'var(--color-text-muted)', fontWeight: 600 }}>Linear Direct (β₁)</span>
+              <div style={{ fontSize: 24, fontWeight: 700, margin: '6px 0', color: 'var(--color-text-primary)' }}>
+                {fmt(betaLin)}
+              </div>
+              <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Main linear effect at mean ({source} = 0)</span>
+            </div>
+
+            <div style={{ padding: 16, borderRadius: 10, backgroundColor: 'var(--color-bg-surface)', border: '1px solid var(--color-border-subtle)' }}>
+              <span style={{ fontSize: 12, color: 'var(--color-text-muted)', fontWeight: 600 }}>Quadratic Effect (β₂)</span>
+              <div style={{ fontSize: 24, fontWeight: 700, margin: '6px 0', color: '#10b981' }}>
+                {fmt(betaQuad)}
+              </div>
+              <span>{pQuad !== undefined && pQuad !== null ? getSigBadge(pQuad) : <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Two-stage unscaled</span>}</span>
+            </div>
+
+            <div style={{ padding: 16, borderRadius: 10, backgroundColor: 'var(--color-bg-surface)', border: '1px solid var(--color-border-subtle)' }}>
+              <span style={{ fontSize: 12, color: 'var(--color-text-muted)', fontWeight: 600 }}>Kenny (2015) f² Effect Size</span>
+              <div style={{ fontSize: 24, fontWeight: 700, margin: '6px 0', color: f2Val >= 0.01 ? '#10b981' : '#d97706' }}>
+                {fmt(f2Val)}
+              </div>
+              <span style={{ fontSize: 11, color: f2Val >= 0.01 ? '#10b981' : '#d97706', textTransform: 'uppercase', fontWeight: 600 }}>
+                {f2Rating} (≥0.01 small, ≥0.05 med, ≥0.10 large)
+              </span>
+            </div>
+
+            <div style={{ padding: 16, borderRadius: 10, backgroundColor: 'var(--color-bg-surface)', border: '1px solid var(--color-border-subtle)' }}>
+              <span style={{ fontSize: 12, color: 'var(--color-text-muted)', fontWeight: 600 }}>Turning Point (x*)</span>
+              <div style={{ fontSize: 24, fontWeight: 700, margin: '6px 0', color: turningInRange ? '#10b981' : 'var(--color-text-primary)' }}>
+                {turningPoint !== null ? `${fmt(turningPoint)} SD` : '—'}
+              </div>
+              <span style={{ fontSize: 11, color: turningInRange ? '#059669' : 'var(--color-text-muted)' }}>
+                {turningInRange ? 'Lies inside observed range' : 'Outside observed range (monotonic in data)'}
+              </span>
+            </div>
+          </div>
+
+          {/* Visual Plot & Marginal Slopes Side-by-Side */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(320px, 1fr) minmax(340px, 1.2fr)', gap: 20, marginBottom: 24 }}>
+            {/* Interactive Curve Visualization */}
+            <div style={{ border: '1px solid var(--color-border-subtle)', borderRadius: 8, padding: 16, backgroundColor: 'var(--color-bg-surface)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <span style={{ fontWeight: 600, fontSize: 13 }}>Relationship Curve: {source} → {target}</span>
+                <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Basco et al. (2021)</span>
+              </div>
+              <svg viewBox="0 0 420 220" style={{ width: '100%', height: 'auto', maxHeight: 210 }}>
+                {/* Horizontal reference axis at y=0 */}
+                <line x1="45" y1={toPy(0)} x2="380" y2={toPy(0)} stroke="#cbd5e1" strokeWidth="1" strokeDasharray="2 2" />
+                {/* Vertical reference axis at x=0 */}
+                <line x1={toPx(0)} y1="30" x2={toPx(0)} y2="190" stroke="#cbd5e1" strokeWidth="1" strokeDasharray="2 2" />
+
+                {/* Vertical Turning Point Reference Line */}
+                {turningInRange && tpX !== null && tpX >= 45 && tpX <= 380 && (
+                  <>
+                    <line x1={tpX} y1="30" x2={tpX} y2="190" stroke="#ef4444" strokeWidth="1.5" strokeDasharray="3 3" />
+                    <rect x={tpX - 32} y="16" width="64" height="14" rx="3" fill="#fee2e2" stroke="#ef4444" strokeWidth="1" />
+                    <text x={tpX} y="26" textAnchor="middle" fontSize="9" fontWeight="600" fill="#dc2626">
+                      x* = {fmt(turningPoint)}
+                    </text>
+                  </>
+                )}
+
+                {/* Linear Reference Polyline */}
+                {linPoints && <polyline fill="none" stroke="#94a3b8" strokeWidth="2" strokeDasharray="4 4" points={linPoints} />}
+
+                {/* Quadratic Curve Polyline */}
+                {quadPoints && <polyline fill="none" stroke="#10b981" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" points={quadPoints} />}
+
+                {/* Axis Labels */}
+                <text x="210" y="212" textAnchor="middle" fontSize="10" fill="var(--color-text-secondary)">
+                  {source} (Standardized SD Units)
+                </text>
+                <text x="14" y="110" textAnchor="middle" fontSize="10" fill="var(--color-text-secondary)" transform="rotate(-90, 14, 110)">
+                  Predicted {target}
+                </text>
+              </svg>
+              <div style={{ display: 'flex', justifyContent: 'center', gap: 18, fontSize: 11, marginTop: 8 }}>
+                <span style={{ color: '#94a3b8' }}>- - - Linear Model (β₁ = {fmt(betaLin)})</span>
+                <span style={{ color: '#10b981', fontWeight: 600 }}>── Quadratic (β₁ = {fmt(betaLin)}, β₂ = {fmt(betaQuad)})</span>
+                {turningInRange && (
+                  <span style={{ color: '#dc2626', fontWeight: 600 }}>┆ Turning Point ({fmt(turningPoint)})</span>
+                )}
+              </div>
+            </div>
+
+            {/* Marginal Effects Table */}
+            <div style={{ border: '1px solid var(--color-border-subtle)', borderRadius: 8, overflow: 'hidden', backgroundColor: 'var(--color-bg-surface)' }}>
+              <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--color-border-subtle)', fontWeight: 600, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>Marginal Effects across Predictor Levels</span>
+                <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>dy/dx = β₁ + 2β₂x</span>
+              </div>
+              <table className="results-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ backgroundColor: 'var(--color-bg-surface)', borderBottom: '1px solid var(--color-border-subtle)', textAlign: 'left' }}>
+                    <th style={{ padding: '9px 12px', fontSize: 11, fontWeight: 600 }}>Level of {source}</th>
+                    <th style={{ padding: '9px 12px', fontSize: 11, fontWeight: 600 }}>x (SD)</th>
+                    <th style={{ padding: '9px 12px', fontSize: 11, fontWeight: 600 }}>Slope (dy/dx)</th>
+                    <th style={{ padding: '9px 12px', fontSize: 11, fontWeight: 600 }}>Predicted {target}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(activeQe.marginal_effects || []).map((row: any, rIdx: number) => (
+                    <tr key={rIdx} style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
+                      <td style={{ padding: '9px 12px', fontWeight: 600, fontSize: 12 }}>{row.level}</td>
+                      <td style={{ padding: '9px 12px', fontSize: 12 }}>{fmt(row.x)}</td>
+                      <td style={{ padding: '9px 12px', fontWeight: 600, color: row.slope > 0 ? '#10b981' : '#ef4444', fontSize: 12 }}>
+                        {fmt(row.slope)}
+                      </td>
+                      <td style={{ padding: '9px 12px', fontSize: 12 }}>{fmt(row.predicted_y)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Interpretation Callout */}
+          <div style={{
+            padding: 16,
+            borderRadius: 8,
+            backgroundColor: 'rgba(16, 185, 129, 0.08)',
+            border: '1px solid rgba(16, 185, 129, 0.25)',
+            display: 'flex',
+            gap: 12,
+            alignItems: 'flex-start'
+          }}>
+            <span style={{ fontSize: 20 }}>💡</span>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 13, color: '#065f46', marginBottom: 4 }}>
+                Interpretation (Hair et al., 2024 / Basco et al., 2021)
+              </div>
+              <div style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--color-text-secondary)' }}>
+                {interpretation}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Fallback: Standalone modal analysisData rendering
     const {
       source = 'X',
       target = 'Y',
@@ -1221,13 +1536,11 @@ export const AdvancedResultPanels: React.FC<AdvancedResultPanelsProps> = ({
     const pQuad = quadratic_model.quadratic_p_value ?? 1;
     const isQuadSig = pQuad < 0.05 && f_squared >= 0.01;
 
-    // SVG curve simulation
     const points: string[] = [];
     const linPoints: string[] = [];
     for (let x = -2; x <= 2; x += 0.2) {
       const yLin = betaLin * x;
       const yQuad = betaLin * x + betaQuad * (x * x);
-      // Map x from [-2, 2] -> [40, 360], y from [-1.5, 1.5] -> [160, 40]
       const px = 40 + ((x + 2) / 4) * 320;
       const pyLin = 100 - (yLin / 1.5) * 60;
       const pyQuad = 100 - (yQuad / 1.5) * 60;
@@ -1242,11 +1555,10 @@ export const AdvancedResultPanels: React.FC<AdvancedResultPanelsProps> = ({
             Nonlinear &amp; Quadratic Effects: {source} → {target}
           </h3>
           <p style={{ margin: 0, fontSize: 13, color: 'var(--color-text-muted)' }}>
-            Polynomial regression ($Y = \beta_1 X + \beta_2 X^2$) with Kenny (2015) effect size and marginal slope evaluation (Hair et al., 2018 Ch. 3).
+            Polynomial regression ($Y = \beta_1 X + \beta_2 X^2$) with Kenny (2015) effect size and marginal slope evaluation.
           </p>
         </div>
 
-        {/* Metric Cards */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14, marginBottom: 24 }}>
           <div style={{ padding: 16, borderRadius: 10, backgroundColor: 'var(--color-bg-surface)', border: '1px solid var(--color-border-subtle)' }}>
             <span style={{ fontSize: 12, color: 'var(--color-text-muted)', fontWeight: 600 }}>Linear Path (β₁)</span>
@@ -1258,7 +1570,7 @@ export const AdvancedResultPanels: React.FC<AdvancedResultPanelsProps> = ({
 
           <div style={{ padding: 16, borderRadius: 10, backgroundColor: 'var(--color-bg-surface)', border: '1px solid var(--color-border-subtle)' }}>
             <span style={{ fontSize: 12, color: 'var(--color-text-muted)', fontWeight: 600 }}>Quadratic Path (β₂)</span>
-            <div style={{ fontSize: 24, fontWeight: 700, margin: '6px 0', color: isQuadSig ? '#16a34a' : 'var(--color-accent)' }}>
+            <div style={{ fontSize: 24, fontWeight: 700, margin: '6px 0', color: isQuadSig ? '#10b981' : 'var(--color-accent)' }}>
               {fmt(betaQuad)}
             </div>
             <span>{getSigBadge(pQuad)}</span>
@@ -1266,17 +1578,17 @@ export const AdvancedResultPanels: React.FC<AdvancedResultPanelsProps> = ({
 
           <div style={{ padding: 16, borderRadius: 10, backgroundColor: 'var(--color-bg-surface)', border: '1px solid var(--color-border-subtle)' }}>
             <span style={{ fontSize: 12, color: 'var(--color-text-muted)', fontWeight: 600 }}>Kenny (2015) f² Effect Size</span>
-            <div style={{ fontSize: 24, fontWeight: 700, margin: '6px 0', color: f_squared >= 0.01 ? '#16a34a' : '#d97706' }}>
+            <div style={{ fontSize: 24, fontWeight: 700, margin: '6px 0', color: f_squared >= 0.01 ? '#10b981' : '#d97706' }}>
               {fmt(f_squared)}
             </div>
-            <span style={{ fontSize: 11, color: f_squared >= 0.01 ? '#16a34a' : '#d97706' }}>
+            <span style={{ fontSize: 11, color: f_squared >= 0.01 ? '#10b981' : '#d97706', textTransform: 'uppercase' }}>
               {f2_rating.toUpperCase()} (≥0.01 small, ≥0.05 med, ≥0.10 large)
             </span>
           </div>
 
           <div style={{ padding: 16, borderRadius: 10, backgroundColor: 'var(--color-bg-surface)', border: '1px solid var(--color-border-subtle)' }}>
             <span style={{ fontSize: 12, color: 'var(--color-text-muted)', fontWeight: 600 }}>Decision Recommendation</span>
-            <div style={{ fontSize: 15, fontWeight: 700, margin: '8px 0', color: isQuadSig ? '#16a34a' : '#64748b' }}>
+            <div style={{ fontSize: 15, fontWeight: 700, margin: '8px 0', color: isQuadSig ? '#10b981' : '#64748b' }}>
               {isQuadSig ? 'Retain Quadratic Term' : 'Keep Linear Model'}
             </div>
             <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
@@ -1285,39 +1597,32 @@ export const AdvancedResultPanels: React.FC<AdvancedResultPanelsProps> = ({
           </div>
         </div>
 
-        {/* Visual Plot & Marginal Slopes */}
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 1fr) minmax(320px, 1.2fr)', gap: 20, marginBottom: 24 }}>
-          {/* Curve Visualization */}
           <div style={{ border: '1px solid var(--color-border-subtle)', borderRadius: 8, padding: 16, backgroundColor: 'var(--color-bg-surface)' }}>
             <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 12 }}>Relationship Curve Simulation</div>
             <svg viewBox="0 0 400 200" style={{ width: '100%', height: 'auto', maxHeight: 180 }}>
-              {/* Axes */}
-              <line x1="40" y1="100" x2="360" y2="100" stroke="#cbd5e1" strokeWidth="1" strokeDasharray="2,2" />
-              <line x1="200" y1="20" x2="200" y2="180" stroke="#cbd5e1" strokeWidth="1" strokeDasharray="2,2" />
-              {/* Linear Path */}
-              <polyline fill="none" stroke="#94a3b8" strokeWidth="2" strokeDasharray="4,4" points={linPoints.join(' ')} />
-              {/* Quadratic Path */}
-              <polyline fill="none" stroke="var(--color-accent, #2563eb)" strokeWidth="3" points={points.join(' ')} />
-              {/* Labels */}
+              <line x1="40" y1="100" x2="360" y2="100" stroke="#cbd5e1" strokeWidth="1" strokeDasharray="2 2" />
+              <line x1="200" y1="20" x2="200" y2="180" stroke="#cbd5e1" strokeWidth="1" strokeDasharray="2 2" />
+              <polyline fill="none" stroke="#94a3b8" strokeWidth="2" strokeDasharray="4 4" points={linPoints.join(' ')} />
+              <polyline fill="none" stroke="#10b981" strokeWidth="3" points={points.join(' ')} />
               <text x="200" y="195" textAnchor="middle" fontSize="10" fill="#64748b">{source} (Normalized -2 to +2 SD)</text>
               <text x="15" y="100" textAnchor="middle" fontSize="10" fill="#64748b" transform="rotate(-90, 15, 100)">{target}</text>
             </svg>
             <div style={{ display: 'flex', justifyContent: 'center', gap: 16, fontSize: 11, marginTop: 8 }}>
               <span style={{ color: '#94a3b8' }}>- - - Linear Model (β = {fmt(betaLin)})</span>
-              <span style={{ color: 'var(--color-accent, #2563eb)', fontWeight: 600 }}>── Quadratic (β₁={fmt(betaLin)}, β₂={fmt(betaQuad)})</span>
+              <span style={{ color: '#10b981', fontWeight: 600 }}>── Quadratic (β₁={fmt(betaLin)}, β₂={fmt(betaQuad)})</span>
             </div>
           </div>
 
-          {/* Marginal Slopes Table */}
           <div style={{ border: '1px solid var(--color-border-subtle)', borderRadius: 8, overflow: 'hidden' }}>
             <div style={{ padding: '12px 14px', backgroundColor: 'var(--color-bg-surface)', borderBottom: '1px solid var(--color-border-subtle)', fontWeight: 600, fontSize: 13 }}>
-              Marginal Slopes across Predictor Levels (Exhibit 3.16)
+              Marginal Slopes across Predictor Levels
             </div>
             <table className="results-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ backgroundColor: 'var(--color-bg-surface)', borderBottom: '1px solid var(--color-border-subtle)', textAlign: 'left' }}>
                   <th style={{ padding: '10px 14px', fontSize: 12, fontWeight: 600 }}>Level of {source}</th>
-                  <th style={{ padding: '10px 14px', fontSize: 12, fontWeight: 600 }}>Marginal Slope (β₁ + 2β₂X)</th>
+                  <th style={{ padding: '10px 14px', fontSize: 12, fontWeight: 600 }}>Marginal Slope</th>
                   <th style={{ padding: '10px 14px', fontSize: 12, fontWeight: 600 }}>Interpretation</th>
                 </tr>
               </thead>
@@ -2218,56 +2523,421 @@ export const AdvancedResultPanels: React.FC<AdvancedResultPanelsProps> = ({
     );
   }
 
-  // 16. GAUSSIAN COPULA ENDOGENEITY
-  if (activeTab === 'copula') {
-    if (!analysisData) {
+  // 16. GAUSSIAN COPULA ENDOGENEITY (Liengaard et al., 2025; Park & Gupta, 2012)
+  if (activeTab === 'copula' || activeTab === 'gaussian_copula') {
+    const gcData = results?.gaussian_copula || analysisResults?.gaussian_copula || results?.copula || analysisResults?.copula || analysisData;
+
+    if (!gcData) {
       return (
         <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--color-text-muted)' }}>
           <h4 style={{ margin: '0 0 8px', fontSize: 16, fontWeight: 600, color: 'var(--color-text-primary)' }}>No Gaussian Copula Results</h4>
-          <p style={{ margin: 0, fontSize: 13 }}>Click <strong>Calculate → Gaussian Copula Endogeneity...</strong> to test for omitted variable bias.</p>
+          <p style={{ margin: 0, fontSize: 13 }}>Add Gaussian copula terms on structural paths using the <strong>Gaussian Copula</strong> canvas tool and click <strong>Calculate</strong>.</p>
         </div>
       );
     }
 
-    const {
-      candidate_predictor = 'X',
-      target_construct = 'Y',
-      copula_coefficient = 0,
-      p_value = 1,
-      is_endogenous = false,
-      standard_error = 0,
-    } = analysisData;
+    const endoTests = gcData.endogeneity_tests || [];
+    const waldTests = gcData.wald_tests || {};
+    const regDiags = gcData.regressor_diagnostics || [];
+    const effectsOfCorrection = gcData.effects_of_correction || [];
+    const sampleSize = gcData.sample_size || (results?.sample_size ?? 0);
+    const collinearityErr = gcData.collinearity_error;
+
+    const copyTableData = (headers: string[], rows: (string | number)[][]) => {
+      const tsv = [headers.join('\t'), ...rows.map(r => r.join('\t'))].join('\n');
+      navigator.clipboard.writeText(tsv);
+      try {
+        window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Table copied to clipboard (TSV)' } }));
+      } catch (e) {}
+    };
 
     return (
       <div className="results-content-pane">
-        <div style={{ marginBottom: 20 }}>
-          <h3 style={{ margin: '0 0 4px', fontSize: 18, fontWeight: 600, color: 'var(--color-text-primary)' }}>
-            Gaussian Copula Endogeneity Test: {candidate_predictor} → {target_construct}
-          </h3>
-          <p style={{ margin: 0, fontSize: 13, color: 'var(--color-text-muted)' }}>
-            Instrument-free assessment of potential omitted variable bias using empirical inversion (Park &amp; Gupta, 2012; Hult et al., 2018).
-          </p>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14, marginBottom: 24 }}>
-          <div style={{ padding: 16, borderRadius: 10, backgroundColor: 'var(--color-bg-surface)', border: '1px solid var(--color-border-subtle)' }}>
-            <span style={{ fontSize: 12, color: 'var(--color-text-muted)', fontWeight: 600 }}>Endogeneity Decision</span>
-            <div style={{ fontSize: 18, fontWeight: 700, margin: '8px 0', color: is_endogenous ? '#dc2626' : '#16a34a' }}>
-              {is_endogenous ? 'Endogeneity Present (p < .05)' : 'Exogeneity Supported (p ≥ .05)'}
-            </div>
-            <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
-              {is_endogenous ? 'Copula term is significant; address omitted variable bias.' : 'No significant omitted variable bias detected.'}
-            </span>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+          <div>
+            <h3 style={{ margin: '0 0 4px', fontSize: 18, fontWeight: 600, color: 'var(--color-text-primary)' }}>
+              Gaussian Copula (Endogeneity Analysis)
+            </h3>
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--color-text-muted)' }}>
+              Instrument-free assessment and correction of potential omitted variable bias (Liengaard et al., 2025, <em>JAMS</em>; Park &amp; Gupta, 2012).
+            </p>
           </div>
-
-          <div style={{ padding: 16, borderRadius: 10, backgroundColor: 'var(--color-bg-surface)', border: '1px solid var(--color-border-subtle)' }}>
-            <span style={{ fontSize: 12, color: 'var(--color-text-muted)', fontWeight: 600 }}>Copula Term Coefficient</span>
-            <div style={{ fontSize: 24, fontWeight: 700, margin: '6px 0', color: 'var(--color-accent)' }}>
-              {fmt(copula_coefficient)}
-            </div>
-            <span>{getSigBadge(p_value)}</span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {onExportExcel && (
+              <button className="btn btn-secondary btn-sm" onClick={onExportExcel}>
+                Excel
+              </button>
+            )}
+            {onExportPdf && (
+              <button className="btn btn-secondary btn-sm" onClick={onExportPdf}>
+                PDF
+              </button>
+            )}
           </div>
         </div>
+
+        {/* Collinearity Error Alert */}
+        {collinearityErr && (
+          <div style={{ padding: '12px 16px', borderRadius: 8, backgroundColor: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', marginBottom: 18, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 18 }}>⚠️</span>
+            <span style={{ fontSize: 13, fontWeight: 500 }}>{collinearityErr}</span>
+          </div>
+        )}
+
+        {/* Small Sample Warning */}
+        {sampleSize > 0 && sampleSize < 200 && (
+          <div style={{ padding: '10px 14px', borderRadius: 8, backgroundColor: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', marginBottom: 18, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 16 }}>⚠️</span>
+            <span style={{ fontSize: 12 }}>Small sample size (N = {sampleSize} &lt; 200). Gaussian copula estimates may exhibit bias in small samples.</span>
+          </div>
+        )}
+
+        {/* Sub-tabs Navigation */}
+        <div style={{ display: 'flex', gap: 8, borderBottom: '1px solid var(--color-border-subtle)', marginBottom: 20 }}>
+          <button
+            className={`btn btn-sm ${gcSubTab === 'endogeneity' ? 'btn-primary' : 'btn-ghost'}`}
+            style={{ borderRadius: '6px 6px 0 0' }}
+            onClick={() => setGcSubTab('endogeneity')}
+          >
+            Endogeneity Tests ({endoTests.length})
+          </button>
+          <button
+            className={`btn btn-sm ${gcSubTab === 'wald' ? 'btn-primary' : 'btn-ghost'}`}
+            style={{ borderRadius: '6px 6px 0 0' }}
+            onClick={() => setGcSubTab('wald')}
+          >
+            Joint Wald Tests
+          </button>
+          <button
+            className={`btn btn-sm ${gcSubTab === 'diagnostics' ? 'btn-primary' : 'btn-ghost'}`}
+            style={{ borderRadius: '6px 6px 0 0' }}
+            onClick={() => setGcSubTab('diagnostics')}
+          >
+            Regressor Diagnostics ({regDiags.length})
+          </button>
+          <button
+            className={`btn btn-sm ${gcSubTab === 'correction' ? 'btn-primary' : 'btn-ghost'}`}
+            style={{ borderRadius: '6px 6px 0 0' }}
+            onClick={() => setGcSubTab('correction')}
+          >
+            Effect of Correction ({effectsOfCorrection.length})
+          </button>
+        </div>
+
+        {/* Sub-tab 1: Endogeneity tests */}
+        {gcSubTab === 'endogeneity' && (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-secondary)' }}>
+                Individual Copula Terms Significance
+              </span>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => copyTableData(
+                  ['Relationship', 'Copula Construct', 'Original (O)', 'Sample Mean (M)', 'SE', 't-statistic', 'p-value', '95% CI', 'Significant (p < .05)'],
+                  endoTests.map((t: any) => [
+                    t.relationship,
+                    t.gc_construct,
+                    fmt(t.original, 3),
+                    fmt(t.mean, 3),
+                    fmt(t.se, 3),
+                    fmt(t.t_stat, 3),
+                    fmt(t.p_value, 4),
+                    `[${fmt(t.ci_lower, 3)}, ${fmt(t.ci_upper, 3)}]`,
+                    t.is_significant ? 'Yes' : 'No'
+                  ])
+                )}
+              >
+                Copy Table
+              </button>
+            </div>
+            <table className="scientific-table">
+              <thead>
+                <tr>
+                  <th>Relationship</th>
+                  <th>Copula Construct</th>
+                  <th>Original (γ)</th>
+                  <th>Sample Mean (M)</th>
+                  <th>Std Error (SE)</th>
+                  <th>t-statistic</th>
+                  <th>p-value</th>
+                  <th>95% CI</th>
+                  <th>Significance</th>
+                </tr>
+              </thead>
+              <tbody>
+                {endoTests.map((row: any, i: number) => {
+                  const pVal = Number(row.p_value ?? 1);
+                  const isSig = row.is_significant || pVal < 0.05;
+                  return (
+                    <tr key={i}>
+                      <td style={{ fontWeight: 600 }}>{row.relationship}</td>
+                      <td>
+                        <span style={{ fontSize: 11, fontFamily: 'monospace', padding: '2px 6px', borderRadius: 4, backgroundColor: 'rgba(107,78,230,0.1)', color: 'var(--color-accent)' }}>
+                          {row.gc_construct}
+                        </span>
+                      </td>
+                      <td className="cell-sig"><div className="cell-value">{fmt(row.original, 3)}</div></td>
+                      <td>{fmt(row.mean, 3)}</td>
+                      <td>{fmt(row.se, 3)}</td>
+                      <td>{fmt(row.t_stat, 3)}</td>
+                      <td style={{ fontWeight: isSig ? 700 : 400, color: isSig ? '#16a34a' : 'inherit' }}>
+                        {fmt(pVal, 4)}
+                      </td>
+                      <td>[{fmt(row.ci_lower, 3)}, {fmt(row.ci_upper, 3)}]</td>
+                      <td>
+                        <span style={{
+                          fontSize: 11,
+                          padding: '2px 6px',
+                          borderRadius: 4,
+                          fontWeight: 600,
+                          backgroundColor: isSig ? '#dcfce7' : '#f1f5f9',
+                          color: isSig ? '#15803d' : '#64748b'
+                        }}>
+                          {isSig ? 'Endogenous (p < .05)' : 'Exogenous (ns)'}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Sub-tab 2: Joint Wald tests */}
+        {gcSubTab === 'wald' && (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-secondary)' }}>
+                Joint Significance (Wald Test: H₀: all copula coefficients = 0)
+              </span>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  const perTarget = Object.entries(waldTests.per_target || {}).map(([tgt, st]: [string, any]) => [
+                    `Target: ${tgt}`,
+                    fmt(st.statistic, 3),
+                    String(st.df),
+                    fmt(st.p_value, 4),
+                    st.significant ? 'Significant' : 'Not Significant'
+                  ]);
+                  const overall = waldTests.overall ? [[
+                    'Overall Model',
+                    fmt(waldTests.overall.statistic, 3),
+                    String(waldTests.overall.df),
+                    fmt(waldTests.overall.p_value, 4),
+                    waldTests.overall.significant ? 'Significant' : 'Not Significant'
+                  ]] : [];
+                  copyTableData(['Scope', 'Chi-Square (W)', 'df', 'p-value', 'Decision'], [...perTarget, ...overall]);
+                }}
+              >
+                Copy Table
+              </button>
+            </div>
+            <table className="scientific-table" style={{ marginBottom: 16 }}>
+              <thead>
+                <tr>
+                  <th>Target Construct / Scope</th>
+                  <th>Chi-Square (W)</th>
+                  <th>df</th>
+                  <th>p-value</th>
+                  <th>Joint Decision</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(waldTests.per_target || {}).map(([tgt, st]: [string, any]) => {
+                  const pVal = Number(st.p_value ?? 1);
+                  const isSig = st.significant || pVal < 0.05;
+                  return (
+                    <tr key={tgt}>
+                      <td style={{ fontWeight: 600 }}>Target: {tgt}</td>
+                      <td>{fmt(st.statistic, 3)}</td>
+                      <td>{st.df}</td>
+                      <td style={{ fontWeight: isSig ? 700 : 400, color: isSig ? '#16a34a' : 'inherit' }}>
+                        {fmt(pVal, 4)}
+                      </td>
+                      <td>
+                        <span style={{
+                          fontSize: 11,
+                          padding: '2px 6px',
+                          borderRadius: 4,
+                          fontWeight: 600,
+                          backgroundColor: isSig ? '#dcfce7' : '#f1f5f9',
+                          color: isSig ? '#15803d' : '#64748b'
+                        }}>
+                          {isSig ? 'Endogeneity Present (p < .05)' : 'No Joint Endogeneity'}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {waldTests.overall && (
+                  <tr style={{ backgroundColor: 'var(--color-bg-surface, #f8fafc)', fontWeight: 600 }}>
+                    <td>Overall Model</td>
+                    <td>{fmt(waldTests.overall.statistic, 3)}</td>
+                    <td>{waldTests.overall.df}</td>
+                    <td style={{ color: waldTests.overall.significant ? '#16a34a' : 'inherit' }}>
+                      {fmt(waldTests.overall.p_value, 4)}
+                    </td>
+                    <td>
+                      <span style={{
+                        fontSize: 11,
+                        padding: '2px 6px',
+                        borderRadius: 4,
+                        fontWeight: 600,
+                        backgroundColor: waldTests.overall.significant ? '#dcfce7' : '#f1f5f9',
+                        color: waldTests.overall.significant ? '#15803d' : '#64748b'
+                      }}>
+                        {waldTests.overall.significant ? 'Endogeneity Present (p < .05)' : 'No Joint Endogeneity'}
+                      </span>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+
+            <div style={{ padding: '12px 14px', borderRadius: 8, backgroundColor: 'var(--color-bg-surface, #f8fafc)', border: '1px solid var(--color-border-subtle, #e2e8f0)', fontSize: 12, color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>
+              💡 <strong>Interpretation Note:</strong> {waldTests.interpretation || 'Researchers should retain and interpret the copula model estimates even when GC terms are not statistically significant, due to lower power of copula tests in finite samples (Liengaard et al., 2025).'}
+            </div>
+          </div>
+        )}
+
+        {/* Sub-tab 3: Regressor diagnostics */}
+        {gcSubTab === 'diagnostics' && (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-secondary)' }}>
+                Regressor Non-Normality &amp; Identification Diagnostics
+              </span>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => copyTableData(
+                  ['Construct', 'Role', 'Skewness', 'Excess Kurtosis', 'Anderson-Darling (p)', 'Cramer-von Mises (p)', 'Corr(P, C(P))', 'Assessment'],
+                  regDiags.map((d: any) => [
+                    d.construct,
+                    d.role,
+                    fmt(d.skewness, 3),
+                    fmt(d.excess_kurtosis, 3),
+                    `${fmt(d.anderson_darling?.statistic, 3)} (p=${fmt(d.anderson_darling?.p_value, 3)})`,
+                    `${fmt(d.cramer_von_mises?.statistic, 3)} (p=${fmt(d.cramer_von_mises?.p_value, 3)})`,
+                    fmt(d.corr_p_cp, 3),
+                    d.warnings?.join('; ') || 'Non-normal supported'
+                  ])
+                )}
+              >
+                Copy Table
+              </button>
+            </div>
+            <table className="scientific-table">
+              <thead>
+                <tr>
+                  <th>Construct</th>
+                  <th>Role</th>
+                  <th>Skewness</th>
+                  <th>Excess Kurtosis</th>
+                  <th>Anderson-Darling (p)</th>
+                  <th>Cramer-von Mises (p)</th>
+                  <th>Corr(P, C(P))</th>
+                  <th>Non-Normality Assessment</th>
+                </tr>
+              </thead>
+              <tbody>
+                {regDiags.map((d: any, i: number) => {
+                  const hasWarning = d.warnings && d.warnings.length > 0;
+                  return (
+                    <tr key={i}>
+                      <td style={{ fontWeight: 600 }}>{d.construct}</td>
+                      <td>{d.role}</td>
+                      <td>{fmt(d.skewness, 3)}</td>
+                      <td>{fmt(d.excess_kurtosis, 3)}</td>
+                      <td>{fmt(d.anderson_darling?.statistic, 3)} (p={fmt(d.anderson_darling?.p_value, 3)})</td>
+                      <td>{fmt(d.cramer_von_mises?.statistic, 3)} (p={fmt(d.cramer_von_mises?.p_value, 3)})</td>
+                      <td>{fmt(d.corr_p_cp, 3)}</td>
+                      <td>
+                        {hasWarning ? (
+                          <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, backgroundColor: '#fef3c7', color: '#b45309', fontWeight: 600 }}>
+                            ⚠️ {d.warnings[0]}
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, backgroundColor: '#dcfce7', color: '#15803d', fontWeight: 600 }}>
+                            ✓ Sufficient non-normality (p &lt; .05)
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Sub-tab 4: Effect of the correction */}
+        {gcSubTab === 'correction' && (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-secondary)' }}>
+                Comparison: Stage 1 (Standard PLS) vs Stage 2 (Copula-Corrected)
+              </span>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => copyTableData(
+                  ['Relationship', 'Stage 1 (without GC)', 'Stage 2 (with GC)', 'Difference', 'Diff SE', 'Diff 95% CI', 'Diff p-value'],
+                  effectsOfCorrection.map((e: any) => [
+                    e.relationship,
+                    fmt(e.stage1_coefficient, 3),
+                    fmt(e.stage2_coefficient, 3),
+                    fmt(e.difference, 3),
+                    fmt(e.diff_se, 3),
+                    `[${fmt(e.diff_ci_lower, 3)}, ${fmt(e.diff_ci_upper, 3)}]`,
+                    fmt(e.diff_pvalue, 4)
+                  ])
+                )}
+              >
+                Copy Table
+              </button>
+            </div>
+            <table className="scientific-table">
+              <thead>
+                <tr>
+                  <th>Relationship</th>
+                  <th>Stage 1 (without GC)</th>
+                  <th>Stage 2 (with GC)</th>
+                  <th>Difference (Δ)</th>
+                  <th>Diff SE</th>
+                  <th>Diff 95% CI</th>
+                  <th>Diff p-value</th>
+                  <th>Correction Shift</th>
+                </tr>
+              </thead>
+              <tbody>
+                {effectsOfCorrection.map((e: any, i: number) => {
+                  const diff = Number(e.difference ?? 0);
+                  const pVal = e.diff_pvalue !== undefined ? Number(e.diff_pvalue) : null;
+                  return (
+                    <tr key={i}>
+                      <td style={{ fontWeight: 600 }}>{e.relationship}</td>
+                      <td>{fmt(e.stage1_coefficient, 3)}</td>
+                      <td className="cell-sig"><div className="cell-value">{fmt(e.stage2_coefficient, 3)}</div></td>
+                      <td style={{ fontWeight: 600, color: diff !== 0 ? 'var(--color-accent)' : 'inherit' }}>
+                        {fmt(diff, 3)}
+                      </td>
+                      <td>{fmt(e.diff_se, 3)}</td>
+                      <td>[{fmt(e.diff_ci_lower, 3)}, {fmt(e.diff_ci_upper, 3)}]</td>
+                      <td>{pVal !== null ? fmt(pVal, 4) : '—'}</td>
+                      <td>
+                        <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, backgroundColor: 'rgba(107,78,230,0.1)', color: 'var(--color-accent)', fontWeight: 600 }}>
+                          {diff > 0 ? `+${fmt(diff, 3)} upward` : (diff < 0 ? `${fmt(diff, 3)} downward` : 'No shift')}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     );
   }

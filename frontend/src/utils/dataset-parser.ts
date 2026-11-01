@@ -61,8 +61,14 @@ export function processData(
     .map(s => s.trim())
     .filter(Boolean);
 
+  // Filter out completely blank/empty rows (e.g. from trailing empty lines in CSV files)
+  const nonBlankRawRows = (rawRows || []).filter(row => {
+    if (!row || !Array.isArray(row)) return false;
+    return row.some(cell => cell !== null && cell !== undefined && String(cell).trim() !== '');
+  });
+
   // Step 1: Replace all designated missing values with null
-  let processedRows: any[][] = rawRows.map(row => {
+  let processedRows: any[][] = nonBlankRawRows.map(row => {
     return headers.map((_, colIdx) => {
       const cell = row ? row[colIdx] : null;
       if (isMissingValue(cell, markerList)) {
@@ -180,6 +186,7 @@ export async function parseDatasetFile(file: File): Promise<ParsedDataset> {
     
     if (name.endsWith('.csv') || name.endsWith('.txt')) {
       Papa.parse(file, {
+        skipEmptyLines: 'greedy',
         complete: (results) => {
           if (!results.data || results.data.length === 0) return reject("Empty file");
           const headers = results.data[0] as string[];

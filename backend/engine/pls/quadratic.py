@@ -1,27 +1,334 @@
 """
-Non-linear (Quadratic and Cubic) Effects Analysis (A18-NL-01 to A18-NL-14).
-Source of truth: Hair et al. (2018) Ch. 2 & Kenny (2015).
-
+SmartPLS-4 Style Nonlinear (Quadratic) Effects Engine.
 Implements:
-1. Three polynomial term creation approaches:
-   - Two-stage approach (most versatile; recommended default)
-   - Product indicator approach (all unique cross-products x_u * x_v)
-   - Orthogonalizing approach (standardized residuals regressed on original indicators)
-2. Evaluation rules: Kenny (2015) f^2 effect size thresholds (0.005, 0.01, 0.025).
-3. Turning points x* = -beta_1 / (2 * beta_2) and curve coordinates vs linear line.
-4. Effect tables at Y1 = 0, 1, 2 and at +/- 1 SD.
-5. Keep-linear decision recommendation and optional cubic term.
+1. Two-stage approach (Hair et al. 2024; Basco et al. 2021) as default.
+   - Stage 1: Main effects model without quadratic terms, yielding standardized LV scores.
+   - Term construction: q = score², standardized as q* = (q - mean(q)) / sd(q).
+   - Stage 2: Full PLS-SEM on original model plus single-item "{P} x {P}" construct.
+   - Unscaling: beta_unstd = beta_std / sd(q), exactly reproducing SmartPLS 4 path coefficients.
+2. Product indicator and orthogonalizing generation methods.
+3. Kenny (2015) f² effect sizes (0.005 small, 0.010 medium, 0.025 large).
+4. Turning point: x* = -b1 * s / (2 * b2_std) = -b1 / (2 * b2_unstd) in SD units.
+5. Marginal effect table: dy/dx = b1 + 2 * b2_unstd * x at min, -1 SD, 0, +1 SD, max.
+6. Interactive effect curve coordinates: y_hat(x) = b1 * x + b2_unstd * (x² - m).
+7. Bootstrap re-estimation per resample (Stage 1 + term generation + Stage 2).
 """
 
 from typing import List, Dict, Any, Optional, Tuple, Union
-import itertools
+import copy
 import numpy as np
 import pandas as pd
 from scipy import stats
 
 from core.settings_schema import PipelineSettings
-from engine.pls.algorithm import run_pipeline
-from engine.pls.bootstrap import ParallelBootstrapper
+
+
+def standardize_series(s: Union[np.ndarray, pd.Series, List[float]], ddof: int = 1) -> np.ndarray:
+    """Standardizes a series to mean 0 and unit variance (sample SD by default, ddof=1)."""
+    arr = np.asarray(s, dtype=float)
+    m = np.nanmean(arr)
+    sd = np.nanstd(arr, ddof=ddof)
+    if sd == 0 or np.isnan(sd):
+        sd = 1.0
+    return (arr - m) / sd
+
+
+def normalize_quadratic_spec(
+    model_spec: Union[Dict[str, Any], Any]
+) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    """
+    Extracts and standardizes quadratic effects from a ModelSpec or dictionary.
+    Returns (spec_dict, list_of_quadratic_effects).
+    """
+    if hasattr(model_spec, "model_dump"):
+        spec_dict = model_spec.model_dump(mode="json", by_alias=True)
+    elif isinstance(model_spec, dict):
+        spec_dict = copy.deepcopy(model_spec)
+    else:
+        raise TypeError("model_spec must be a ModelSpec instance or dictionary")
+
+    raw_quads = spec_dict.get("quadratic_effects") or spec_dict.get("quadraticEffects") or []
+    c_list = spec_dict.get("constructs", [])
+    name_to_cid = {}
+    id_to_cname = {}
+    for c in c_list:
+        if isinstance(c, dict):
+            cid = str(c.get("id") or "")
+            cname = str(c.get("name") or "")
+            if cid:
+                id_to_cname[cid] = cname or cid
+                if cname:
+                    name_to_cid[cname] = cid
+
+    quadratics: List[Dict[str, Any]] = []
+    seen = set()
+
+    for idx, qe in enumerate(raw_quads):
+        if hasattr(qe, "model_dump"):
+            d = qe.model_dump(mode="json", by_alias=True)
+        elif isinstance(qe, dict):
+            d = dict(qe)
+        else:
+            continue
+
+        pred = str(
+            d.get("predictor_construct")
+            or d.get("predictorConstruct")
+            or d.get("construct_id")
+            or d.get("construct")
+            or d.get("predictor")
+            or d.get("source")
+            or d.get("source_construct")
+            or ""
+        ).strip()
+        tgt = str(
+            d.get("target_construct")
+            or d.get("targetConstruct")
+            or d.get("target")
+            or d.get("outcome")
+            or ""
+        ).strip()
+
+        if pred not in id_to_cname and pred in name_to_cid:
+            pred = name_to_cid[pred]
+        if tgt not in id_to_cname and tgt in name_to_cid:
+            tgt = name_to_cid[tgt]
+
+        if not pred or not tgt:
+            continue
+
+        key = (pred, tgt)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        pred_name = id_to_cname.get(pred, pred)
+        tgt_name = id_to_cname.get(tgt, tgt)
+        quad_construct_name = f"{pred_name} x {pred_name}"
+        quad_id = str(d.get("id") or f"quad_{pred}_{tgt}_{idx}")
+        indicator_name = f"q_{pred}_{tgt}"
+
+        quadratics.append({
+            "id": quad_id,
+            "predictor": pred,
+            "target": tgt,
+            "predictor_name": pred_name,
+            "target_name": tgt_name,
+            "quad_construct_name": quad_construct_name,
+            "indicator_name": indicator_name,
+            "method": str(d.get("method") or "two_stage").lower(),
+            "node_x": d.get("node_x") or d.get("nodeX"),
+            "node_y": d.get("node_y") or d.get("nodeY"),
+        })
+
+    return spec_dict, quadratics
+
+
+def calculate_kenny_f2(r2_included: float, r2_excluded: float) -> Dict[str, Any]:
+    """
+    Computes Kenny (2015) effect size f^2 = (R2_incl - R2_excl) / (1 - R2_incl).
+    Thresholds: 0.005 (small), 0.010 (medium), 0.025 (large).
+    """
+    denom = max(1e-12, 1.0 - r2_included)
+    f2_val = max(0.0, (r2_included - r2_excluded) / denom)
+
+    if f2_val < 0.005:
+        rating = "None (< 0.005)"
+    elif f2_val < 0.010:
+        rating = "Small (0.005 - 0.010)"
+    elif f2_val < 0.025:
+        rating = "Medium (0.010 - 0.025)"
+    else:
+        rating = "Large (>= 0.025)"
+
+    return {
+        "f_squared": round(float(f2_val), 4),
+        "f_squared_raw": float(f2_val),
+        "rating": rating,
+        "r2_included": round(float(r2_included), 4),
+        "r2_excluded": round(float(r2_excluded), 4),
+    }
+
+
+def compute_quadratic_diagnostics(
+    b1_linear: float,
+    b2_quad_unstd: float,
+    scale: float,
+    mean_sq: float,
+    predictor_scores: np.ndarray,
+    target_scores: Optional[np.ndarray] = None,
+    b_linear_stage1: Optional[float] = None,
+    f2_info: Optional[Dict[str, Any]] = None,
+    p_value: Optional[float] = None,
+    ci_lower: Optional[float] = None,
+    ci_upper: Optional[float] = None,
+) -> Dict[str, Any]:
+    """
+    Computes marginal effects, turning point, effect plot coordinates,
+    and interpretation text for a quadratic effect term.
+    """
+    sc = np.asarray(predictor_scores, dtype=float)
+    min_x = float(np.nanmin(sc)) if len(sc) > 0 else -2.5
+    max_x = float(np.nanmax(sc)) if len(sc) > 0 else 2.5
+
+    b2_quad_std = float(b2_quad_unstd * scale)
+    b_lin_ref = b_linear_stage1 if b_linear_stage1 is not None else b1_linear
+
+    # Turning point: x* = -b1 / (2 * b2_unstd) = -b1 * s / (2 * b2_std)
+    if abs(b2_quad_unstd) > 1e-9:
+        turning_point = float(-b1_linear / (2.0 * b2_quad_unstd))
+        turning_in_range = bool(min_x <= turning_point <= max_x)
+    else:
+        turning_point = None
+        turning_in_range = False
+
+    # Marginal effect table at [min, -1 SD, 0, +1 SD, max]
+    levels = [
+        ("Min (Observed)", min_x),
+        ("-1 SD (Low)", -1.0),
+        ("Mean (0 SD)", 0.0),
+        ("+1 SD (High)", 1.0),
+        ("Max (Observed)", max_x),
+    ]
+
+    marginal_effects = []
+    for label, x_val in levels:
+        # dy/dx = b1 + 2 * b2_unstd * x
+        slope = float(b1_linear + 2.0 * b2_quad_unstd * x_val)
+        # y_hat(x) = b1 * x + b2_unstd * (x^2 - mean_sq)
+        y_hat = float(b1_linear * x_val + b2_quad_unstd * (x_val ** 2 - mean_sq))
+        marginal_effects.append({
+            "level": label,
+            "x": round(float(x_val), 4),
+            "slope": round(float(slope), 4),
+            "predicted_y": round(float(y_hat), 4),
+        })
+
+    # Effect plot points across observed range (or [-3, +3])
+    x_plot_min = max(min_x, -3.0)
+    x_plot_max = min(max_x, 3.0)
+    x_grid = np.linspace(x_plot_min, x_plot_max, 51)
+    curve_points = []
+    for x in x_grid:
+        y_q = float(b1_linear * x + b2_quad_unstd * (x ** 2 - mean_sq))
+        y_lin = float(b_lin_ref * x)
+        curve_points.append({
+            "x": round(float(x), 4),
+            "y_nonlinear": round(float(y_q), 4),
+            "y_linear": round(float(y_lin), 4),
+        })
+
+    # Shape classification
+    is_sig = (p_value is not None and p_value < 0.05) or (ci_lower is not None and ci_upper is not None and (ci_lower > 0 or ci_upper < 0))
+    if not is_sig and p_value is not None:
+        shape = "Linear (no significant curvature)"
+    elif b2_quad_unstd < 0:
+        shape = "Inverted U-shape (diminishing returns)"
+    else:
+        shape = "U-shape (accelerating returns)"
+
+    # Short interpretation text
+    if not is_sig and p_value is not None:
+        interpretation = (
+            "The quadratic term is not statistically significant. "
+            "A linear relationship is supported; the nonlinear term can be disregarded."
+        )
+    else:
+        tp_text = (
+            f"The turning point x* = {round(turning_point, 3)} SD lies within the observed range ({round(min_x, 2)} to {round(max_x, 2)})."
+            if (turning_point is not None and turning_in_range)
+            else "The turning point lies outside the observed range; the observed relationship is monotonic within the data."
+        )
+        interpretation = (
+            f"A significant quadratic effect ({shape}) is observed. {tp_text} "
+            f"Direction and strength of the effect vary depending on the level of the predictor."
+        )
+
+    return {
+        "linear_effect": round(float(b1_linear), 4),
+        "quadratic_effect": round(float(b2_quad_unstd), 4),
+        "quadratic_effect_std": round(float(b2_quad_std), 4),
+        "scale": round(float(scale), 4),
+        "mean_sq": round(float(mean_sq), 4),
+        "turning_point": round(float(turning_point), 4) if turning_point is not None else None,
+        "turning_point_in_range": turning_in_range,
+        "shape": shape,
+        "interpretation": interpretation,
+        "marginal_effects": marginal_effects,
+        "curve_points": curve_points,
+        "f_squared": f2_info.get("f_squared") if f2_info else None,
+        "f_squared_rating": f2_info.get("rating") if f2_info else None,
+        "p_value": round(float(p_value), 4) if p_value is not None else None,
+        "ci_lower": round(float(ci_lower), 4) if ci_lower is not None else None,
+        "ci_upper": round(float(ci_upper), 4) if ci_upper is not None else None,
+        "is_significant": is_sig,
+    }
+
+
+def attach_bootstrap_to_quadratic(
+    res: Dict[str, Any],
+    boot_res: Dict[str, Any],
+    alpha: float = 0.05,
+) -> None:
+    """
+    Attaches bootstrap inference (SE, t, p-value, CI) to the nonlinear effects
+    section of the results dictionary.
+    """
+    nl_block = res.get("nonlinear_effects")
+    if not nl_block or not isinstance(nl_block, list):
+        return
+
+    p_summary = boot_res.get("parameter_summary") or boot_res.get("parameters") or {}
+    coef_reps = boot_res.get("replicates") or boot_res.get("samples") or {}
+
+    for item in nl_block:
+        term_name = item.get("quad_construct_name")
+        tgt = item.get("target")
+        pkey = f"path:{term_name}->{tgt}"
+        lin_key = f"path:{item.get('predictor')}->{tgt}"
+
+        stat = p_summary.get(pkey, {})
+        if stat:
+            item["standard_error"] = round(float(stat.get("standard_error", 0.0)), 4)
+            item["t_statistic"] = round(float(stat.get("t_statistic", 0.0)), 4)
+            item["p_value"] = round(float(stat.get("p_value", 1.0)), 4)
+            item["ci_lower"] = round(float(stat.get("ci_lower", 0.0)), 4)
+            item["ci_upper"] = round(float(stat.get("ci_upper", 0.0)), 4)
+            item["is_significant"] = bool(item["p_value"] < alpha)
+
+        # Turning point bootstrap CI if replicates are available
+        reps_b2 = coef_reps.get(pkey)
+        reps_b1 = coef_reps.get(lin_key)
+        if reps_b2 is not None and reps_b1 is not None and len(reps_b2) > 0:
+            scale = float(item.get("scale", 1.0))
+            # x* = -b1 / (2 * b2)
+            valid_mask = np.abs(reps_b2) > 1e-6
+            if np.sum(valid_mask) > len(reps_b2) * 0.8:
+                tp_reps = -reps_b1[valid_mask] / (2.0 * reps_b2[valid_mask])
+                tp_low = float(np.percentile(tp_reps, 100 * (alpha / 2)))
+                tp_high = float(np.percentile(tp_reps, 100 * (1.0 - alpha / 2)))
+                item["turning_point_ci_lower"] = round(tp_low, 4)
+                item["turning_point_ci_upper"] = round(tp_high, 4)
+
+        # Re-evaluate shape and interpretation with bootstrap inference
+        if item.get("p_value") is not None:
+            is_sig = item["is_significant"]
+            b2 = item.get("quadratic_effect", 0.0)
+            if not is_sig:
+                item["shape"] = "Linear (no significant curvature)"
+                item["interpretation"] = (
+                    "The quadratic term is not statistically significant. "
+                    "A linear relationship is supported; the nonlinear term can be disregarded."
+                )
+            else:
+                shape = "Inverted U-shape (diminishing returns)" if b2 < 0 else "U-shape (accelerating returns)"
+                item["shape"] = shape
+                tp = item.get("turning_point")
+                in_rng = item.get("turning_point_in_range", False)
+                tp_text = f"The turning point x* = {round(tp, 3)} SD lies within the observed range." if (tp is not None and in_rng) else "The turning point lies outside the observed range; the relationship is monotonic within the data."
+                item["interpretation"] = (
+                    f"A significant quadratic effect ({shape}) is observed (p = {item['p_value']}). {tp_text}"
+                )
 
 
 def analyze_quadratic_effect(
@@ -29,8 +336,8 @@ def analyze_quadratic_effect(
     spec: Union[Dict[str, Any], Any],
     source: str,
     target: str,
-    approach: str = "two_stage",  # "two_stage", "product_indicator", "orthogonalizing"
-    degree: int = 2,  # 2 for quadratic, 3 for cubic
+    approach: str = "two_stage",
+    degree: int = 2,
     n_boot: int = 500,
     seed: Optional[int] = 42,
     alpha: float = 0.05,
@@ -39,239 +346,44 @@ def analyze_quadratic_effect(
     cancel_event: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """
-    Evaluates polynomial non-linear effects: target ~ source + (source)^2 (+ (source)^3).
+    Stand-alone helper to analyze a quadratic effect on a path (backward-compatible API).
     """
-    spec_dict = spec.model_dump(mode="json", by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else {})
+    from engine.pls.algorithm import run_pipeline
+
+    spec_dict = spec.model_dump(mode="json", by_alias=True) if hasattr(spec, "model_dump") else copy.deepcopy(spec)
     cfg = settings or PipelineSettings()
 
-    # Step 1: Base linear model
-    res_linear = run_pipeline(df, spec_dict, cfg)
-    linear_r2 = float(res_linear.get("structural", {}).get("r_squared", {}).get(target, 0.0))
-    linear_paths = res_linear.get("structural", {}).get("path_coefficients", {})
-    beta_pure_linear = float(linear_paths.get(target, {}).get(source, 0.0))
+    # Add quadratic effect to spec
+    spec_with_quad = copy.deepcopy(spec_dict)
+    quads = list(spec_with_quad.get("quadratic_effects", []))
+    quads.append({
+        "id": f"quad_{source}_{target}",
+        "predictor_construct": source,
+        "target_construct": target,
+        "method": approach,
+    })
+    spec_with_quad["quadratic_effects"] = quads
 
-    scores = res_linear.get("construct_scores", {})
-    N = len(df)
+    res = run_pipeline(df, spec_with_quad, cfg)
 
-    from engine.pls.algorithm import parse_model_spec
-    constructs_dict, ind_col_map, paths_list = parse_model_spec(spec_dict)
-
-    source_inds = []
-    for iid in constructs_dict.get(source, {}).get("indicators", []):
-        col = ind_col_map.get(iid, iid)
-        if col in df.columns and col not in source_inds:
-            source_inds.append(col)
-
-    df_model = df.copy()
-    quad_name = f"{source}_squared"
-    quad_indicators = []
-
-    # Step 2: Build quadratic indicators according to selected approach (A18-NL-05)
-    if approach == "product_indicator":
-        # Product indicator approach: x_u * x_v for all pairs
-        if not source_inds:
-            raise ValueError(f"Source construct '{source}' has no indicators in dataset.")
-
-        # Standardize source indicators
-        X_src = df_model[source_inds].values.astype(float)
-        X_src_std = (X_src - np.mean(X_src, axis=0)) / (np.std(X_src, axis=0, ddof=0) or 1.0)
-
-        p_idx = 0
-        for u in range(len(source_inds)):
-            for v in range(u, len(source_inds)):
-                p_col = f"{quad_name}_p{p_idx}"
-                prod_vals = X_src_std[:, u] * X_src_std[:, v]
-                prod_std = (prod_vals - np.mean(prod_vals)) / (np.std(prod_vals, ddof=0) or 1.0)
-                df_model[p_col] = prod_std
-                quad_indicators.append(p_col)
-                p_idx += 1
-
-    elif approach == "orthogonalizing":
-        # Orthogonalizing approach: regress product indicators on all linear indicators
-        if not source_inds:
-            raise ValueError(f"Source construct '{source}' has no indicators in dataset.")
-
-        X_src = df_model[source_inds].values.astype(float)
-        X_src_std = (X_src - np.mean(X_src, axis=0)) / (np.std(X_src, axis=0, ddof=0) or 1.0)
-        X_des = np.column_stack([np.ones(N), X_src_std])
-
-        p_idx = 0
-        for u in range(len(source_inds)):
-            for v in range(u, len(source_inds)):
-                p_col = f"{quad_name}_ortho{p_idx}"
-                prod_raw = X_src_std[:, u] * X_src_std[:, v]
-                coefs, _, _, _ = np.linalg.lstsq(X_des, prod_raw, rcond=None)
-                res = prod_raw - X_des @ coefs
-                res_std = (res - np.mean(res)) / (np.std(res, ddof=0) or 1.0)
-                df_model[p_col] = res_std
-                quad_indicators.append(p_col)
-                p_idx += 1
-
-    else:
-        # Two-stage approach (recommended default) (A18-NL-05)
-        x_score = np.asarray(scores.get(source, np.zeros(N)), dtype=float)
-        x_std = (x_score - np.mean(x_score)) / (np.std(x_score, ddof=0) or 1.0)
-        x_sq = x_std ** 2
-        x_sq_std = (x_sq - np.mean(x_sq)) / (np.std(x_sq, ddof=0) or 1.0)
-        quad_col = f"{quad_name}_ind"
-        df_model[quad_col] = x_sq_std
-        quad_indicators.append(quad_col)
-
-    # Build spec with quadratic construct
-    new_constructs = list(spec_dict.get("constructs", [])) + [{
-        "id": quad_name,
-        "name": f"{source}²",
-        "type": "reflective",
-        "indicators": quad_indicators,
-    }]
-    new_indicators = list(spec_dict.get("indicators", [])) + [
-        {"name": col, "construct_id": quad_name} for col in quad_indicators
-    ]
-    new_paths = list(spec_dict.get("paths", [])) + [{
-        "from": quad_name,
-        "to": target,
-    }]
-
-    # Optional cubic term (A18-NL-13)
-    cubic_name = f"{source}_cubed"
-    if degree == 3:
-        x_score = np.asarray(scores.get(source, np.zeros(N)), dtype=float)
-        x_std = (x_score - np.mean(x_score)) / (np.std(x_score, ddof=0) or 1.0)
-        x_cub = x_std ** 3
-        x_cub_std = (x_cub - np.mean(x_cub)) / (np.std(x_cub, ddof=0) or 1.0)
-        cub_col = f"{cubic_name}_ind"
-        df_model[cub_col] = x_cub_std
-        new_constructs.append({
-            "id": cubic_name,
-            "name": f"{source}³",
-            "type": "reflective",
-            "indicators": [cub_col],
-        })
-        new_indicators.append({"name": cub_col, "construct_id": cubic_name})
-        new_paths.append({"from": cubic_name, "to": target})
-
-    quad_spec = {
-        "constructs": new_constructs,
-        "indicators": new_indicators,
-        "paths": new_paths,
-    }
-
-    # Step 3: Estimate quadratic model
-    res_quad = run_pipeline(df_model, quad_spec, cfg)
-    paths_quad = res_quad.get("structural", {}).get("path_coefficients", {})
-    quad_r2 = float(res_quad.get("structural", {}).get("r_squared", {}).get(target, 0.0))
-
-    beta_linear_in_quad = float(paths_quad.get(target, {}).get(source, 0.0))
-    beta_quad = float(paths_quad.get(target, {}).get(quad_name, 0.0))
-    beta_cubic = float(paths_quad.get(target, {}).get(cubic_name, 0.0)) if degree == 3 else 0.0
-
-    # Turning point for quadratic: x* = -beta_1 / (2 * beta_2) (A18-NL-01)
-    turning_point = (-beta_linear_in_quad / (2.0 * beta_quad)) if abs(beta_quad) > 1e-6 else None
-
-    # Step 4: Bootstrapping for quadratic significance
-    booter = ParallelBootstrapper()
-    boot_res = booter.run(
-        data=df_model,
-        model_spec=quad_spec,
-        n_boot=n_boot,
-        seed=seed,
-        scheme=cfg.inner_weighting,
-        mode="basic",
-        sign_change="none",
-        alpha=alpha,
-        progress_callback=progress_callback,
-        cancel_event=cancel_event,
-    )
-
-    p_summary = boot_res.get("parameter_summary", {})
-    quad_stat = p_summary.get(f"path:{quad_name}->{target}", {})
-    quad_p = float(quad_stat.get("p_value", 1.0))
-    quad_sig = quad_p < alpha
-
-    # Effect size f^2 = (R2_quad - R2_linear) / (1 - R2_quad) (A18-NL-10)
-    denom = max(1e-12, 1.0 - quad_r2)
-    f2_val = max(0.0, (quad_r2 - linear_r2) / denom)
-
-    # Kenny (2015) classification
-    if f2_val < 0.005:
-        f2_rating = "None (< 0.005)"
-    elif f2_val < 0.01:
-        f2_rating = "Small (0.005 - 0.01)"
-    elif f2_val < 0.025:
-        f2_rating = "Medium (0.01 - 0.025)"
-    else:
-        f2_rating = "Large (>= 0.025)"
-
-    # Shape classification (A18-NL-02)
-    if not quad_sig:
-        shape = "Linear (no significant curvature)"
-    elif beta_quad < 0:
-        shape = "Inverted U-shape (concave / diminishing returns)"
-    else:
-        shape = "U-shape (convex / accelerating returns)"
-
-    # Effect table at Y1 = 0, 1, 2 (A18-NL-11)
-    effect_table = [
-        {"source_level": 0.0, "predicted_y": 0.0, "marginal_effect": round(beta_linear_in_quad, 4)},
-        {"source_level": 1.0, "predicted_y": round(beta_linear_in_quad * 1.0 + beta_quad * 1.0, 4), "marginal_effect": round(beta_linear_in_quad + 2.0 * beta_quad, 4)},
-        {"source_level": 2.0, "predicted_y": round(beta_linear_in_quad * 2.0 + beta_quad * 4.0, 4), "marginal_effect": round(beta_linear_in_quad + 4.0 * beta_quad, 4)},
-    ]
-
-    # Effect at +/- 1 SD of standardized Y1
-    effect_plus_1sd = round(beta_linear_in_quad + beta_quad, 4)
-    effect_minus_1sd = round(beta_linear_in_quad - beta_quad, 4)
-
-    # Curve plotting data: x in [-2, 2] with 21 points
-    x_grid = np.linspace(-2.0, 2.0, 21).tolist()
-    curve_data = []
-    for x in x_grid:
-        y_q = beta_linear_in_quad * x + beta_quad * (x ** 2) + (beta_cubic * (x ** 3) if degree == 3 else 0.0)
-        y_lin = beta_pure_linear * x
-        curve_data.append({
-            "x": round(x, 2),
-            "y_nonlinear": round(y_q, 4),
-            "y_linear": round(y_lin, 4),
-        })
-
-    # Keep-linear decision helper (A18-NL-12)
-    if not quad_sig or f2_val < 0.005:
-        decision_recommendation = (
-            "The quadratic term is statistically non-significant or exhibits negligible effect size (f² < 0.005). "
-            "In accordance with Hair et al. (2018), retain the simpler linear model for parsimony and straightforward interpretation."
+    # Bootstrapping
+    if n_boot and n_boot > 0:
+        from engine.pls.bootstrap import ParallelBootstrapper
+        booter = ParallelBootstrapper()
+        boot_res = booter.run(
+            data=df,
+            model_spec=spec_with_quad,
+            n_boot=n_boot,
+            seed=seed,
+            scheme=cfg.inner_weighting,
+            alpha=alpha,
+            progress_callback=progress_callback,
+            cancel_event=cancel_event,
         )
-    else:
-        decision_recommendation = (
-            f"The quadratic effect is statistically significant (p = {round(quad_p, 4)}) with {f2_rating} effect size (f² = {round(f2_val, 4)}). "
-            f"Retaining the non-linear relationship is empirically supported."
-        )
+        res["significance"] = boot_res
+        attach_bootstrap_to_quadratic(res, boot_res, alpha=alpha)
 
-    return {
-        "source": source,
-        "target": target,
-        "approach": approach,
-        "degree": degree,
-        "linear_path": round(beta_linear_in_quad, 4),
-        "linear_path_in_linear_model": round(beta_pure_linear, 4),
-        "linear_path_in_quad_model": round(beta_linear_in_quad, 4),
-        "quadratic_path": round(beta_quad, 4),
-        "cubic_path": round(beta_cubic, 4) if degree == 3 else None,
-        "quadratic_se": round(float(quad_stat.get("standard_error", 0.0)), 4),
-        "quadratic_t": round(float(quad_stat.get("t_statistic", 0.0)), 4),
-        "quadratic_p_value": round(quad_p, 4),
-        "quadratic_ci_lower": round(float(quad_stat.get("ci_lower", 0.0)), 4),
-        "quadratic_ci_upper": round(float(quad_stat.get("ci_upper", 0.0)), 4),
-        "is_significant": quad_sig,
-        "turning_point": round(float(turning_point), 4) if turning_point is not None else None,
-        "turning_point_in_range": (abs(turning_point) <= 2.0) if turning_point is not None else False,
-        "shape_classification": shape,
-        "r_squared_linear": round(linear_r2, 4),
-        "r_squared_quadratic": round(quad_r2, 4),
-        "f_squared": round(float(f2_val), 4),
-        "f_squared_rating": f2_rating,
-        "effect_table_0_1_2": effect_table,
-        "effect_plus_1sd": effect_plus_1sd,
-        "effect_minus_1sd": effect_minus_1sd,
-        "curve_points": curve_data,
-        "decision_recommendation": decision_recommendation,
-        "note": "Non-linear terms are created using standardized data. p1 in the quadratic model is not directly comparable to linear beta (Hair et al. 2018).",
-    }
+    # Return summary dict
+    nl_list = res.get("nonlinear_effects", [])
+    quad_info = next((item for item in nl_list if item.get("predictor") == source and item.get("target") == target), (nl_list[0] if nl_list else {}))
+    return quad_info

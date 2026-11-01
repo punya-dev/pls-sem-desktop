@@ -758,16 +758,19 @@ def test_corporate_reputation_single_moderation():
 
 def test_corporate_reputation_multiple_moderation():
     """
-    Run SWITCH_1..3 moderating LIKE->CUSA, LIKE->CUSL, CUSA->CUSL (and COMP->CUSL) with two-stage.
-    Print full results (paths, R², f², conditional indirect effects).
-    Compare with tests/reference/smartpls_multiple_moderation.json.
+    Run SmartPLS 4 model 'PLS-SEM: 5 Moderation - multiple interactions' on Corporate reputation data:
+    SWITCH_1..3 moderating LIKE->CUSL with all 7 interaction combinations using two-stage estimation.
+    Compares against tests/reference/smartpls_multiple_moderation.json.
     """
     csv_path = os.path.join(os.path.dirname(__file__), "data", "Corporate reputation data.csv")
     if not os.path.exists(csv_path):
         pytest.skip(f"Dataset not found at {csv_path}")
 
     df_raw = pd.read_csv(csv_path, sep=";")
-    df = df_raw.replace(-99, np.nan).replace("-99", np.nan).dropna()
+    df = df_raw.replace(-99, np.nan).replace("-99", np.nan)
+    for col in df.columns:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    df = df.fillna(df.mean())
 
     spec = {
         "constructs": [
@@ -796,11 +799,13 @@ def test_corporate_reputation_multiple_moderation():
             {"from": "CUSA", "to": "CUSL"},
         ],
         "moderating_effects": [
-            {"id": "m1", "moderator": "SWITCH_1", "source": "LIKE", "target": "CUSA", "method": "two_stage"},
-            {"id": "m2", "moderator": "SWITCH_1", "source": "LIKE", "target": "CUSL", "method": "two_stage"},
-            {"id": "m3", "moderator": "SWITCH_1", "source": "CUSA", "target": "CUSL", "method": "two_stage"},
-            {"id": "m4", "moderator": "SWITCH_2", "source": "LIKE", "target": "CUSL", "method": "two_stage"},
-            {"id": "m5", "moderator": "SWITCH_3", "source": "CUSA", "target": "CUSL", "method": "two_stage"},
+            {"id": "m1", "moderator": "SWITCH_1", "source": "LIKE", "target": "CUSL", "method": "two_stage"},
+            {"id": "m2", "moderator": "SWITCH_2", "source": "LIKE", "target": "CUSL", "method": "two_stage"},
+            {"id": "m3", "moderator": "SWITCH_3", "source": "LIKE", "target": "CUSL", "method": "two_stage"},
+            {"id": "m4", "moderator": "SWITCH_2", "source": "LIKE", "target": "CUSL", "method": "two_stage", "attach_to_mod_id": "m1"},
+            {"id": "m5", "moderator": "SWITCH_3", "source": "LIKE", "target": "CUSL", "method": "two_stage", "attach_to_mod_id": "m1"},
+            {"id": "m6", "moderator": "SWITCH_3", "source": "LIKE", "target": "CUSL", "method": "two_stage", "attach_to_mod_id": "m2"},
+            {"id": "m7", "moderator": "SWITCH_3", "source": "LIKE", "target": "CUSL", "method": "two_stage", "attach_to_mod_id": "m4"},
         ]
     }
 
@@ -815,26 +820,25 @@ def test_corporate_reputation_multiple_moderation():
     print("\nR^2:")
     for k, v in res["structural"]["r_squared"].items():
         print(f"  {k}: {v:.4f}")
-    print("\nKenny f^2 effect sizes:")
-    for k, v in res["moderation"]["f2_effect_sizes"].items():
-        print(f"  {k}: f2={v['f_squared']:.4f} ({v['magnitude']})")
-    print("\nConditional Indirect Effects (Moderated Mediation):")
-    for cie in res["moderation"]["conditional_indirect_effects"]:
-        print(f"  Chain: {cie['chain']} (Moderator: {cie['moderator']})")
-        print(f"    Index of Moderated Mediation: {cie['index_of_moderated_mediation']:.4f}")
-        for ce in cie["conditional_effects"]:
-            print(f"      w = {ce['w_label']}: indirect = {ce['indirect_effect']:.4f}, total = {ce['total_effect']:.4f}")
     print("=======================================================\n")
 
     ref_file = os.path.join(os.path.dirname(__file__), "reference", "smartpls_multiple_moderation.json")
-    if os.path.exists(ref_file):
-        with open(ref_file) as f:
-            ref_data = json.load(f)
-        ref_paths = ref_data.get("paths", {})
-        if ref_paths.get("SWITCH_1 x LIKE -> CUSA") is not None:
-            assert abs(path_mat["CUSA"].get("SWITCH_1 x LIKE", 0.0) - ref_paths["SWITCH_1 x LIKE -> CUSA"]) <= 0.01
-        else:
-            print("[INFO] Reference file tests/reference/smartpls_multiple_moderation.json has null placeholders; skipped reference comparison.")
+    assert os.path.exists(ref_file)
+    with open(ref_file) as f:
+        ref_data = json.load(f)
+
+    # Compare R^2
+    ref_r2 = ref_data.get("r_squared", {})
+    for construct_name, exp_r2 in ref_r2.items():
+        actual_r2 = res["structural"]["r_squared"].get(construct_name, 0.0)
+        assert abs(actual_r2 - exp_r2) <= 0.005, f"R² {construct_name}: expected {exp_r2}, got {actual_r2}"
+
+    # Compare structural paths and interaction paths
+    ref_paths = ref_data.get("paths", {})
+    for path_str, expected in ref_paths.items():
+        src, tgt = path_str.split(" -> ")
+        actual = path_mat[tgt].get(src, 0.0)
+        assert abs(actual - expected) <= 0.005, f"{path_str}: expected {expected}, got {actual} (diff {abs(actual - expected)})"
 
 
 def test_cascade_delete_and_project_roundtrip():

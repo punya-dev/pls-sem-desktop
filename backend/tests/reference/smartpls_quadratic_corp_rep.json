@@ -1,0 +1,69 @@
+{
+  "case": "quadratic_corporate_reputation",
+  "model": "Corporate reputation (advanced) with quadratic effect of CUSA on CUSL",
+  "data": "backend/tests/data/Corporate reputation data.csv",
+  "settings": {
+    "inner_weighting": "path",
+    "max_iterations": 3000,
+    "stop_criterion": 1e-7,
+    "missing_treatment": "mean"
+  },
+  "r_squared": {
+    "COMP": 0.631,
+    "LIKE": 0.558,
+    "CUSA": 0.292,
+    "CUSL": 0.566
+  },
+  "paths": {
+    "QUAL -> COMP": 0.430,
+    "PERF -> COMP": 0.295,
+    "CSOR -> COMP": 0.059,
+    "ATTR -> COMP": 0.086,
+    "QUAL -> LIKE": 0.380,
+    "PERF -> LIKE": 0.117,
+    "CSOR -> LIKE": 0.178,
+    "ATTR -> LIKE": 0.167,
+    "COMP -> CUSA": 0.146,
+    "LIKE -> CUSA": 0.436,
+    "COMP -> CUSL": 0.008,
+    "LIKE -> CUSL": 0.348,
+    "CUSA -> CUSL": 0.467,
+    "CUSA x CUSA -> CUSL": -0.046
+  },
+  "loadings": {
+    "comp_1": 0.824,
+    "comp_2": 0.821,
+    "comp_3": 0.844,
+    "like_1": 0.880,
+    "like_2": 0.869,
+    "like_3": 0.844,
+    "cusl_1": 0.833,
+    "cusl_2": 0.917,
+    "cusl_3": 0.843,
+    "cusa": 1.000
+  },
+  "outer_weights": {
+    "attr_1": 0.414,
+    "attr_2": 0.201,
+    "attr_3": 0.658,
+    "csor_1": 0.306,
+    "csor_2": 0.037,
+    "csor_3": 0.406,
+    "csor_4": 0.080,
+    "csor_5": 0.416,
+    "perf_1": 0.468,
+    "perf_2": 0.177,
+    "perf_3": 0.194,
+    "perf_4": 0.340,
+    "perf_5": 0.199,
+    "qual_1": 0.202,
+    "qual_2": 0.041,
+    "qual_3": 0.106,
+    "qual_4": -0.005,
+    "qual_5": 0.160,
+    "qual_6": 0.398,
+    "qual_7": 0.229,
+    "qual_8": 0.190
+  }
+}
+

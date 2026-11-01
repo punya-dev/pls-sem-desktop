@@ -30,7 +30,12 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
   const [stage, setStage] = useState<'config' | 'running' | 'completed' | 'cancelled' | 'error'>('config');
   const [nBoot, setNBoot] = useState<number>(500);
   const [seed, setSeed] = useState<number>(42);
+  const [ecdfMethod, setEcdfMethod] = useState<'F4' | 'F3'>('F4');
+  const [copulaTransform, setCopulaTransform] = useState<'raw' | 'eq17'>('raw');
   const [jobId, setJobId] = useState<string | null>(null);
+
+  const gcList = (spec as any)?.gaussian_copulas || (spec as any)?.gaussianCopulas || [];
+  const hasGcTerms = Array.isArray(gcList) && gcList.length > 0;
   const [current, setCurrent] = useState<number>(0);
   const [total, setTotal] = useState<number>(500);
   const [percent, setPercent] = useState<number>(0);
@@ -80,6 +85,12 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
         dataset_name: datasetName,
         model_id: modelId,
         diagram_layout: diagramLayout,
+        settings: hasGcTerms ? {
+          gc: {
+            ecdf: ecdfMethod,
+            copula_transform: copulaTransform,
+          }
+        } : undefined,
       });
 
       if (startRes.error || !startRes.job_id) {
@@ -356,6 +367,88 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
                 </div>
               </div>
 
+              {hasGcTerms && (
+                <div style={{
+                  marginBottom: '16px',
+                  padding: '12px 14px',
+                  borderRadius: '8px',
+                  backgroundColor: 'var(--color-bg-surface, #f8fafc)',
+                  border: '1px solid var(--color-border-subtle, #e2e8f0)',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--color-text-primary, #0f172a)' }}>
+                      Gaussian Copula ({gcList.length} active)
+                    </span>
+                    <span style={{ fontSize: '11px', padding: '2px 6px', borderRadius: '4px', backgroundColor: 'rgba(107,78,230,0.12)', color: 'var(--color-accent)', fontWeight: 600 }}>
+                      Endogeneity
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '12px' }}>
+                    {gcList.map((gc: any, idx: number) => {
+                      const src = gc.source_construct || gc.source;
+                      const tgt = gc.target_construct || gc.target;
+                      return (
+                        <span key={gc.id || idx} style={{
+                          fontSize: '11px',
+                          fontFamily: 'monospace',
+                          padding: '3px 8px',
+                          borderRadius: '4px',
+                          backgroundColor: 'var(--color-bg-base, #ffffff)',
+                          border: '1px solid var(--color-border-subtle, #cbd5e1)',
+                          color: 'var(--color-text-primary, #1e293b)'
+                        }}>
+                          GC ({src} → {tgt})
+                        </span>
+                      );
+                    })}
+                  </div>
+                  <div style={{ display: 'flex', gap: '14px' }}>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--color-text-secondary, #475569)', marginBottom: '4px' }}>
+                        ECDF Method
+                      </label>
+                      <select
+                        value={ecdfMethod}
+                        onChange={(e) => setEcdfMethod(e.target.value as any)}
+                        style={{
+                          width: '100%',
+                          padding: '6px 8px',
+                          fontSize: '12px',
+                          borderRadius: '6px',
+                          border: '1px solid var(--color-border-subtle, #cbd5e1)',
+                          backgroundColor: 'var(--color-bg-base, #ffffff)',
+                          color: 'var(--color-text-primary, #0f172a)'
+                        }}
+                      >
+                        <option value="F4">F4 (Adjusted - Recommended)</option>
+                        <option value="F3">F3 (Endpoint-adjusted)</option>
+                      </select>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--color-text-secondary, #475569)', marginBottom: '4px' }}>
+                        Copula Transform
+                      </label>
+                      <select
+                        value={copulaTransform}
+                        onChange={(e) => setCopulaTransform(e.target.value as any)}
+                        style={{
+                          width: '100%',
+                          padding: '6px 8px',
+                          fontSize: '12px',
+                          borderRadius: '6px',
+                          border: '1px solid var(--color-border-subtle, #cbd5e1)',
+                          backgroundColor: 'var(--color-bg-base, #ffffff)',
+                          color: 'var(--color-text-primary, #0f172a)'
+                        }}
+                      >
+                        <option value="raw">Raw C(P) (SmartPLS 4 calibrated)</option>
+                        <option value="eq17">Eq. 17 (Sigma^-1 Inv)</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div style={{
                 backgroundColor: '#f0fdf4',
                 border: '1px solid #bbf7d0',
@@ -377,7 +470,7 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                 <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text-primary, #1e293b)' }}>
-                  Running Resamples...
+                  {hasGcTerms ? 'Bootstrapping with Gaussian copulas...' : 'Running Resamples...'}
                 </span>
                 <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-accent)' }}>
                   {percent.toFixed(1)}%

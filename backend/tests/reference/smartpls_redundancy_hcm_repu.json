@@ -1,0 +1,28 @@
+{
+  "case": "hcm_redundancy_analysis_repu",
+  "description": "HCM disjoint 2nd stage redundancy analysis for REPU (REPU_F -> REPU_G)",
+  "settings": {
+    "inner_weighting": "path",
+    "max_iterations": 3000,
+    "stop_criterion": 1e-7,
+    "missing_treatment": "mean",
+    "initial_weights": 1.0
+  },
+  "models": {
+    "REPU": {
+      "formative_construct": "REPU_F",
+      "global_construct": "REPU_G",
+      "formative_indicators": ["LV scores - COMP", "LV scores - LIKE"],
+      "global_item": "repu_global",
+      "path_coefficient": 0.900,
+      "r_squared": 0.811,
+      "outer_weights": {
+        "LV scores - COMP": 0.377,
+        "LV scores - LIKE": 0.716
+      },
+      "outer_loadings": {
+        "repu_global": 1.000
+      }
+    }
+  }
+}

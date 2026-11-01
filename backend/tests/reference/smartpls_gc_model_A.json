@@ -1,0 +1,58 @@
+{
+  "case": "gaussian_copula_model_a",
+  "model": "Corporate reputation (advanced) Gaussian copula model A (5-GC)",
+  "data": "backend/tests/data/Corporate reputation data.csv",
+  "settings": {
+    "inner_weighting": "path",
+    "max_iterations": 3000,
+    "stop_criterion": 1e-7,
+    "missing_treatment": "mean",
+    "gc": {
+      "ecdf": "F4",
+      "copula_transform": "raw"
+    }
+  },
+  "r_squared": {
+    "CUSA": 0.306,
+    "CUSL": 0.569
+  },
+  "paths": {
+    "COMP -> CUSA": -0.223,
+    "LIKE -> CUSA": 0.430,
+    "COMP -> CUSL": -0.089,
+    "LIKE -> CUSL": 0.436,
+    "CUSA -> CUSL": 0.758
+  },
+  "gc_coefficients": {
+    "GC (COMP -> CUSA)": 0.362,
+    "GC (LIKE -> CUSA)": -0.006,
+    "GC (COMP -> CUSL)": 0.102,
+    "GC (LIKE -> CUSL)": -0.088,
+    "GC (CUSA -> CUSL)": -0.203
+  },
+  "loadings": {
+    "comp_1": 0.858,
+    "comp_2": 0.798,
+    "comp_3": 0.818,
+    "like_1": 0.879,
+    "like_2": 0.870,
+    "like_3": 0.843,
+    "cusl_1": 0.833,
+    "cusl_2": 0.917,
+    "cusl_3": 0.843,
+    "cusa": 1.000
+  },
+  "inner_vif": {
+    "LIKE -> CUSA": 17.08,
+    "CUSA -> CUSL": 11.46,
+    "LIKE -> CUSL": 17.43,
+    "COMP -> CUSA": 16.56,
+    "COMP -> CUSL": 17.61,
+    "GC (COMP -> CUSA)": 16.31,
+    "GC (COMP -> CUSL)": 17.84,
+    "GC (CUSA -> CUSL)": 11.82,
+    "GC (LIKE -> CUSA)": 16.97,
+    "GC (LIKE -> CUSL)": 17.07
+  }
+}
+

@@ -125,6 +125,9 @@ def calculate_rms_theta(
 
     residuals = {}
     for cid in reflective_constructs:
+        # Single-item constructs have outer residual = 0 (constant) by definition; exclude from outer residual covariance
+        if len(constructs[cid].get("indicators", [])) <= 1:
+            continue
         c_score_raw = construct_scores.get(cid)
         if c_score_raw is None:
             continue
@@ -143,7 +146,9 @@ def calculate_rms_theta(
             lam = float(loadings.get(cid, {}).get(iid, loadings.get(cid, {}).get(col, 0.0)))
             # Outer residual: e = x - lambda * Y
             e = x_norm - lam * c_score
-            residuals[f"{cid}_{iid}"] = e
+            # Only include if residual has non-zero variance (constant vectors have undefined correlation)
+            if np.std(e, ddof=1) > 1e-8:
+                residuals[f"{cid}_{iid}"] = e
 
     if len(residuals) < 2:
         return None
@@ -154,7 +159,14 @@ def calculate_rms_theta(
     if len(triu_off_diag[0]) == 0:
         return None
 
-    rms_theta_val = float(np.sqrt(np.mean(res_corr[triu_off_diag] ** 2)))
+    vals = res_corr[triu_off_diag]
+    valid_vals = vals[~np.isnan(vals) & ~np.isinf(vals)]
+    if len(valid_vals) == 0:
+        return None
+
+    rms_theta_val = float(np.sqrt(np.mean(valid_vals ** 2)))
+    if np.isnan(rms_theta_val) or np.isinf(rms_theta_val):
+        return None
     return rms_theta_val
 
 
@@ -290,21 +302,29 @@ def evaluate_model_fit(
     srmr_thresh = THRESHOLDS.get("model_fit", {}).get("srmr_max", 0.08)
     rms_thresh = THRESHOLDS.get("model_fit", {}).get("rms_theta_max", 0.12)
 
+    rms_is_valid = (rms_theta_val is not None and not np.isnan(rms_theta_val) and not np.isinf(rms_theta_val))
+    sat_srmr_valid = (srmr_sat is not None and not np.isnan(srmr_sat) and not np.isinf(srmr_sat))
+    est_srmr_valid = (srmr_est is not None and not np.isnan(srmr_est) and not np.isinf(srmr_est))
+    sat_duls_valid = (crit_sat.get("d_uls") is not None and not np.isnan(crit_sat["d_uls"]) and not np.isinf(crit_sat["d_uls"]))
+    sat_dg_valid = (crit_sat.get("d_g") is not None and not np.isnan(crit_sat["d_g"]) and not np.isinf(crit_sat["d_g"]))
+    est_duls_valid = (crit_est.get("d_uls") is not None and not np.isnan(crit_est["d_uls"]) and not np.isinf(crit_est["d_uls"]))
+    est_dg_valid = (crit_est.get("d_g") is not None and not np.isnan(crit_est["d_g"]) and not np.isinf(crit_est["d_g"]))
+
     return {
         "saturated_model": {
-            "srmr": round(srmr_sat, 4),
-            "srmr_ok": srmr_sat < srmr_thresh,
-            "d_uls": round(crit_sat["d_uls"], 4),
-            "d_g": round(crit_sat["d_g"], 4),
+            "srmr": round(srmr_sat, 4) if sat_srmr_valid else None,
+            "srmr_ok": (srmr_sat < srmr_thresh) if sat_srmr_valid else None,
+            "d_uls": round(crit_sat["d_uls"], 4) if sat_duls_valid else None,
+            "d_g": round(crit_sat["d_g"], 4) if sat_dg_valid else None,
         },
         "estimated_model": {
-            "srmr": round(srmr_est, 4),
-            "srmr_ok": srmr_est < srmr_thresh,
-            "d_uls": round(crit_est["d_uls"], 4),
-            "d_g": round(crit_est["d_g"], 4),
+            "srmr": round(srmr_est, 4) if est_srmr_valid else None,
+            "srmr_ok": (srmr_est < srmr_thresh) if est_srmr_valid else None,
+            "d_uls": round(crit_est["d_uls"], 4) if est_duls_valid else None,
+            "d_g": round(crit_est["d_g"], 4) if est_dg_valid else None,
         },
-        "rms_theta": round(rms_theta_val, 4) if rms_theta_val is not None else None,
-        "rms_theta_ok": (rms_theta_val < rms_thresh) if rms_theta_val is not None else None,
+        "rms_theta": round(rms_theta_val, 4) if rms_is_valid else None,
+        "rms_theta_ok": (rms_theta_val < rms_thresh) if rms_is_valid else None,
         "gof": gof_res,
         "thresholds": {
             "srmr": srmr_thresh,

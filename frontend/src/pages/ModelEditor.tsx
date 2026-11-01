@@ -5,6 +5,7 @@ import { initModelCanvas, exportModelSpec, getModelCanvasState, loadModelCanvasS
 import { BootstrapModal } from '../components/BootstrapModal';
 import { AnalysisModal } from '../components/AnalysisModal';
 import { AdvancedResultPanels } from '../components/AdvancedResultPanels';
+import RedundancyWizardModal from '../components/RedundancyWizardModal';
 import type { ParsedDataset } from '../utils/dataset-parser';
 import { parseDatasetFile, processData } from '../utils/dataset-parser';
 import { api, type ValidationResponse } from '../utils/api';
@@ -138,6 +139,8 @@ const ModelEditor = () => {
     touchStudy,
     openTab,
     addStudySnapshot,
+    addModel,
+    setActiveModel,
     theme,
     settings,
     tabs,
@@ -435,6 +438,20 @@ const ModelEditor = () => {
 
   // Snapshot modal state
   const [isSnapshotModalOpen, setIsSnapshotModalOpen] = useState(false);
+
+  // Redundancy Analysis Wizard state
+  const [isRedundancyWizardOpen, setIsRedundancyWizardOpen] = useState(false);
+  const [wizardTargetConstructId, setWizardTargetConstructId] = useState<string | null>(null);
+
+  useEffect(() => {
+    (window as any)._openRedundancyWizard = (constructId: string) => {
+      setWizardTargetConstructId(constructId);
+      setIsRedundancyWizardOpen(true);
+    };
+    return () => {
+      delete (window as any)._openRedundancyWizard;
+    };
+  }, []);
   const [snapshotName, setSnapshotName] = useState('');
   const [snapshotTargetStudyId, setSnapshotTargetStudyId] = useState<string>('');
   const [isSavingSnapshot, setIsSavingSnapshot] = useState(false);
@@ -1134,23 +1151,124 @@ const ModelEditor = () => {
         return;
       }
       const nSamples = plsResults.n_samples || 0;
-      let csvContent = constructs.join(',') + '\n';
+      const cnamesMap = plsResults.construct_names || {};
+
+      // SmartPLS 4 naming: LV scores - <CONSTRUCT>
+      const scoreColNames = constructs.map(c => `LV scores - ${cnamesMap[c] || c}`);
+
+      // Collect original data columns and rows
+      const origVars = activeDataset ? activeDataset.variables.map(v => v.name) : [];
+      const origRows = activeDataset ? activeDataset.rows : [];
+
+      const combinedHeaders = [...origVars, ...scoreColNames];
+      const combinedRows: any[][] = [];
+
       for (let i = 0; i < nSamples; i++) {
-        const rowVals = constructs.map(c => scores[c]?.[i] !== undefined ? scores[c][i] : '');
-        csvContent += rowVals.join(',') + '\n';
+        const rowBase = origRows && origRows[i] ? [...origRows[i]] : [];
+        const scoreVals = constructs.map(c => {
+          const val = scores[c]?.[i];
+          if (val !== undefined && val !== null && !isNaN(Number(val))) {
+            return Number(val);
+          }
+          return '';
+        });
+        combinedRows.push([...rowBase, ...scoreVals]);
       }
+
+      // Generate CSV string with proper escaping
+      const escapeCsv = (v: any) => {
+        if (v === null || v === undefined) return '';
+        const s = String(v);
+        if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+          return `"${s.replace(/"/g, '""')}"`;
+        }
+        return s;
+      };
+      let csvContent = combinedHeaders.map(escapeCsv).join(',') + '\n';
+      for (const row of combinedRows) {
+        csvContent += row.map(escapeCsv).join(',') + '\n';
+      }
+
+      // Download CSV
       const blob = new Blob([csvContent], { type: 'text/csv' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${activeModel?.name || 'Model'}_construct_scores.csv`;
+      a.download = `${activeModel?.name || 'Model'}_with_LV_scores.csv`;
       a.click();
       URL.revokeObjectURL(url);
-      setSaveToast('Construct scores data file generated');
-      setTimeout(() => setSaveToast(null), 2500);
+
+      // Save dataset into project and store so it is immediately available
+      const newDatasetName = `${activeStudy?.name || 'Dataset'} with LV scores`;
+      const newDsId = `ds_lv_${Date.now()}`;
+      const newParsed = processData(newDatasetName, combinedHeaders, combinedRows);
+      newParsed.id = newDsId;
+
+      if (effectiveStudyId) {
+        addStudyDataset(effectiveStudyId, newParsed);
+      }
+
+      if (activeStudy?.path) {
+        api.saveProjectDataJson(
+          activeStudy.path,
+          newDatasetName,
+          combinedHeaders,
+          combinedRows,
+          undefined,
+          undefined,
+          newDsId
+        ).catch(err => console.warn('Auto-save LV scores dataset failed:', err));
+      }
+
+      setSaveToast('Created data file with LV scores and added to project');
+      setTimeout(() => setSaveToast(null), 3000);
     } catch (e: any) {
       alert('Error creating data file: ' + e?.message);
     }
+  };
+
+  const handleRedundancyModelsCreated = (createdModels: any[], calculateNow: boolean) => {
+    if (!createdModels || createdModels.length === 0) return;
+
+    createdModels.forEach(m => {
+      addModel({
+        id: m.model_id,
+        studyId: effectiveStudyId || '',
+        name: m.name,
+        type: 'pls',
+        datasetId: activeDataset?.id,
+        lastModified: 'Just now',
+      });
+    });
+
+    if (effectiveStudyId) {
+      touchStudy(effectiveStudyId);
+    }
+
+    const first = createdModels[0];
+    if (first) {
+      setActiveModel(first.model_id);
+      openTab({
+        type: 'model',
+        title: first.name,
+        modelId: first.model_id,
+        studyId: effectiveStudyId || '',
+        workspaceId: activeWorkspaceId,
+      });
+
+      if (calculateNow && first.results) {
+        setPlsResults(first.results);
+        setCanvasResults(first.results);
+        setCurrentView('results');
+      }
+    }
+
+    setSaveToast(
+      createdModels.length === 1
+        ? `Created model "${first?.name}"`
+        : `Created ${createdModels.length} redundancy analysis models`
+    );
+    setTimeout(() => setSaveToast(null), 3000);
   };
 
   const handleExportExcel = () => {
@@ -1324,13 +1442,54 @@ const ModelEditor = () => {
     return false;
   };
 
+  const isCopulaConstruct = (cid: string): boolean => {
+    if (!cid) return false;
+    if (cid.startsWith('GC (') || cid.startsWith('gc_')) return true;
+    if (Array.isArray(plsResults?.latent_variables)) {
+      const lv = plsResults.latent_variables.find((v: any) => v.id === cid || v.name === cid);
+      if (lv?.is_copula) return true;
+    }
+    return false;
+  };
+
+  const isQuadraticConstruct = (cid: string) => {
+    if (!plsResults) return false;
+    if (cid.includes(' x ') && cid.split(' x ')[0].trim() === cid.split(' x ')[1].trim()) return true;
+    if (Array.isArray(plsResults.latent_variables)) {
+      const lv = plsResults.latent_variables.find((v: any) => v.id === cid || v.name === cid);
+      if (lv?.is_quadratic) return true;
+    }
+    return false;
+  };
+
   const renderConstructLabel = (cid: string, customName?: string) => {
-    const isInt = isInteractionConstruct(cid);
+    const isQuad = isQuadraticConstruct(cid);
+    const isInt = !isQuad && isInteractionConstruct(cid);
+    const isCop = isCopulaConstruct(cid);
     const label = customName || getConstructName(cid);
     return (
       <div className="construct-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-        <div className="construct-dot" style={{ background: isInt ? '#ec4899' : (constructPalette[cid] || '#6366f1') }} />
+        <div className="construct-dot" style={{ background: isQuad ? '#10b981' : (isInt ? '#ec4899' : (isCop ? '#8b5cf6' : (constructPalette[cid] || '#6366f1'))) }} />
         <span className="construct-name">{label}</span>
+        {isQuad && (
+          <span
+            className="quadratic-badge"
+            style={{
+              fontSize: '10px',
+              fontWeight: 600,
+              padding: '1px 5px',
+              borderRadius: '4px',
+              background: 'rgba(16, 185, 129, 0.15)',
+              color: '#059669',
+              border: '1px solid rgba(16, 185, 129, 0.3)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.04em',
+              lineHeight: 1.3,
+            }}
+          >
+            x²
+          </span>
+        )}
         {isInt && (
           <span
             className="interaction-badge"
@@ -1348,6 +1507,25 @@ const ModelEditor = () => {
             }}
           >
             interaction
+          </span>
+        )}
+        {isCop && (
+          <span
+            className="copula-badge"
+            style={{
+              fontSize: '10px',
+              fontWeight: 600,
+              padding: '1px 5px',
+              borderRadius: '4px',
+              background: 'rgba(139, 92, 246, 0.15)',
+              color: '#7c3aed',
+              border: '1px solid rgba(139, 92, 246, 0.3)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.04em',
+              lineHeight: 1.3,
+            }}
+          >
+            copula
           </span>
         )}
       </div>
@@ -1394,7 +1572,11 @@ const ModelEditor = () => {
   }, [plsResults]);
 
   const targetConstructs: string[] = useMemo(() => {
-    return resultConstructs.filter(c => !isInteractionConstruct(c));
+    return resultConstructs.filter(c => !isInteractionConstruct(c) && !isCopulaConstruct(c));
+  }, [resultConstructs]);
+
+  const measurementConstructs: string[] = useMemo(() => {
+    return resultConstructs.filter(c => !isInteractionConstruct(c) && !isCopulaConstruct(c));
   }, [resultConstructs]);
 
   const constructPalette: Record<string, string> = useMemo(() => {
@@ -2149,9 +2331,39 @@ const ModelEditor = () => {
             >
               Executive Report (PDF / APA)...
             </button>
+            <div style={{ height: 1, background: 'var(--color-border-subtle)', margin: '4px 0' }} />
+            <div style={{ padding: '6px 10px 2px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--color-text-muted)', letterSpacing: '0.5px' }}>
+              Validation Tools
+            </div>
+            <button
+              type="button"
+              className="subheader__dropdown-item"
+              onClick={() => {
+                setIsCalcMenuOpen(false);
+                setWizardTargetConstructId(null);
+                setIsRedundancyWizardOpen(true);
+              }}
+            >
+              Create redundancy analysis...
+            </button>
           </div>
         )}
       </div>
+
+      {/* Tools Button */}
+      <button
+        className="subheader__btn"
+        type="button"
+        onClick={() => {
+          setWizardTargetConstructId(null);
+          setIsRedundancyWizardOpen(true);
+        }}
+        title="Redundancy analysis wizard for formative constructs"
+        style={{ gap: 4 }}
+      >
+        <span className="material-symbols-outlined" style={{ fontSize: 16 }}>analytics</span>
+        <span>Tools</span>
+      </button>
     </div>
   </div>
   {/* ═══ APP BODY ═══ */}
@@ -3528,6 +3740,38 @@ const ModelEditor = () => {
                   </span>
                 )}
               </a>
+              {plsResults?.gaussian_copula && (
+                <a
+                  href="#"
+                  className={`tree-item ${activeResultTab === 'copula' ? 'active' : ''}`}
+                  onClick={(e) => { e.preventDefault(); setActiveResultTab('copula'); }}
+                  style={{ position: 'relative' }}
+                >
+                  <div className="tree-item__left">
+                    <div className="tree-item__dot" style={{ backgroundColor: '#8b5cf6' }} />
+                    <span>Gaussian copula</span>
+                  </div>
+                  <span className="tree-item__size" style={{ backgroundColor: 'rgba(139, 92, 246, 0.15)', color: '#7c3aed', fontWeight: 600 }}>
+                    endog
+                  </span>
+                </a>
+              )}
+              {(plsResults?.nonlinear_effects?.length > 0 || plsResults?.quadratic_effects?.length > 0) && (
+                <a
+                  href="#"
+                  className={`tree-item ${activeResultTab === 'quadratic' ? 'active' : ''}`}
+                  onClick={(e) => { e.preventDefault(); setActiveResultTab('quadratic'); }}
+                  style={{ position: 'relative' }}
+                >
+                  <div className="tree-item__left">
+                    <div className="tree-item__dot" style={{ backgroundColor: '#10b981' }} />
+                    <span>Nonlinear / Quadratic</span>
+                  </div>
+                  <span className="tree-item__size" style={{ backgroundColor: 'rgba(16, 185, 129, 0.15)', color: '#059669', fontWeight: 600 }}>
+                    x²
+                  </span>
+                </a>
+              )}
             </div>
           </div>
           {/* Quality criteria */}
@@ -3572,6 +3816,15 @@ const ModelEditor = () => {
               >
                 Collinearity statistics (VIF)
               </a>
+              {plsResults?.convergent_validity_redundancy && (
+                <a
+                  href="#"
+                  className={`tree-item ${activeResultTab === 'convergent_validity_redundancy' ? 'active' : ''}`}
+                  onClick={(e) => { e.preventDefault(); setActiveResultTab('convergent_validity_redundancy'); }}
+                >
+                  Convergent validity (redundancy analysis)
+                </a>
+              )}
             </div>
           </div>
 
@@ -4537,7 +4790,7 @@ const ModelEditor = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {resultConstructs.map(cid => {
+                  {measurementConstructs.map(cid => {
                     const rv = plsResults.reliability_and_validity || {};
                     const alpha = Number(rv.cronbachs_alpha?.[cid] ?? 0);
                     const cr = Number(rv.composite_reliability?.[cid] ?? 0);
@@ -4591,11 +4844,11 @@ const ModelEditor = () => {
                               onToggle={(m) => setTableMode('htmt', m)}
                             />
                           </th>
-                          {resultConstructs.map(c => <th key={c}>{getConstructName(c)}</th>)}
+                          {measurementConstructs.map(c => <th key={c}>{getConstructName(c)}</th>)}
                         </tr>
                       </thead>
                       <tbody>
-                        {resultConstructs.map(c1 => (
+                        {measurementConstructs.map(c1 => (
                           <tr key={c1}>
                             <td>
                               <div className="construct-label">
@@ -4603,7 +4856,7 @@ const ModelEditor = () => {
                                 <span className="construct-name">{getConstructName(c1)}</span>
                               </div>
                             </td>
-                            {resultConstructs.map(c2 => {
+                            {measurementConstructs.map(c2 => {
                               if (c1 === c2) return <td key={c2} className="cell-empty">—</td>;
                               const htmtVal = plsResults.reliability_and_validity?.htmt?.[c1]?.[c2];
                               if (htmtVal !== undefined) {
@@ -4638,8 +4891,8 @@ const ModelEditor = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {resultConstructs.flatMap((c1, i) =>
-                          resultConstructs.slice(i + 1).map(c2 => {
+                        {measurementConstructs.flatMap((c1, i) =>
+                          measurementConstructs.slice(i + 1).map(c2 => {
                             const val = plsResults.reliability_and_validity?.htmt?.[c1]?.[c2] ??
                                         plsResults.reliability_and_validity?.htmt?.[c2]?.[c1];
                             if (val === undefined || val === null) return null;
@@ -4693,11 +4946,11 @@ const ModelEditor = () => {
                     <thead>
                       <tr>
                         <th>Construct</th>
-                        {resultConstructs.map(c => <th key={c}>{getConstructName(c)}</th>)}
+                        {measurementConstructs.map(c => <th key={c}>{getConstructName(c)}</th>)}
                       </tr>
                     </thead>
                     <tbody>
-                      {resultConstructs.map(c1 => (
+                      {measurementConstructs.map(c1 => (
                         <tr key={c1}>
                           <td>
                             <div className="construct-label">
@@ -4705,7 +4958,7 @@ const ModelEditor = () => {
                               <span className="construct-name">{getConstructName(c1)}</span>
                             </div>
                           </td>
-                          {resultConstructs.map(c2 => {
+                          {measurementConstructs.map(c2 => {
                             const flVal = plsResults.reliability_and_validity?.fornell_larcker?.[c1]?.[c2];
                             if (flVal !== undefined) {
                               const isDiag = c1 === c2;
@@ -4788,6 +5041,98 @@ const ModelEditor = () => {
                       )}
                     </tbody>
                   </table>
+                </div>
+              </div>
+            ) : activeResultTab === 'convergent_validity_redundancy' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: '#1e293b' }}>
+                    Convergent Validity of Formative Constructs (Redundancy Analysis)
+                  </h4>
+                </div>
+                <table className="scientific-table">
+                  <thead>
+                    <tr>
+                      <th>Formative construct</th>
+                      <th>Global item construct</th>
+                      <th>Path coefficient</th>
+                      {plsResults.convergent_validity_redundancy?.some((r: any) => r.bootstrap) && (
+                        <>
+                          <th>Mean</th>
+                          <th>SD</th>
+                          <th>t Value</th>
+                          <th>p Value</th>
+                          <th>95% CI</th>
+                        </>
+                      )}
+                      <th>R² of global item</th>
+                      <th>Threshold</th>
+                      <th>Result</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(plsResults.convergent_validity_redundancy || []).map((row: any, idx: number) => {
+                      const isSupported = row.supported || (row.path_coefficient >= 0.70);
+                      const b = row.bootstrap;
+                      return (
+                        <tr key={idx}>
+                          <td>
+                            <strong>{row.formative_construct}</strong>
+                          </td>
+                          <td>
+                            <strong>{row.global_construct}</strong>
+                          </td>
+                          <td className="cell-sig">
+                            <div className="cell-value">{fmt(row.path_coefficient, 4)}</div>
+                          </td>
+                          {plsResults.convergent_validity_redundancy?.some((r: any) => r.bootstrap) && (
+                            <>
+                              <td>{b ? fmt(b.mean, 4) : '—'}</td>
+                              <td>{b ? fmt(b.se, 4) : '—'}</td>
+                              <td>{b ? fmt(b.t_stat, 3) : '—'}</td>
+                              <td className={b && b.p_value < 0.05 ? 'cell-sig' : ''}>
+                                {b ? fmt(b.p_value, 4) : '—'}
+                              </td>
+                              <td>
+                                {b && b.ci_low !== undefined ? `[${fmt(b.ci_low, 3)}, ${fmt(b.ci_high, 3)}]` : '—'}
+                              </td>
+                            </>
+                          )}
+                          <td>{fmt(row.r_squared, 4)}</td>
+                          <td>&ge; 0.70</td>
+                          <td>
+                            <span style={{
+                              padding: '3px 10px',
+                              borderRadius: '6px',
+                              fontSize: '11px',
+                              fontWeight: 600,
+                              backgroundColor: isSupported ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                              color: isSupported ? '#15803d' : '#b91c1c',
+                              border: `1px solid ${isSupported ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`
+                            }}>
+                              {row.result || (isSupported ? 'Supported (>= 0.70)' : 'Not supported (< 0.70)')}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <div style={{
+                  padding: '12px 16px',
+                  borderRadius: '8px',
+                  backgroundColor: 'var(--color-bg-base)',
+                  border: '1px solid var(--color-border-subtle)',
+                  fontSize: '12px',
+                  lineHeight: '1.5',
+                  color: 'var(--color-text-secondary)'
+                }}>
+                  <div style={{ fontWeight: 600, marginBottom: '4px', color: 'var(--color-text-primary)' }}>
+                    Assessment Guide (Hair et al., 2022)
+                  </div>
+                  <div>
+                    Hair et al. (2022): path coefficient of at least 0.70 (R² of at least 0.50). If not met, consider adding indicators that cover the domain of the construct.
+                  </div>
                 </div>
               </div>
             ) : activeResultTab === 'construct_scores' ? (
@@ -5069,6 +5414,16 @@ const ModelEditor = () => {
       setTimeout(() => setValidationSuccessToast(null), 3500);
     }}
     onClose={() => setIsAnalysisModalOpen(false)}
+  />
+
+  <RedundancyWizardModal
+    isOpen={isRedundancyWizardOpen}
+    onClose={() => setIsRedundancyWizardOpen(false)}
+    targetConstructId={wizardTargetConstructId}
+    nodes={getModelCanvasState()?.nodes || []}
+    dataset={activeDataset}
+    projectPath={activeStudy?.path || ''}
+    onModelsCreated={handleRedundancyModelsCreated}
   />
 
   {/* ─── Validation Error Modal ─── */}

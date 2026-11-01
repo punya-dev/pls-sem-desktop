@@ -26,6 +26,7 @@ from reporting.templates import (
     build_discriminant_validity_summary,
     build_structural_summary,
     build_fit_summary,
+    build_copula_summary,
 )
 from reporting.narrative import generate_narrative_report
 
@@ -164,6 +165,7 @@ def generate_pdf_report(
         build_formative_summary,
         build_discriminant_validity_summary,
         build_structural_summary,
+        build_copula_summary,
         build_fit_summary,
     ]
 

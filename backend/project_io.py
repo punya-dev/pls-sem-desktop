@@ -8,6 +8,7 @@ import pandas as pd
 import numpy as np
 
 import settings_io
+from core.json_utils import sanitize_for_json
 from data.datasets import (
     init_datasets_schema,
     migrate_legacy_raw_data,
@@ -511,6 +512,14 @@ def save_results(
     conn = sqlite3.connect(path)
     cur = conn.cursor()
 
+    results_dict = sanitize_for_json(results_dict)
+    if spec is not None:
+        spec = sanitize_for_json(spec)
+    if diagram_layout is not None:
+        diagram_layout = sanitize_for_json(diagram_layout)
+    if params is not None:
+        params = sanitize_for_json(params)
+
     def _json_default(obj):
         if isinstance(obj, np.ndarray):
             return obj.tolist()
@@ -610,7 +619,7 @@ def load_results(path: str, algorithm: str = "pls", model_id: str = None, analys
     saved_spec_hash = row_dict.get("spec_hash")
     stale = bool(saved_spec_hash and current_spec_hash and saved_spec_hash != current_spec_hash)
 
-    return {
+    res = {
         "algorithm": algorithm,
         "analysis_type": row_dict.get("analysis_type", "pls"),
         "results": json.loads(row_dict["results_json"]) if row_dict.get("results_json") else None,
@@ -623,6 +632,7 @@ def load_results(path: str, algorithm: str = "pls", model_id: str = None, analys
         "stale": stale,
         "params": json.loads(row_dict["params_json"]) if row_dict.get("params_json") else None,
     }
+    return sanitize_for_json(res)
 
 
 def save_snapshot(path: str, name: str, algorithm: str, results: dict, spec: dict, diagram_layout: dict, description: str = "", source_model_id: str = None) -> dict:

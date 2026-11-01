@@ -639,8 +639,23 @@ def run_pipeline(
         cfg = settings
 
     spec_dict = model_spec.model_dump(mode="json", by_alias=True) if hasattr(model_spec, "model_dump") else (copy.deepcopy(model_spec) if isinstance(model_spec, dict) else {})
-    raw_mods = spec_dict.get("moderating_effects", [])
-    if raw_mods and len(raw_mods) > 0 and not getattr(cfg, "_in_moderation", False):
+
+    # Gaussian Copula expansion hook (Stage 1 -> Copulas -> Stage 2)
+    raw_gcs = spec_dict.get("gaussian_copulas") or spec_dict.get("gaussianCopulas") or []
+    if raw_gcs and len(raw_gcs) > 0 and not getattr(cfg, "_in_gaussian_copula", False):
+        from engine.pls.copula import (
+            run_expanded_copula_estimation,
+            normalize_gc_spec,
+        )
+        spec_dict_norm, gcs = normalize_gc_spec(spec_dict)
+        if gcs:
+            cfg_copy = copy.deepcopy(cfg)
+            cfg_copy._in_gaussian_copula = True
+            return run_expanded_copula_estimation(df, spec_dict_norm, gcs, cfg_copy)
+
+    raw_mods = spec_dict.get("moderating_effects") or spec_dict.get("moderatingEffects") or []
+    raw_quads = spec_dict.get("quadratic_effects") or spec_dict.get("quadraticEffects") or []
+    if (raw_mods or raw_quads) and not getattr(cfg, "_in_moderation", False) and not getattr(cfg, "_in_quadratic", False):
         from engine.pls.moderation import (
             run_expanded_pls_estimation,
             normalize_moderation_spec,
@@ -649,68 +664,136 @@ def run_pipeline(
             detect_moderated_mediation_chains,
             compute_conditional_indirect_effects,
         )
+        from engine.pls.quadratic import (
+            normalize_quadratic_spec,
+            compute_quadratic_diagnostics,
+            calculate_kenny_f2,
+        )
+
         spec_dict_norm, moderations = normalize_moderation_spec(spec_dict)
-        if moderations:
+        spec_dict_norm, quadratics = normalize_quadratic_spec(spec_dict_norm)
+
+        if moderations or quadratics:
             cfg_copy = copy.deepcopy(cfg)
             cfg_copy._in_moderation = True
-            res_full = run_expanded_pls_estimation(df, spec_dict_norm, moderations, cfg_copy)
+            cfg_copy._in_quadratic = True
+            res_full = run_expanded_pls_estimation(
+                df, spec_dict_norm, moderations, cfg_copy, quadratics=quadratics
+            )
 
-            # Kenny f2 for each interaction
-            r2_full_map = res_full.get("structural", {}).get("r_squared", {})
-            f2_results = {}
-            for m in moderations:
-                int_name = m["interaction_term"]
-                tgt = m["target"]
-                r2_incl = float(r2_full_map.get(tgt, 0.0))
-                other_mods = [om for om in moderations if om["id"] != m["id"]]
-                res_excl = run_expanded_pls_estimation(df, spec_dict_norm, other_mods, cfg_copy)
-                r2_excl = float(res_excl.get("structural", {}).get("r_squared", {}).get(tgt, 0.0))
-                f2_results[int_name] = calculate_moderation_f2(r2_incl, r2_excl)
-
-            # Simple slopes per moderation
             path_matrix = res_full.get("structural", {}).get("path_coefficients", {})
-            simple_slopes_by_mod = {}
-            mod_details = []
-            for m in moderations:
-                src = m["source"]
-                mod = m["moderator"]
-                tgt = m["target"]
-                int_name = m["interaction_term"]
-                b_src = float(path_matrix.get(tgt, {}).get(src, 0.0))
-                b_mod = float(path_matrix.get(tgt, {}).get(mod, 0.0))
-                b_int = float(path_matrix.get(tgt, {}).get(int_name, 0.0))
-                slopes_res = compute_simple_slopes(b_src, b_mod, b_int)
-                simple_slopes_by_mod[m["id"]] = slopes_res
-                mod_details.append({
-                    "id": m["id"],
-                    "source": src,
-                    "moderator": mod,
-                    "target": tgt,
-                    "interaction_term": int_name,
-                    "method": m["method"],
-                    "estimates": {
-                        "beta_source": round(b_src, 4),
-                        "beta_moderator": round(b_mod, 4),
-                        "beta_interaction": round(b_int, 4),
-                    },
-                    "f_squared": f2_results.get(int_name, {}),
-                    "simple_slopes": slopes_res["simple_slopes"],
-                    "plot_data": {
-                        "x_range": slopes_res["x_range"],
-                        "lines": slopes_res["simple_slopes"],
-                    },
-                })
+            r2_full_map = res_full.get("structural", {}).get("r_squared", {})
 
-            expanded_paths = [(p.get("from") or p.get("source"), p.get("to") or p.get("target")) for p in res_full.get("_expanded_spec", {}).get("paths", [])]
-            chains = detect_moderated_mediation_chains(expanded_paths, moderations)
-            cond_indirect = compute_conditional_indirect_effects(chains, path_matrix)
+            # 1. Moderation diagnostics
+            if moderations:
+                f2_results = {}
+                for m in moderations:
+                    int_name = m["interaction_term"]
+                    tgt = m["target"]
+                    r2_incl = float(r2_full_map.get(tgt, 0.0))
+                    other_mods = [om for om in moderations if om["id"] != m["id"]]
+                    res_excl = run_expanded_pls_estimation(
+                        df, spec_dict_norm, other_mods, cfg_copy, quadratics=quadratics
+                    )
+                    r2_excl = float(res_excl.get("structural", {}).get("r_squared", {}).get(tgt, 0.0))
+                    f2_results[int_name] = calculate_moderation_f2(r2_incl, r2_excl)
 
-            res_full["moderation"] = {
-                "moderating_effects": mod_details,
-                "f2_effect_sizes": f2_results,
-                "simple_slopes": simple_slopes_by_mod,
-                "conditional_indirect_effects": cond_indirect,
-            }
+                simple_slopes_by_mod = {}
+                mod_details = []
+                for m in moderations:
+                    src = m["source"]
+                    mod = m["moderator"]
+                    tgt = m["target"]
+                    int_name = m["interaction_term"]
+                    b_src = float(path_matrix.get(tgt, {}).get(src, 0.0))
+                    b_mod = float(path_matrix.get(tgt, {}).get(mod, 0.0))
+                    b_int = float(path_matrix.get(tgt, {}).get(int_name, 0.0))
+                    slopes_res = compute_simple_slopes(b_src, b_mod, b_int)
+                    simple_slopes_by_mod[m["id"]] = slopes_res
+                    mod_details.append({
+                        "id": m["id"],
+                        "source": src,
+                        "moderator": mod,
+                        "target": tgt,
+                        "interaction_term": int_name,
+                        "method": m["method"],
+                        "estimates": {
+                            "beta_source": round(b_src, 4),
+                            "beta_moderator": round(b_mod, 4),
+                            "beta_interaction": round(b_int, 4),
+                        },
+                        "f_squared": f2_results.get(int_name, {}),
+                        "simple_slopes": slopes_res["simple_slopes"],
+                        "plot_data": {
+                            "x_range": slopes_res["x_range"],
+                            "lines": slopes_res["simple_slopes"],
+                        },
+                    })
+
+                expanded_paths = [(p.get("from") or p.get("source"), p.get("to") or p.get("target")) for p in res_full.get("_expanded_spec", {}).get("paths", [])]
+                chains = detect_moderated_mediation_chains(expanded_paths, moderations)
+                cond_indirect = compute_conditional_indirect_effects(chains, path_matrix)
+
+                res_full["moderation"] = {
+                    "moderating_effects": mod_details,
+                    "f2_effect_sizes": f2_results,
+                    "simple_slopes": simple_slopes_by_mod,
+                    "conditional_indirect_effects": cond_indirect,
+                }
+
+            # 2. Quadratic effects diagnostics (Kenny 2015 f2, marginal slopes, turning point, curve data)
+            if quadratics:
+                nl_effects = []
+                quad_scales = res_full.get("_quad_scales", {})
+                stage1_res = res_full.get("_stage1_results", {})
+                stage1_scores = stage1_res.get("construct_scores", {})
+                stage1_paths = stage1_res.get("structural", {}).get("path_coefficients", {})
+
+                for q in quadratics:
+                    q_name = q["quad_construct_name"]
+                    tgt = q["target"]
+                    pred = q["predictor"]
+                    r2_incl = float(r2_full_map.get(tgt, 0.0))
+
+                    other_quads = [oq for oq in quadratics if oq["id"] != q["id"]]
+                    if not other_quads and not moderations:
+                        r2_excl = float(stage1_res.get("structural", {}).get("r_squared", {}).get(tgt, 0.0))
+                    else:
+                        res_excl = run_expanded_pls_estimation(
+                            df, spec_dict_norm, moderations, cfg_copy, quadratics=other_quads
+                        )
+                        r2_excl = float(res_excl.get("structural", {}).get("r_squared", {}).get(tgt, 0.0))
+
+                    f2_info = calculate_kenny_f2(r2_incl, r2_excl)
+                    b1_lin = float(path_matrix.get(tgt, {}).get(pred, 0.0))
+                    b2_unstd = float(path_matrix.get(tgt, {}).get(q_name, 0.0))
+                    b_lin_s1 = float(stage1_paths.get(tgt, {}).get(pred, b1_lin))
+                    q_scale_info = quad_scales.get(q_name, {"scale": 1.0, "mean": 0.0})
+                    scale = q_scale_info.get("scale", 1.0)
+                    m_sq = q_scale_info.get("mean", 0.0)
+                    sc_pred = np.asarray(stage1_scores.get(pred, []), dtype=float)
+
+                    diag = compute_quadratic_diagnostics(
+                        b1_linear=b1_lin,
+                        b2_quad_unstd=b2_unstd,
+                        scale=scale,
+                        mean_sq=m_sq,
+                        predictor_scores=sc_pred,
+                        b_linear_stage1=b_lin_s1,
+                        f2_info=f2_info,
+                    )
+                    diag["id"] = q["id"]
+                    diag["predictor"] = pred
+                    diag["target"] = tgt
+                    diag["predictor_name"] = q["predictor_name"]
+                    diag["target_name"] = q["target_name"]
+                    diag["quad_construct_name"] = q_name
+                    diag["method"] = q["method"]
+                    diag["node_x"] = q.get("node_x")
+                    diag["node_y"] = q.get("node_y")
+                    nl_effects.append(diag)
+
+                res_full["nonlinear_effects"] = nl_effects
 
             # Synchronize expanded contract fields
             expanded_constructs_spec = {c.get("id"): c for c in res_full.get("_expanded_spec", {}).get("constructs", [])}
@@ -718,9 +801,12 @@ def run_pipeline(
             mod_lvs = []
             cnames_map = dict(res_full.get("construct_names", {}))
             mod_by_term = {m["interaction_term"]: m for m in moderations}
+            quad_by_term = {q["quad_construct_name"]: q for q in quadratics}
+
             for cid in all_scores.keys():
                 c_meta = expanded_constructs_spec.get(cid, {})
-                is_int = bool(c_meta.get("is_interaction", False) or (" x " in cid) or (cid in mod_by_term))
+                is_int = bool(c_meta.get("is_interaction", False) or (" x " in cid) or (cid in mod_by_term) or (cid in quad_by_term))
+                is_quad = bool(c_meta.get("is_quadratic", False) or (cid in quad_by_term))
                 meta_dict = c_meta.get("metadata")
                 if not meta_dict and cid in mod_by_term:
                     m_info = mod_by_term[cid]
@@ -729,6 +815,15 @@ def run_pipeline(
                         "predictor": m_info["source"],
                         "outcome": m_info["target"],
                         "method": m_info["method"],
+                    }
+                elif not meta_dict and cid in quad_by_term:
+                    q_info = quad_by_term[cid]
+                    meta_dict = {
+                        "predictor": q_info["predictor"],
+                        "outcome": q_info["target"],
+                        "target": q_info["target"],
+                        "method": q_info["method"],
+                        "is_quadratic": True,
                     }
                 elif not meta_dict and is_int and " x " in cid:
                     parts = cid.split(" x ")
@@ -744,6 +839,7 @@ def run_pipeline(
                     "name": cname,
                     "type": c_meta.get("type", "reflective"),
                     "is_interaction": is_int,
+                    "is_quadratic": is_quad,
                     "metadata": meta_dict,
                 })
                 cnames_map[cid] = cname
@@ -765,6 +861,29 @@ def run_pipeline(
             res_full["r2"] = res_full.get("structural", {}).get("r_squared", {})
             res_full["f2"] = res_full.get("structural", {}).get("f_squared", {})
             res_full["vif"] = res_full.get("structural", {}).get("inner_vif", {})
+
+            # Exclude interaction and quadratic terms from reliability and validity tables
+            if "reliability_and_validity" in res_full and isinstance(res_full["reliability_and_validity"], dict):
+                rel = res_full["reliability_and_validity"]
+                excluded_cids = {cid for cid, c in expanded_constructs_spec.items() if c.get("is_interaction") or c.get("is_quadratic")}
+                excluded_cids.update(mod_by_term.keys())
+                excluded_cids.update(quad_by_term.keys())
+                excluded_cids.update({cid for cid in all_scores.keys() if " x " in cid})
+                for metric in ["cronbachs_alpha", "composite_reliability", "rho_a", "ave"]:
+                    if metric in rel and isinstance(rel[metric], dict):
+                        rel[metric] = {k: v for k, v in rel[metric].items() if k not in excluded_cids}
+                if "fornell_larcker" in rel and isinstance(rel["fornell_larcker"], dict):
+                    rel["fornell_larcker"] = {
+                        k: {k2: v2 for k2, v2 in v.items() if k2 not in excluded_cids}
+                        for k, v in rel["fornell_larcker"].items()
+                        if k not in excluded_cids and isinstance(v, dict)
+                    }
+                if "htmt" in rel and isinstance(rel["htmt"], dict):
+                    rel["htmt"] = {
+                        k: {k2: v2 for k2, v2 in v.items() if k2 not in excluded_cids}
+                        for k, v in rel["htmt"].items()
+                        if k not in excluded_cids and isinstance(v, dict)
+                    }
 
             return res_full
 
@@ -861,6 +980,18 @@ def run_pipeline(
     except Exception as e:
         raw_results["fit"] = {"error": str(e)}
 
+    # 9. Redundancy Analysis (Convergent Validity of Formative Constructs)
+    try:
+        from engine.pls.redundancy import compute_convergent_validity_redundancy
+        red_card = compute_convergent_validity_redundancy(raw_results, spec_dict)
+        if red_card:
+            raw_results["convergent_validity_redundancy"] = red_card
+            if "quality_criteria" not in raw_results:
+                raw_results["quality_criteria"] = {}
+            raw_results["quality_criteria"]["convergent_validity_redundancy"] = red_card
+    except Exception:
+        pass
+
     # Friendly construct and indicator display names
     construct_names = {}
     for cid, cinfo in constructs.items():
@@ -895,6 +1026,7 @@ class PLSAlgorithm:
         sign_alignment: bool = True,
         missing_treatment: str = "mean",
         missing_values: Optional[List[Any]] = None,
+        settings: Optional[Union[PipelineSettings, Dict[str, Any]]] = None,
     ):
         self.scheme = scheme
         self.max_iter = max_iter
@@ -902,11 +1034,12 @@ class PLSAlgorithm:
         self.sign_alignment = sign_alignment
         self.missing_treatment = missing_treatment
         self.missing_values = missing_values if missing_values is not None else [-99, "-99"]
+        self.custom_settings = settings
 
     def _parse_spec(self, model_spec: Any):
         return parse_model_spec(model_spec)
 
-    def fit(self, data: pd.DataFrame, model_spec: Any, missing_treatment: Optional[str] = None) -> Dict[str, Any]:
+    def fit(self, data: pd.DataFrame, model_spec: Any, missing_treatment: Optional[str] = None, is_bootstrap: bool = False) -> Dict[str, Any]:
         eff_treatment = missing_treatment or self.missing_treatment or "mean"
         settings = PipelineSettings(
             inner_weighting=self.scheme,
@@ -916,6 +1049,12 @@ class PLSAlgorithm:
             missing_treatment=eff_treatment,
             missing_codes=self.missing_values,
         )
+        if self.custom_settings:
+            if isinstance(self.custom_settings, PipelineSettings):
+                settings.gc = self.custom_settings.gc
+            elif isinstance(self.custom_settings, dict) and "gc" in self.custom_settings:
+                settings.gc = GCSettings(**self.custom_settings["gc"])
+        settings._is_bootstrap = is_bootstrap
         return run_pipeline(data, model_spec, settings)
 
     def bootstrap(

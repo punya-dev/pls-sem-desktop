@@ -148,6 +148,16 @@ def convert_smartpls_model(splsm_dict: Dict[str, Any]) -> Tuple[Dict[str, Any], 
                 "isLatent": False,
                 "parentId": parent_id,
             })
+        elif mtype == "GAUSSIAN_COPULA":
+            label = n.get("caption") or "GC"
+            nodes.append({
+                "id": nid,
+                "label": label,
+                "x": round(cx, 1),
+                "y": round(cy, 1),
+                "isLatent": False,
+                "isCopula": True,
+            })
         elif mtype == "POSTIT":
             text = n.get("description") or n.get("caption") or ""
             nodes.append({
@@ -162,6 +172,7 @@ def convert_smartpls_model(splsm_dict: Dict[str, Any]) -> Tuple[Dict[str, Any], 
     # 2. Convert Connections
     conn_by_id = {c.get("id"): c for c in splsm_dict.get("connections", []) if c.get("id")}
     moderating_effects = []
+    gaussian_copulas = []
 
     for conn in splsm_dict.get("connections", []):
         ctype = conn.get("modelType")
@@ -191,10 +202,26 @@ def convert_smartpls_model(splsm_dict: Dict[str, Any]) -> Tuple[Dict[str, Any], 
                         "method": "two_stage",
                         "standardize": True,
                     })
+        elif "COPULA" in str(ctype).upper():
+            target_conn = conn_by_id.get(tid)
+            if target_conn:
+                pred_id = target_conn.get("sourceId")
+                out_id = target_conn.get("targetId")
+                gc_node = next((n for n in splsm_dict.get("nodes", []) if n.get("id") == sid), None)
+                gc_x = float(gc_node.get("x", 0.0)) + float(gc_node.get("width", 40.0))/2.0 if gc_node else None
+                gc_y = float(gc_node.get("y", 0.0)) + float(gc_node.get("height", 40.0))/2.0 if gc_node else None
+                if pred_id and out_id:
+                    gaussian_copulas.append({
+                        "id": cid,
+                        "source_construct": pred_id,
+                        "target_construct": out_id,
+                        "node_x": round(gc_x, 1) if gc_x is not None else None,
+                        "node_y": round(gc_y, 1) if gc_y is not None else None,
+                    })
 
     # 3. Build ModelSpec
     latent_nodes = [n for n in nodes if n.get("isLatent") is True]
-    manifest_nodes = [n for n in nodes if n.get("isLatent") is False]
+    manifest_nodes = [n for n in nodes if n.get("isLatent") is False and not n.get("isCopula")]
 
     constructs = []
     for ln in latent_nodes:
@@ -222,12 +249,14 @@ def convert_smartpls_model(splsm_dict: Dict[str, Any]) -> Tuple[Dict[str, Any], 
         "indicators": indicators,
         "paths": paths,
         "moderating_effects": moderating_effects,
+        "gaussian_copulas": gaussian_copulas,
     }
 
     diagram_layout = {
         "nodes": nodes,
         "edges": edges,
         "moderating_effects": moderating_effects,
+        "gaussian_copulas": gaussian_copulas,
         "transform": {"x": 0, "y": 0, "k": 1},
     }
 

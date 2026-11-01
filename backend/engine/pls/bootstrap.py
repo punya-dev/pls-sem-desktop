@@ -74,6 +74,15 @@ def _extract_model_parameters(
                 params[f"cond_direct:{chain_str}({mod_str}):{lvl_key}"] = float(ce.get("direct_effect", 0.0))
                 params[f"cond_total:{chain_str}({mod_str}):{lvl_key}"] = float(ce.get("total_effect", 0.0))
 
+    # Capture Gaussian Copula effect of correction differences
+    gc_block = res.get("gaussian_copula", {})
+    if isinstance(gc_block, dict):
+        for eff in gc_block.get("effects_of_correction", []):
+            s_name = eff.get("source")
+            t_name = eff.get("target")
+            diff_val = eff.get("difference", 0.0)
+            params[f"gc_diff:{s_name}->{t_name}"] = float(diff_val)
+
     # 2. Outer loadings & weights
     meas = res.get("measurement", {})
     loadings = meas.get("outer_loadings", {})
@@ -196,7 +205,7 @@ def _run_bootstrap_worker_chunk(
         resampled_df = df_template.iloc[indices].reset_index(drop=True)
 
         try:
-            res = algo.fit(resampled_df, spec_dict)
+            res = algo.fit(resampled_df, spec_dict, is_bootstrap=True)
             params = _extract_model_parameters(res, spec_dict, mode=mode)
 
             # Sign-change corrections
@@ -477,10 +486,14 @@ class ParallelBootstrapper:
                 "original": orig_val,
                 "mean": float(np.mean(dist)),
                 "se": se,
+                "standard_error": se,
                 "t_stat": t_stat,
+                "t_statistic": t_stat,
                 "p_value": p_val,
                 "ci_low": chosen_ci[0],
+                "ci_lower": chosen_ci[0],
                 "ci_high": chosen_ci[1],
+                "ci_upper": chosen_ci[1],
                 "confidence_intervals": all_cis,
                 "significance": sig,
                 "df": df_val,

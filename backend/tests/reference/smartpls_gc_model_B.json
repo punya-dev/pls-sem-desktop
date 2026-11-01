@@ -1,0 +1,38 @@
+{
+  "case": "gaussian_copula_model_b",
+  "model": "Corporate reputation (advanced) Gaussian copula model B (2-GC)",
+  "data": "backend/tests/data/Corporate reputation data.csv",
+  "settings": {
+    "inner_weighting": "path",
+    "max_iterations": 3000,
+    "stop_criterion": 1e-7,
+    "missing_treatment": "mean",
+    "gc": {
+      "ecdf": "F4",
+      "copula_transform": "raw"
+    }
+  },
+  "r_squared": {
+    "CUSL": 0.390
+  },
+  "paths": {
+    "COMP -> CUSL": -0.137,
+    "LIKE -> CUSL": 0.684
+  },
+  "gc_coefficients": {
+    "GC (COMP -> CUSL)": 0.218,
+    "GC (LIKE -> CUSL)": -0.121
+  },
+  "loadings": {
+    "comp_1": 0.853,
+    "comp_2": 0.802,
+    "comp_3": 0.822,
+    "like_1": 0.876,
+    "like_2": 0.873,
+    "like_3": 0.844,
+    "cusl_1": 0.850,
+    "cusl_2": 0.914,
+    "cusl_3": 0.827
+  }
+}
+

@@ -16,6 +16,7 @@ import project_io
 import os
 import workspace_io
 import settings_io
+from core.json_utils import sanitize_for_json
 from model_spec import ModelSpec, ValidateModelRequest, SaveModelRequest, RunPlsRequest, BootstrapStartRequest
 from model_validator import validate_model_spec, ValidationResult
 from engine.pls.algorithm import PLSAlgorithm, run_pls
@@ -1522,6 +1523,128 @@ def duplicate_project_model(req: DuplicateModelRequest):
         return {"error": str(e)}
 
 
+class ValidateRedundancyCandidateRequest(BaseModel):
+    project_path: str
+    construct_id: str
+    construct_name: Optional[str] = None
+    indicators: List[str]
+    is_formative: bool = True
+    global_item: str
+    dataset_id: Optional[str] = None
+
+
+@app.post("/project/validate-redundancy-candidate")
+def validate_redundancy_candidate_endpoint(req: ValidateRedundancyCandidateRequest):
+    if not os.path.exists(req.project_path):
+        return {"error": "Project file does not exist"}
+
+    data_dict = project_io.load_data(req.project_path, dataset_id=req.dataset_id)
+    if not data_dict or not data_dict.get("rows"):
+        return {"error": "No dataset found in project"}
+
+    df = pd.DataFrame(data_dict["rows"], columns=data_dict["columns"])
+    from engine.pls.redundancy import validate_redundancy_candidate
+    val_res = validate_redundancy_candidate(
+        df=df,
+        construct_id=req.construct_id,
+        construct_name=req.construct_name or req.construct_id,
+        indicators=req.indicators,
+        is_formative=req.is_formative,
+        global_item=req.global_item,
+    )
+    return val_res
+
+
+class RedundancyMappingItem(BaseModel):
+    construct_id: str
+    construct_name: Optional[str] = None
+    indicators: List[str]
+    global_item: str
+
+
+class CreateRedundancyModelRequest(BaseModel):
+    project_path: str
+    study_id: Optional[str] = None
+    dataset_id: Optional[str] = None
+    mappings: List[RedundancyMappingItem]
+    calculate_now: bool = False
+    scheme: str = "path"
+    max_iter: int = 3000
+    tol: float = 1e-7
+    missing_treatment: str = "mean"
+    missing_values: Optional[List[Any]] = None
+
+
+@app.post("/project/create-redundancy-model")
+def create_redundancy_model_endpoint(req: CreateRedundancyModelRequest):
+    if not os.path.exists(req.project_path):
+        return {"error": "Project file does not exist"}
+
+    from engine.pls.redundancy import build_redundancy_model_spec
+    created = []
+
+    df = None
+    if req.calculate_now:
+        data_dict = project_io.load_data(req.project_path, dataset_id=req.dataset_id)
+        if data_dict and data_dict.get("rows"):
+            df = pd.DataFrame(data_dict["rows"], columns=data_dict["columns"])
+            for col in df.columns:
+                converted = pd.to_numeric(df[col], errors='coerce')
+                if converted.notnull().sum() > 0:
+                    df[col] = converted
+
+    for item in req.mappings:
+        c_name = item.construct_name or item.construct_id
+        model_name = f"Redundancy analysis {c_name}"
+        model_id = uuid.uuid4().hex
+
+        spec, layout = build_redundancy_model_spec(
+            construct_id=item.construct_id,
+            construct_name=c_name,
+            indicators=item.indicators,
+            global_item=item.global_item,
+            dataset_id=req.dataset_id,
+        )
+
+        project_io.save_model_spec(req.project_path, spec, diagram_layout=layout, model_id=model_id)
+
+        res_clean = None
+        if req.calculate_now and df is not None:
+            try:
+                algo = PLSAlgorithm(
+                    scheme=req.scheme,
+                    max_iter=req.max_iter,
+                    tol=req.tol,
+                    missing_treatment=req.missing_treatment,
+                    missing_values=req.missing_values,
+                )
+                res = algo.fit(df, spec)
+                res_clean = sanitize_for_json(res)
+                project_io.save_results(
+                    req.project_path,
+                    "pls",
+                    res_clean,
+                    model_id=model_id,
+                    spec=spec,
+                    diagram_layout=layout,
+                )
+            except Exception as e:
+                print(f"Error calculating redundancy model for {c_name}: {e}")
+
+        created.append({
+            "model_id": model_id,
+            "name": model_name,
+            "spec": spec,
+            "diagram_layout": layout,
+            "results": res_clean,
+        })
+
+    return {
+        "status": "success",
+        "created_models": created,
+    }
+
+
 @app.post("/project/duplicate")
 @app.post("/study/duplicate")
 def duplicate_project_file(req: DuplicateProjectRequest):
@@ -1655,13 +1778,23 @@ def run_project_pls(req: RunPlsRequest):
             if "moderation" in res and res.get("significance"):
                 from engine.pls.moderation import attach_bootstrap_to_moderation
                 attach_bootstrap_to_moderation(res, res["significance"])
+            if "gaussian_copula" in res and res.get("significance"):
+                from engine.pls.copula import attach_bootstrap_to_copula
+                attach_bootstrap_to_copula(res, res["significance"])
+            if "convergent_validity_redundancy" in res and res.get("significance"):
+                from engine.pls.redundancy import attach_bootstrap_to_redundancy
+                attach_bootstrap_to_redundancy(res, res["significance"])
+            if "nonlinear_effects" in res and res.get("significance"):
+                from engine.pls.quadratic import attach_bootstrap_to_quadratic
+                attach_bootstrap_to_quadratic(res, res["significance"])
 
-        # 5. Persist results in project file scoped to model_id
+        # 5. Sanitize and persist results in project file scoped to model_id
+        clean_res = sanitize_for_json(res)
         spec_dict = spec.model_dump(mode="json", by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else None)
         project_io.save_results(
             req.project_path,
             "pls",
-            res,
+            clean_res,
             model_id=req.model_id,
             spec=spec_dict,
             diagram_layout=req.diagram_layout,
@@ -1670,7 +1803,7 @@ def run_project_pls(req: RunPlsRequest):
         return {
             "status": "success",
             "algorithm": "pls",
-            "results": res,
+            "results": clean_res,
         }
     except Exception as e:
         return {"error": f"PLS-SEM calculation failed: {str(e)}"}
@@ -1683,7 +1816,7 @@ def load_project_results(path: str, algorithm: str = "pls", model_id: Optional[s
     data = project_io.load_results(path, algorithm=algorithm, model_id=model_id)
     if data is None:
         return {"results": None}
-    return data
+    return sanitize_for_json(data)
 
 
 # --- Phase 4: Bootstrapping & Live WebSocket Progress ---
@@ -1693,13 +1826,14 @@ active_bootstrap_jobs: Dict[str, Dict[str, Any]] = {}
 
 def _ws_json_default(obj):
     if isinstance(obj, np.ndarray):
-        return obj.tolist()
+        return [sanitize_for_json(item) for item in obj.tolist()]
     if hasattr(obj, "tolist"):
-        return obj.tolist()
+        return [sanitize_for_json(item) for item in obj.tolist()]
     if hasattr(obj, "to_dict"):
-        return obj.to_dict()
+        return sanitize_for_json(obj.to_dict())
     if isinstance(obj, (np.floating, float)):
-        return float(obj)
+        val = float(obj)
+        return None if (np.isnan(val) or np.isinf(val)) else val
     if isinstance(obj, (np.integer, int)):
         return int(obj)
     if isinstance(obj, (np.bool_, bool)):
@@ -1712,7 +1846,8 @@ def _broadcast_ws(job: dict, msg: dict):
     if not loop or loop.is_closed():
         return
     try:
-        payload = json.dumps(msg, default=_ws_json_default)
+        clean_msg = sanitize_for_json(msg)
+        payload = json.dumps(clean_msg, default=_ws_json_default)
     except Exception as e:
         print(f"Error serializing bootstrap WS message: {e}")
         return
@@ -1815,6 +1950,7 @@ async def start_bootstrap_job(req: BootstrapStartRequest):
                 sign_alignment=req.sign_alignment,
                 missing_treatment=req.missing_treatment or "mean",
                 missing_values=req.missing_values,
+                settings=req.settings,
             )
 
             # Fit base model
@@ -1833,6 +1969,15 @@ async def start_bootstrap_job(req: BootstrapStartRequest):
             if "moderation" in base_res:
                 from engine.pls.moderation import attach_bootstrap_to_moderation
                 attach_bootstrap_to_moderation(base_res, boot_res)
+            if "gaussian_copula" in base_res:
+                from engine.pls.copula import attach_bootstrap_to_copula
+                attach_bootstrap_to_copula(base_res, boot_res)
+            if "convergent_validity_redundancy" in base_res:
+                from engine.pls.redundancy import attach_bootstrap_to_redundancy
+                attach_bootstrap_to_redundancy(base_res, boot_res)
+            if "nonlinear_effects" in base_res:
+                from engine.pls.quadratic import attach_bootstrap_to_quadratic
+                attach_bootstrap_to_quadratic(base_res, boot_res)
 
             # Save full results with significance to project scoped to model_id
             spec_dict = spec.model_dump(mode="json", by_alias=True) if hasattr(spec, "model_dump") else (spec if isinstance(spec, dict) else None)
@@ -1845,7 +1990,7 @@ async def start_bootstrap_job(req: BootstrapStartRequest):
                 diagram_layout=getattr(req, "diagram_layout", None),
             )
 
-            clean_res = json.loads(json.dumps(base_res, default=_ws_json_default))
+            clean_res = sanitize_for_json(base_res)
             job["status"] = "completed"
             job["results"] = clean_res
             job["elapsed_sec"] = round(time.time() - job["start_time"], 1)

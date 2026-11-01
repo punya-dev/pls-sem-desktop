@@ -1,27 +1,33 @@
 {
+  "case": "multiple_moderation",
+  "data": "backend/tests/data/Corporate reputation data.csv",
+  "settings": {
+    "inner_weighting": "path",
+    "max_iterations": 3000,
+    "stop_criterion": 1e-7,
+    "missing_treatment": "mean",
+    "moderation_method": "two_stage"
+  },
   "paths": {
-    "LIKE -> CUSA": null,
-    "LIKE -> CUSL": null,
-    "CUSA -> CUSL": null,
-    "COMP -> CUSL": null,
-    "SWITCH_1 -> CUSA": null,
-    "SWITCH_1 -> CUSL": null,
-    "SWITCH_2 -> CUSL": null,
-    "SWITCH_3 -> CUSL": null,
-    "LIKE x SWITCH_1 -> CUSA": null,
-    "LIKE x SWITCH_1 -> CUSL": null,
-    "LIKE x SWITCH_2 -> CUSL": null,
-    "LIKE x SWITCH_3 -> CUSL": null,
-    "CUSA x SWITCH_1 -> CUSL": null,
-    "CUSA x SWITCH_2 -> CUSL": null,
-    "CUSA x SWITCH_3 -> CUSL": null,
-    "COMP x SWITCH_1 -> CUSL": null,
-    "COMP x SWITCH_2 -> CUSL": null,
-    "COMP x SWITCH_3 -> CUSL": null
+    "COMP -> CUSA": 0.162,
+    "LIKE -> CUSA": 0.424,
+    "COMP -> CUSL": -0.009,
+    "LIKE -> CUSL": 0.240,
+    "CUSA -> CUSL": 0.490,
+    "SWITCH_1 -> CUSL": 0.052,
+    "SWITCH_2 -> CUSL": 0.085,
+    "SWITCH_3 -> CUSL": -0.021,
+    "SWITCH_1 x LIKE -> CUSL": 0.060,
+    "SWITCH_2 x LIKE -> CUSL": -0.115,
+    "SWITCH_3 x LIKE -> CUSL": -0.003,
+    "SWITCH_1 x SWITCH_2 x LIKE -> CUSL": 0.001,
+    "SWITCH_1 x SWITCH_3 x LIKE -> CUSL": -0.019,
+    "SWITCH_2 x SWITCH_3 x LIKE -> CUSL": 0.096,
+    "SWITCH_1 x SWITCH_2 x SWITCH_3 x LIKE -> CUSL": -0.069
   },
   "r_squared": {
-    "CUSA": null,
-    "CUSL": null
+    "CUSA": 0.295,
+    "CUSL": 0.597
   },
   "f_squared": {},
   "conditional_indirect_effects": {}

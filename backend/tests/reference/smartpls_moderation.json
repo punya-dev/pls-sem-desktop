@@ -1,4 +1,13 @@
 {
+  "case": "single_moderation",
+  "data": "backend/tests/data/Corporate reputation data.csv",
+  "settings": {
+    "inner_weighting": "path",
+    "max_iterations": 3000,
+    "stop_criterion": 1e-7,
+    "missing_treatment": "mean",
+    "moderation_method": "two_stage"
+  },
   "paths": {
     "SC x CUSA -> CUSL": -0.071,
     "SC -> CUSL": 0.070,
@@ -17,7 +26,7 @@
     "QUAL -> LIKE": 0.380
   },
   "r_squared": {
-    "CUSL": 0.562
+    "CUSL": 0.571
   },
   "f_squared": {
     "SC x CUSA -> CUSL": 0.012

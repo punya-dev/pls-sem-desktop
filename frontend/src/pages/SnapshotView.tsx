@@ -879,6 +879,15 @@ export const SnapshotView: React.FC = () => {
                       >
                         Collinearity (VIF)
                       </a>
+                      {results?.convergent_validity_redundancy && (
+                        <a
+                          href="#"
+                          className={`tree-item ${activeResultTab === 'convergent_validity_redundancy' ? 'active' : ''}`}
+                          onClick={(e) => { e.preventDefault(); setActiveResultTab('convergent_validity_redundancy'); }}
+                        >
+                          Convergent validity (redundancy)
+                        </a>
+                      )}
                       <a
                         href="#"
                         className={`tree-item ${activeResultTab === 'model_fit' ? 'active' : ''}`}
@@ -1678,6 +1687,83 @@ export const SnapshotView: React.FC = () => {
                           ))}
                         </tbody>
                       </table>
+                    ) : activeResultTab === 'convergent_validity_redundancy' ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                        <table className="scientific-table">
+                          <thead>
+                            <tr>
+                              <th>Formative construct</th>
+                              <th>Global item construct</th>
+                              <th>Path coefficient</th>
+                              {results?.convergent_validity_redundancy?.some((r: any) => r.bootstrap) && (
+                                <>
+                                  <th>Mean</th>
+                                  <th>SD</th>
+                                  <th>t Value</th>
+                                  <th>p Value</th>
+                                  <th>95% CI</th>
+                                </>
+                              )}
+                              <th>R² of global item</th>
+                              <th>Threshold</th>
+                              <th>Result</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(results?.convergent_validity_redundancy || []).map((row: any, idx: number) => {
+                              const isSupported = row.supported || (row.path_coefficient >= 0.70);
+                              const b = row.bootstrap;
+                              return (
+                                <tr key={idx}>
+                                  <td><strong>{row.formative_construct}</strong></td>
+                                  <td><strong>{row.global_construct}</strong></td>
+                                  <td className="cell-sig"><div className="cell-value">{fmt(row.path_coefficient, 4)}</div></td>
+                                  {results?.convergent_validity_redundancy?.some((r: any) => r.bootstrap) && (
+                                    <>
+                                      <td>{b ? fmt(b.mean, 4) : '—'}</td>
+                                      <td>{b ? fmt(b.se, 4) : '—'}</td>
+                                      <td>{b ? fmt(b.t_stat, 3) : '—'}</td>
+                                      <td className={b && b.p_value < 0.05 ? 'cell-sig' : ''}>{b ? fmt(b.p_value, 4) : '—'}</td>
+                                      <td>{b && b.ci_low !== undefined ? `[${fmt(b.ci_low, 3)}, ${fmt(b.ci_high, 3)}]` : '—'}</td>
+                                    </>
+                                  )}
+                                  <td>{fmt(row.r_squared, 4)}</td>
+                                  <td>&ge; 0.70</td>
+                                  <td>
+                                    <span style={{
+                                      padding: '3px 10px',
+                                      borderRadius: '6px',
+                                      fontSize: '11px',
+                                      fontWeight: 600,
+                                      backgroundColor: isSupported ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                                      color: isSupported ? '#15803d' : '#b91c1c',
+                                      border: `1px solid ${isSupported ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`
+                                    }}>
+                                      {row.result || (isSupported ? 'Supported (>= 0.70)' : 'Not supported (< 0.70)')}
+                                    </span>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                        <div style={{
+                          padding: '12px 16px',
+                          borderRadius: '8px',
+                          backgroundColor: 'var(--color-bg-base)',
+                          border: '1px solid var(--color-border-subtle)',
+                          fontSize: '12px',
+                          lineHeight: '1.5',
+                          color: 'var(--color-text-secondary)'
+                        }}>
+                          <div style={{ fontWeight: 600, marginBottom: '4px', color: 'var(--color-text-primary)' }}>
+                            Assessment Guide (Hair et al., 2022)
+                          </div>
+                          <div>
+                            Hair et al. (2022): path coefficient of at least 0.70 (R² of at least 0.50). If not met, consider adding indicators that cover the domain of the construct.
+                          </div>
+                        </div>
+                      </div>
                     ) : activeResultTab === 'construct_scores' ? (
                       <table className="scientific-table">
                         <thead>
