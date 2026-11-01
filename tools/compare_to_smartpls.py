@@ -189,6 +189,41 @@ def get_model_spec_for_case(case_name: str, ref_dict: Dict[str, Any]) -> Dict[st
                 {"id": "mod_sc", "moderator": "SC", "source": "CUSA", "target": "CUSL", "method": "two_stage"},
             ],
         }
+    elif case_name == "quadratic_corporate_reputation":
+        return {
+            "constructs": [
+                {"id": "ATTR", "name": "ATTR", "type": "formative", "indicators": ["attr_1", "attr_2", "attr_3"], "outer_mode": "B"},
+                {"id": "CSOR", "name": "CSOR", "type": "formative", "indicators": ["csor_1", "csor_2", "csor_3", "csor_4", "csor_5"], "outer_mode": "B"},
+                {"id": "PERF", "name": "PERF", "type": "formative", "indicators": ["perf_1", "perf_2", "perf_3", "perf_4", "perf_5"], "outer_mode": "B"},
+                {"id": "QUAL", "name": "QUAL", "type": "formative", "indicators": ["qual_1", "qual_2", "qual_3", "qual_4", "qual_5", "qual_6", "qual_7", "qual_8"], "outer_mode": "B"},
+                {"id": "COMP", "name": "COMP", "type": "reflective", "indicators": ["comp_1", "comp_2", "comp_3"], "outer_mode": "A"},
+                {"id": "LIKE", "name": "LIKE", "type": "reflective", "indicators": ["like_1", "like_2", "like_3"], "outer_mode": "A"},
+                {"id": "CUSA", "name": "CUSA", "type": "reflective", "indicators": ["cusa"], "outer_mode": "A"},
+                {"id": "CUSL", "name": "CUSL", "type": "reflective", "indicators": ["cusl_1", "cusl_2", "cusl_3"], "outer_mode": "A"},
+            ],
+            "indicators": [
+                {"id": "attr_1", "column": "attr_1"}, {"id": "attr_2", "column": "attr_2"}, {"id": "attr_3", "column": "attr_3"},
+                {"id": "csor_1", "column": "csor_1"}, {"id": "csor_2", "column": "csor_2"}, {"id": "csor_3", "column": "csor_3"}, {"id": "csor_4", "column": "csor_4"}, {"id": "csor_5", "column": "csor_5"},
+                {"id": "perf_1", "column": "perf_1"}, {"id": "perf_2", "column": "perf_2"}, {"id": "perf_3", "column": "perf_3"}, {"id": "perf_4", "column": "perf_4"}, {"id": "perf_5", "column": "perf_5"},
+                {"id": "qual_1", "column": "qual_1"}, {"id": "qual_2", "column": "qual_2"}, {"id": "qual_3", "column": "qual_3"}, {"id": "qual_4", "column": "qual_4"}, {"id": "qual_5", "column": "qual_5"}, {"id": "qual_6", "column": "qual_6"}, {"id": "qual_7", "column": "qual_7"}, {"id": "qual_8", "column": "qual_8"},
+                {"id": "comp_1", "column": "comp_1"}, {"id": "comp_2", "column": "comp_2"}, {"id": "comp_3", "column": "comp_3"},
+                {"id": "like_1", "column": "like_1"}, {"id": "like_2", "column": "like_2"}, {"id": "like_3", "column": "like_3"},
+                {"id": "cusa", "column": "cusa"},
+                {"id": "cusl_1", "column": "cusl_1"}, {"id": "cusl_2", "column": "cusl_2"}, {"id": "cusl_3", "column": "cusl_3"},
+            ],
+            "paths": [
+                {"from": "ATTR", "to": "COMP"}, {"from": "ATTR", "to": "LIKE"},
+                {"from": "CSOR", "to": "COMP"}, {"from": "CSOR", "to": "LIKE"},
+                {"from": "PERF", "to": "COMP"}, {"from": "PERF", "to": "LIKE"},
+                {"from": "QUAL", "to": "COMP"}, {"from": "QUAL", "to": "LIKE"},
+                {"from": "COMP", "to": "CUSA"}, {"from": "LIKE", "to": "CUSA"},
+                {"from": "COMP", "to": "CUSL"}, {"from": "LIKE", "to": "CUSL"},
+                {"from": "CUSA", "to": "CUSL"},
+            ],
+            "quadratic_effects": [
+                {"id": "qe_cusa_cusl", "predictor_construct": "CUSA", "target_construct": "CUSL"}
+            ],
+        }
     else:
         raise ValueError(f"Unknown reference case: {case_name}")
 
