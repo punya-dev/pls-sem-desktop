@@ -1,10 +1,28 @@
+import { getCachedTokenString } from './license';
+
 const API_BASE = 'http://127.0.0.1:8721';
+
+const nativeFetch = window.fetch.bind(window);
+
+async function fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const headers = new Headers(init?.headers || {});
+  try {
+    const token = await getCachedTokenString();
+    if (token && !headers.has('X-License-Token')) {
+      headers.set('X-License-Token', token);
+    }
+  } catch {
+    // Ignore in case Tauri invoke fails or in browser environment
+  }
+  return nativeFetch(input, { ...init, headers });
+}
 
 export interface WorkspaceMetadata {
   name: string;
   created_at: string;
   modified_at: string;
   projects: Array<{ path: string; name: string }>;
+  archived_projects?: Array<{ path: string; name: string; archived_at?: string }>;
 }
 
 export interface WorkspaceResponse {
@@ -156,6 +174,75 @@ export const api = {
       return await res.json();
     } catch (err: any) {
       return { error: err?.message || 'Failed to delete project' };
+    }
+  },
+
+  async archiveProject(folderPath: string, projectFilename: string): Promise<{ status?: string; workspace?: WorkspaceMetadata; new_path?: string; error?: string }> {
+    try {
+      const res = await fetch(
+        `${API_BASE}/workspace/archive-project?folder_path=${encodeURIComponent(folderPath)}&project_filename=${encodeURIComponent(projectFilename)}`,
+        { method: 'POST' }
+      );
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to archive project' };
+    }
+  },
+
+  async restoreProject(folderPath: string, projectFilename: string): Promise<{ status?: string; workspace?: WorkspaceMetadata; new_path?: string; error?: string }> {
+    try {
+      const res = await fetch(
+        `${API_BASE}/workspace/restore-project?folder_path=${encodeURIComponent(folderPath)}&project_filename=${encodeURIComponent(projectFilename)}`,
+        { method: 'POST' }
+      );
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to restore project' };
+    }
+  },
+
+  async deleteArchivedProject(folderPath: string, projectFilename: string): Promise<{ status?: string; workspace?: WorkspaceMetadata; error?: string }> {
+    try {
+      const res = await fetch(
+        `${API_BASE}/workspace/delete-archived-project?folder_path=${encodeURIComponent(folderPath)}&project_filename=${encodeURIComponent(projectFilename)}`,
+        { method: 'POST' }
+      );
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to delete archived project' };
+    }
+  },
+
+  async archiveWorkspace(folderPath: string): Promise<{ status?: string; old_path?: string; new_path?: string; name?: string; error?: string }> {
+    try {
+      const res = await fetch(
+        `${API_BASE}/workspace/archive?folder_path=${encodeURIComponent(folderPath)}`,
+        { method: 'POST' }
+      );
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to archive workspace' };
+    }
+  },
+
+  async restoreWorkspace(folderPath: string): Promise<{ status?: string; old_path?: string; new_path?: string; name?: string; error?: string }> {
+    try {
+      const res = await fetch(
+        `${API_BASE}/workspace/restore?folder_path=${encodeURIComponent(folderPath)}`,
+        { method: 'POST' }
+      );
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to restore workspace' };
+    }
+  },
+
+  async listArchivedWorkspaces(): Promise<{ status?: string; workspaces: Array<{ id: string; path: string; name: string; original_path?: string; archived_at?: string; project_count?: number }>; error?: string }> {
+    try {
+      const res = await fetch(`${API_BASE}/workspace/archived-list`);
+      return await res.json();
+    } catch (err: any) {
+      return { workspaces: [], error: err?.message || 'Failed to list archived workspaces' };
     }
   },
 
@@ -1592,6 +1679,31 @@ export const api = {
       return await res.blob();
     } catch (err: any) {
       return { error: err?.message || 'Failed to download PDF report' };
+    }
+  },
+
+  async generateNarrative(data: {
+    results?: any;
+    projectPath?: string;
+    modelId?: string;
+    style?: string;
+    sections?: string[];
+  }): Promise<{ full_text?: string; sections?: Record<string, { title: string; content: string }>; error?: string }> {
+    try {
+      const res = await fetch(`${API_BASE}/reporting/narrative`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          results: data.results,
+          project_path: data.projectPath,
+          model_id: data.modelId,
+          style: data.style || 'apa',
+          sections: data.sections,
+        }),
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { error: err?.message || 'Failed to generate narrative report' };
     }
   },
 

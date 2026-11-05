@@ -1,10 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useStore, LICENSE_INFO } from '../store';
+import { getTierLabel } from '../utils/license';
 import TabBar from './TabBar';
 
 export const TitleBar: React.FC = () => {
-  const { theme, toggleTheme, openTab, openSettings, isLicenseActive, setIsLicenseActive } = useStore();
+  const {
+    theme,
+    toggleTheme,
+    openTab,
+    openSettings,
+    isLicenseActive,
+    licenseStatus,
+    deactivateLicenseKey,
+  } = useStore();
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   useEffect(() => {
@@ -77,9 +86,12 @@ export const TitleBar: React.FC = () => {
   };
 
   const handleCopyKey = () => {
-    navigator.clipboard.writeText(LICENSE_INFO.key);
-    setCopiedKey(true);
-    setTimeout(() => setCopiedKey(false), 2000);
+    const key = licenseStatus?.license_key || LICENSE_INFO.key;
+    if (key) {
+      navigator.clipboard.writeText(key);
+      setCopiedKey(true);
+      setTimeout(() => setCopiedKey(false), 2000);
+    }
   };
 
   return (
@@ -152,7 +164,11 @@ export const TitleBar: React.FC = () => {
               alignItems: 'center',
               justifyContent: 'center',
             }}
-            title={isLicenseActive ? 'License Active' : 'License Inactive'}
+            title={isLicenseActive ? `License Active: ${licenseStatus ? getTierLabel(licenseStatus.tier) : LICENSE_INFO.type}` : 'License Inactive'}
+            onClick={() => {
+              openSettings('about');
+              setIsLicenseHovered(false);
+            }}
           >
             <span
               className="license-status-circle"
@@ -188,23 +204,29 @@ export const TitleBar: React.FC = () => {
                 <span className="license-popup-card__status-text" style={{ color: isLicenseActive ? '#059669' : '#DC2626' }}>
                   {isLicenseActive ? 'Active' : 'Inactive'}
                 </span>
-                <span className="license-popup-card__type">{LICENSE_INFO.type}</span>
+                <span className="license-popup-card__type">
+                  {licenseStatus ? getTierLabel(licenseStatus.tier) : LICENSE_INFO.type}
+                </span>
               </div>
 
               <div className="license-popup-card__rows">
                 <div className="license-popup-card__row">
                   <span className="license-popup-card__key-label">Licensee</span>
-                  <span className="license-popup-card__key-value">{LICENSE_INFO.licensee}</span>
+                  <span className="license-popup-card__key-value">{licenseStatus?.licensee || LICENSE_INFO.licensee}</span>
                 </div>
                 <div className="license-popup-card__row">
                   <span className="license-popup-card__key-label">Expiry</span>
                   <span className="license-popup-card__key-value">
-                    {isLicenseActive ? `${LICENSE_INFO.daysRemaining} days (${LICENSE_INFO.expiryDate})` : 'Inactive'}
+                    {isLicenseActive
+                      ? (licenseStatus?.expires_at
+                          ? `${licenseStatus.days_remaining} days (${new Date(licenseStatus.expires_at).toLocaleDateString()})`
+                          : `${LICENSE_INFO.daysRemaining} days (${LICENSE_INFO.expiryDate})`)
+                      : 'Inactive'}
                   </span>
                 </div>
                 <div className="license-popup-card__row license-popup-card__row--mono">
                   <span className="license-popup-card__key-label">Key</span>
-                  <span className="license-popup-card__key-mono">{LICENSE_INFO.key}</span>
+                  <span className="license-popup-card__key-mono">{licenseStatus?.license_key || LICENSE_INFO.key}</span>
                   <button
                     type="button"
                     className="license-popup-card__copy-btn"
@@ -222,7 +244,14 @@ export const TitleBar: React.FC = () => {
                 <button
                   type="button"
                   className={`license-popup-card__action ${isLicenseActive ? 'license-popup-card__action--deactivate' : 'license-popup-card__action--activate'}`}
-                  onClick={() => setIsLicenseActive(!isLicenseActive)}
+                  onClick={() => {
+                    if (isLicenseActive) {
+                      void deactivateLicenseKey();
+                    } else {
+                      openSettings('about');
+                      setIsLicenseHovered(false);
+                    }
+                  }}
                 >
                   {isLicenseActive ? 'Deactivate' : 'Activate'}
                 </button>

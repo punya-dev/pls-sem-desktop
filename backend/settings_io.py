@@ -5,18 +5,19 @@ SETTINGS_PATH = os.path.expanduser("~/.pls_sem_desktop_settings.json")
 
 def load_settings():
     if not os.path.exists(SETTINGS_PATH):
-        return {"recent_projects": [], "recent_workspaces": []}
+        return {"recent_projects": [], "recent_workspaces": [], "archived_workspaces": []}
     try:
         with open(SETTINGS_PATH, "r") as f:
             content = f.read().strip()
             if not content:
-                return {"recent_projects": [], "recent_workspaces": []}
+                return {"recent_projects": [], "recent_workspaces": [], "archived_workspaces": []}
             data = json.loads(content)
             data.setdefault("recent_projects", [])
             data.setdefault("recent_workspaces", [])
+            data.setdefault("archived_workspaces", [])
             return data
     except Exception:
-        return {"recent_projects": [], "recent_workspaces": []}
+        return {"recent_projects": [], "recent_workspaces": [], "archived_workspaces": []}
 
 def save_settings(settings):
     with open(SETTINGS_PATH, "w") as f:

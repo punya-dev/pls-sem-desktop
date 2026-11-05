@@ -134,9 +134,11 @@ const WorkspaceModal = ({
               name: s.name,
               type: s.type || 'PLS-SEM',
               description: s.description || '',
-              lastModified: 'Just now',
+              lastModified: s.lastModified || 'Just now',
               path: s.path,
               createdAt: s.createdAt,
+              isArchived: s.isArchived || false,
+              archivedAt: s.archivedAt,
             });
             try {
               const dRes = await api.loadProjectData(s.path);

@@ -709,7 +709,7 @@
 }
 
 .canvas-latent-popup__val {
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
   font-weight: 600;
   color: var(--color-text-primary, #1e293b);
 }

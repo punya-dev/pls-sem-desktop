@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useStore, LICENSE_INFO, type AppSettings } from '../store';
 import { ACCENT_PRESETS, getContrastTextColor, applyAccentColor } from '../utils/theme';
+import { getTierLabel, getModeLabel } from '../utils/license';
 
 type SettingsTab = 'about' | 'appearance' | 'calculation' | 'canvas';
 
@@ -14,11 +15,30 @@ export const SettingsModal: React.FC = () => {
     setSettingsActiveTab, 
     isLicenseActive, 
     setIsLicenseActive,
+    licenseStatus,
+    activateLicenseKey,
+    deactivateLicenseKey,
+    devMintLicense,
+    machineFingerprint,
     setSidebarCollapsed
   } = useStore();
   const [activeTab, setActiveTab] = useState<SettingsTab>(settingsActiveTab || 'about');
   const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'latest'>('idle');
   const [copiedLicenseKey, setCopiedLicenseKey] = useState(false);
+  const [copiedFingerprint, setCopiedFingerprint] = useState(false);
+  const [showActivationInput, setShowActivationInput] = useState(false);
+  const [activationToken, setActivationToken] = useState('');
+  const [activationError, setActivationError] = useState<string | null>(null);
+  const [activationSuccess, setActivationSuccess] = useState<string | null>(null);
+  const [isActivating, setIsActivating] = useState(false);
+
+  // Dev mint state
+  const [showDevSandbox, setShowDevSandbox] = useState(false);
+  const [devLicensee, setDevLicensee] = useState('Dr. Jane Doe');
+  const [devTier, setDevTier] = useState('researcher');
+  const [devMode, setDevMode] = useState('node_locked');
+  const [devDays, setDevDays] = useState(365);
+  const [isMintingDev, setIsMintingDev] = useState(false);
 
   const currentAccent = settings.accentColor || '#6B4EE6';
   const [hexInput, setHexInput] = useState(currentAccent);
@@ -70,9 +90,64 @@ export const SettingsModal: React.FC = () => {
   };
 
   const handleCopyLicenseKey = () => {
-    navigator.clipboard.writeText(LICENSE_INFO.key);
-    setCopiedLicenseKey(true);
-    setTimeout(() => setCopiedLicenseKey(false), 2000);
+    const key = licenseStatus?.license_key || LICENSE_INFO.key;
+    if (key) {
+      navigator.clipboard.writeText(key);
+      setCopiedLicenseKey(true);
+      setTimeout(() => setCopiedLicenseKey(false), 2000);
+    }
+  };
+
+  const handleCopyFingerprint = () => {
+    const fp = machineFingerprint || licenseStatus?.machine_id;
+    if (fp) {
+      navigator.clipboard.writeText(fp);
+      setCopiedFingerprint(true);
+      setTimeout(() => setCopiedFingerprint(false), 2000);
+    }
+  };
+
+  const handleActivateToken = async () => {
+    if (!activationToken.trim()) {
+      setActivationError('Please paste a license token.');
+      return;
+    }
+    setActivationError(null);
+    setActivationSuccess(null);
+    setIsActivating(true);
+    try {
+      const res = await activateLicenseKey(activationToken.trim());
+      if (res.success) {
+        setActivationSuccess('License successfully activated!');
+        setActivationToken('');
+        setTimeout(() => setShowActivationInput(false), 1500);
+      } else {
+        setActivationError(res.error || 'Invalid license token. Please check the payload.');
+      }
+    } catch (err: any) {
+      setActivationError(String(err?.message || err));
+    } finally {
+      setIsActivating(false);
+    }
+  };
+
+  const handleDevMintAndActivate = async () => {
+    setActivationError(null);
+    setActivationSuccess(null);
+    setIsMintingDev(true);
+    try {
+      const token = await devMintLicense(devLicensee, devTier, devMode, devDays);
+      const res = await activateLicenseKey(token);
+      if (res.success) {
+        setActivationSuccess(`Test ${getTierLabel(devTier)} license minted and active!`);
+      } else {
+        setActivationError(res.error || 'Failed to activate test token.');
+      }
+    } catch (err: any) {
+      setActivationError(String(err?.message || err));
+    } finally {
+      setIsMintingDev(false);
+    }
   };
 
   const tabs: { id: SettingsTab; label: string; icon: string }[] = [
@@ -160,21 +235,32 @@ export const SettingsModal: React.FC = () => {
                 <div className="settings-row">
                   <div className="settings-row__label">License Type</div>
                   <span className="settings-badge" style={{ fontWeight: 600 }}>
-                    {LICENSE_INFO.type}
+                    {licenseStatus ? getTierLabel(licenseStatus.tier) : LICENSE_INFO.type}
                   </span>
+                </div>
+
+                <div className="settings-row">
+                  <div className="settings-row__label">License Mode</div>
+                  <div style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-text-secondary)' }}>
+                    {getModeLabel(licenseStatus?.mode || 'node_locked')}
+                  </div>
                 </div>
 
                 <div className="settings-row">
                   <div className="settings-row__label">Licensee</div>
                   <div style={{ fontSize: '12.5px', fontWeight: 500, color: 'var(--color-text-primary)' }}>
-                    {LICENSE_INFO.licensee}
+                    {licenseStatus?.licensee || LICENSE_INFO.licensee}
                   </div>
                 </div>
 
                 <div className="settings-row">
                   <div className="settings-row__label">Expiry Date</div>
                   <div style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-text-primary)' }}>
-                    {isLicenseActive ? `${LICENSE_INFO.daysRemaining} days remaining (${LICENSE_INFO.expiryDate})` : 'Inactive'}
+                    {isLicenseActive
+                      ? (licenseStatus?.expires_at
+                          ? `${licenseStatus.days_remaining} days remaining (${new Date(licenseStatus.expires_at).toLocaleDateString()})`
+                          : `${LICENSE_INFO.daysRemaining} days remaining (${LICENSE_INFO.expiryDate})`)
+                      : 'Inactive'}
                   </div>
                 </div>
 
@@ -191,7 +277,7 @@ export const SettingsModal: React.FC = () => {
                       color: 'var(--color-text-secondary)',
                       letterSpacing: '0.02em'
                     }}>
-                      {LICENSE_INFO.key}
+                      {licenseStatus?.license_key || LICENSE_INFO.key}
                     </code>
                     <button
                       type="button"
@@ -218,25 +304,269 @@ export const SettingsModal: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="settings-row" style={{ borderBottom: 'none' }}>
+                <div className="settings-row">
                   <div>
-                    <div className="settings-row__label">Manage Seat</div>
+                    <div className="settings-row__label">Hardware Fingerprint</div>
+                    <div className="settings-row__desc">Deterministic device ID used to bind node-locked licenses.</div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <code style={{ 
+                      fontSize: '11px', 
+                      fontFamily: 'var(--font-mono)', 
+                      backgroundColor: 'var(--color-bg-subtle, rgba(0,0,0,0.04))',
+                      padding: '3px 8px',
+                      borderRadius: '4px',
+                      border: '1px solid var(--color-border-subtle)',
+                      color: 'var(--color-text-secondary)',
+                      maxWidth: '220px',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap'
+                    }} title={machineFingerprint || licenseStatus?.machine_id}>
+                      {machineFingerprint || licenseStatus?.machine_id || 'Generating…'}
+                    </code>
+                    <button
+                      type="button"
+                      className="settings-icon-btn"
+                      onClick={handleCopyFingerprint}
+                      title={copiedFingerprint ? 'Copied!' : 'Copy hardware fingerprint'}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '4px',
+                        borderRadius: '4px',
+                        color: copiedFingerprint ? 'var(--color-accent)' : 'var(--color-text-muted)',
+                        transition: 'color var(--transition-fast)'
+                      }}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>
+                        {copiedFingerprint ? 'check' : 'content_copy'}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Manage Subscription Row */}
+                <div className="settings-row" style={{ borderBottom: showActivationInput ? 'none' : undefined }}>
+                  <div>
+                    <div className="settings-row__label">Manage Subscription</div>
                     <div className="settings-row__desc">
                       {isLicenseActive 
                         ? 'Deactivating releases this seat to use on another machine.' 
-                        : 'Activate to restore full academic multi-seat features.'}
+                        : 'Activate to restore full researcher and team calculation features.'}
                     </div>
                   </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {!showActivationInput && (
+                      <button
+                        type="button"
+                        className="settings-license-toggle-btn settings-license-toggle-btn--activate"
+                        onClick={() => {
+                          setShowActivationInput(true);
+                          setActivationError(null);
+                          setActivationSuccess(null);
+                        }}
+                      >
+                        <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>key</span>
+                        {isLicenseActive ? 'Enter New Token' : 'Enter Token'}
+                      </button>
+                    )}
+                    {isLicenseActive && (
+                      <button
+                        type="button"
+                        className="settings-license-toggle-btn settings-license-toggle-btn--deactivate"
+                        onClick={() => void deactivateLicenseKey()}
+                      >
+                        <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>power_settings_new</span>
+                        Deactivate Seat
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Inline Activation Box */}
+                {showActivationInput && (
+                  <div style={{
+                    margin: '8px 0 16px 0',
+                    padding: '14px',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--color-border-strong)',
+                    background: 'var(--color-bg-surface)',
+                  }}>
+                    <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text-primary)', marginBottom: '4px' }}>
+                      Activate StatSEM Token
+                    </div>
+                    <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginBottom: '8px' }}>
+                      Paste your signed offline license token below to activate this device.
+                    </div>
+                    <textarea
+                      value={activationToken}
+                      onChange={(e) => setActivationToken(e.target.value)}
+                      placeholder="Paste signed license token here (e.g. eyJwYXlsb2FkX2I2NCI6...)"
+                      rows={3}
+                      className="settings-textarea"
+                      style={{ width: '100%', marginBottom: '6px' }}
+                    />
+                    {activationError && (
+                      <div style={{ color: '#dc2626', fontSize: '11px', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: '13px' }}>error</span>
+                        {activationError}
+                      </div>
+                    )}
+                    {activationSuccess && (
+                      <div style={{ color: '#16a34a', fontSize: '11px', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: '13px' }}>check_circle</span>
+                        {activationSuccess}
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '4px' }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowActivationInput(false);
+                          setActivationError(null);
+                        }}
+                        className="settings-license-toggle-btn"
+                        style={{
+                          background: 'transparent',
+                          border: '1px solid var(--color-border-subtle)',
+                          color: 'var(--color-text-secondary)',
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleActivateToken}
+                        disabled={isActivating || !activationToken.trim()}
+                        className="settings-license-toggle-btn settings-license-toggle-btn--activate"
+                      >
+                        <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>check</span>
+                        {isActivating ? 'Validating…' : 'Activate'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Developer Sandbox Drawer */}
+                <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid var(--color-border-subtle)' }}>
                   <button
                     type="button"
-                    className={`settings-license-toggle-btn ${isLicenseActive ? 'settings-license-toggle-btn--deactivate' : 'settings-license-toggle-btn--activate'}`}
-                    onClick={() => setIsLicenseActive(!isLicenseActive)}
+                    onClick={() => setShowDevSandbox(!showDevSandbox)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      padding: '4px 0',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      width: '100%',
+                      color: 'var(--color-text-muted)',
+                      fontSize: '11.5px',
+                      fontWeight: 500,
+                    }}
                   >
-                    <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>
-                      {isLicenseActive ? 'power_settings_new' : 'check_circle'}
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span className="material-symbols-outlined" style={{ fontSize: '15px' }}>build</span>
+                      Developer Test Sandbox (Mint Test Licenses)
                     </span>
-                    {isLicenseActive ? 'Deactivate License' : 'Activate License'}
+                    <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>
+                      {showDevSandbox ? 'expand_less' : 'expand_more'}
+                    </span>
                   </button>
+
+                  {showDevSandbox && (
+                    <div style={{
+                      marginTop: '10px',
+                      padding: '12px',
+                      borderRadius: 'var(--radius-md)',
+                      background: 'var(--color-bg-raised)',
+                      border: '1px dashed var(--color-border-strong)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '10px',
+                    }}>
+                      <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)' }}>
+                        Mint and activate a cryptographically signed test token locally without reaching any remote payment server.
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                        <div>
+                          <label style={{ fontSize: '11px', color: 'var(--color-text-muted)', display: 'block', marginBottom: '3px' }}>
+                            Licensee
+                          </label>
+                          <input
+                            type="text"
+                            value={devLicensee}
+                            onChange={(e) => setDevLicensee(e.target.value)}
+                            className="settings-input"
+                            style={{ width: '100%' }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '11px', color: 'var(--color-text-muted)', display: 'block', marginBottom: '3px' }}>
+                            Tier
+                          </label>
+                          <select
+                            value={devTier}
+                            onChange={(e) => setDevTier(e.target.value)}
+                            className="settings-select"
+                            style={{ width: '100%', minWidth: 0 }}
+                          >
+                            <option value="trial">Free Trial</option>
+                            <option value="student">Student</option>
+                            <option value="researcher">Individual Researcher</option>
+                            <option value="lab">Lab / Team</option>
+                            <option value="institutional">Institutional</option>
+                            <option value="developer">Developer</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                        <div>
+                          <label style={{ fontSize: '11px', color: 'var(--color-text-muted)', display: 'block', marginBottom: '3px' }}>
+                            Mode
+                          </label>
+                          <select
+                            value={devMode}
+                            onChange={(e) => setDevMode(e.target.value)}
+                            className="settings-select"
+                            style={{ width: '100%', minWidth: 0 }}
+                          >
+                            <option value="node_locked">Node-Locked (Machine-Bound)</option>
+                            <option value="floating">Floating (Seat Pool)</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '11px', color: 'var(--color-text-muted)', display: 'block', marginBottom: '3px' }}>
+                            Days Valid
+                          </label>
+                          <input
+                            type="number"
+                            value={devDays}
+                            onChange={(e) => setDevDays(Number(e.target.value) || 30)}
+                            className="settings-input"
+                            style={{ width: '100%' }}
+                          />
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
+                        <button
+                          type="button"
+                          onClick={handleDevMintAndActivate}
+                          disabled={isMintingDev}
+                          className="settings-license-toggle-btn settings-license-toggle-btn--activate"
+                        >
+                          <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>auto_fix_high</span>
+                          {isMintingDev ? 'Minting…' : 'Mint & Activate Test Token'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -466,12 +796,13 @@ export const SettingsModal: React.FC = () => {
                 <div className="settings-row" style={{ alignItems: 'flex-start', marginBottom: '16px' }}>
                   <div className="settings-row__label">
                     Sidebar Position
-                    <div className="settings-row__desc">Position the sidebar on the left or right side of the screen</div>
+                    <div className="settings-row__desc">Position the sidebar on the left or right side, or completely hide it</div>
                   </div>
-                  <div className="settings-theme-grid" style={{ gridTemplateColumns: 'repeat(2, 100px)', gap: '8px' }}>
+                  <div className="settings-theme-grid" style={{ gridTemplateColumns: 'repeat(3, 100px)', gap: '8px' }}>
                     {[
                       { id: 'left', label: 'Left', icon: 'dock_to_left' },
                       { id: 'right', label: 'Right', icon: 'dock_to_right' },
+                      { id: 'hidden', label: 'Hidden', icon: 'visibility_off' },
                     ].map((pos) => {
                       const isActive = (settings.sidebarPosition || 'left') === pos.id;
                       return (
@@ -494,7 +825,14 @@ export const SettingsModal: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="settings-row">
+                <div
+                  className="settings-row"
+                  style={{
+                    opacity: settings.sidebarPosition === 'hidden' ? 0.4 : 1,
+                    pointerEvents: settings.sidebarPosition === 'hidden' ? 'none' : 'auto',
+                    transition: 'opacity var(--transition-fast)',
+                  }}
+                >
                   <div className="settings-row__label">
                     Lock Expanded Sidebar
                     <div className="settings-row__desc">Keep the sidebar permanently open and prevent automatic collapsing</div>
@@ -559,12 +897,14 @@ export const SettingsModal: React.FC = () => {
                       const font = e.target.value as AppSettings['fontFamily'];
                       updateSettings({ fontFamily: font });
                       const fontMap: Record<string, string> = {
-                        'Inter': "'Inter', sans-serif",
-                        'Roboto': "'Roboto', sans-serif",
-                        'JetBrains Mono': "'JetBrains Mono', monospace",
-                        'System': 'system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
+                        'Inter': "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
+                        'Roboto': "'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+                        'JetBrains Mono': "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                        'System': "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
                       };
-                      document.body.style.fontFamily = fontMap[font] || font;
+                      const activeFont = fontMap[font] || font;
+                      document.body.style.fontFamily = activeFont;
+                      document.documentElement.style.setProperty('--font-sans', activeFont);
                     }}
                   >
                     <option value="Inter">Inter (Default)</option>
