@@ -2204,21 +2204,6 @@ const ModelEditor = () => {
           </div>
         )}
       </div>
-
-      {/* Tools Button */}
-      <button
-        className="subheader__btn"
-        type="button"
-        onClick={() => {
-          setWizardTargetConstructId(null);
-          setIsRedundancyWizardOpen(true);
-        }}
-        title="Redundancy analysis wizard for formative constructs"
-        style={{ gap: 4 }}
-      >
-        <span className="material-symbols-outlined" style={{ fontSize: 16 }}>analytics</span>
-        <span>Tools</span>
-      </button>
     </div>
   </div>
   {/* ═══ APP BODY ═══ */}
