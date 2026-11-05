@@ -4,6 +4,7 @@ import { useStore, getStudyDatasets, type Study } from '../store';
 import WorkspaceModal from '../components/WorkspaceModal';
 import StudyModal from '../components/StudyModal';
 import StudyWorkspaceDropdown from '../components/StudyWorkspaceDropdown';
+import { ModelComparisonModal } from '../components/ModelComparisonModal';
 import InputDialog from '../components/InputDialog';
 import { parseDatasetFile } from '../utils/dataset-parser';
 import type { ParsedDataset } from '../utils/dataset-parser';
@@ -27,6 +28,7 @@ const Dashboard = () => {
     studies, setActiveStudy, models, setActiveModel, addModel,
     datasetsByStudy, setStudyDataset, addStudyDataset, touchStudy, archiveWorkspace, restoreWorkspace, renameWorkspace,
     deleteWorkspace, deleteStudy, deleteModel, deleteDataset, requestDelete,
+    archiveStudy, restoreStudy,
     renameStudy, duplicateStudy, renameModel, duplicateModel, openTab,
     togglePinStudy,
     snapshotsByStudy, setStudySnapshots, removeStudySnapshot,
@@ -42,8 +44,10 @@ const Dashboard = () => {
   }, [activeWorkspaceId, workspaces, setActiveWorkspace]);
 
   useEffect(() => {
-    studies.forEach(study => {
-      if (study.path) {
+    if (!activeWorkspaceId) return;
+    const wsStudies = studies.filter(s => s.workspaceId === activeWorkspaceId);
+    wsStudies.forEach(study => {
+      if (study.path && !snapshotsByStudy[study.path]) {
         api.listSnapshots(study.path).then(snaps => {
           if (Array.isArray(snaps)) {
             setStudySnapshots(study.path, snaps);
@@ -51,7 +55,7 @@ const Dashboard = () => {
         }).catch(() => {});
       }
     });
-  }, [studies]);
+  }, [activeWorkspaceId, studies, snapshotsByStudy, setStudySnapshots]);
 
   const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = useState(false);
   const [isWorkspaceSearchOpen, setIsWorkspaceSearchOpen] = useState(false);
@@ -61,6 +65,7 @@ const Dashboard = () => {
   const [expandedStudies, setExpandedStudies] = useState<Set<string>>(new Set());
   
   const [isStudyModalOpen, setIsStudyModalOpen] = useState(false);
+  const [comparisonStudy, setComparisonStudy] = useState<any | null>(null);
   const [workspaceDropdownConfig, setWorkspaceDropdownConfig] = useState<{
     isOpen: boolean;
     mode: 'move' | 'copy';
@@ -81,10 +86,40 @@ const Dashboard = () => {
   const [modelName, setModelName] = useState('');
   const [modelType, setModelType] = useState('PLS-SEM');
 
+  const [workspaceSubTab, setWorkspaceSubTab] = useState<'studies' | 'archive'>('studies');
+
+  const formatDisplayDate = (isoStr?: string) => {
+    try {
+      const d = isoStr ? new Date(isoStr) : new Date();
+      if (isNaN(d.getTime())) {
+        return new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+      }
+      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    } catch {
+      return new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+  };
+
+  const formatFullDate = (isoStr?: string) => {
+    try {
+      const d = isoStr ? new Date(isoStr) : new Date();
+      if (isNaN(d.getTime())) {
+        return new Date().toLocaleString();
+      }
+      return `${d.toLocaleDateString()} ${d.toLocaleTimeString()}`;
+    } catch {
+      return new Date().toLocaleString();
+    }
+  };
+
   const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId);
-  const activeStudies = studies.filter(s => s.workspaceId === activeWorkspaceId);
+  const allWorkspaceStudies = studies.filter(s => s.workspaceId === activeWorkspaceId);
+  const activeStudies = allWorkspaceStudies.filter(s => !s.isArchived);
+  const archivedStudies = allWorkspaceStudies.filter(s => s.isArchived);
+
+  const displayedStudies = workspaceSubTab === 'studies' ? activeStudies : archivedStudies;
   const filteredWorkspaces = workspaces.filter(workspace => workspace.name.toLocaleLowerCase().includes(workspaceQuery.toLocaleLowerCase()));
-  const filteredStudies = activeStudies.filter(study => study.name.toLocaleLowerCase().includes(studyQuery.toLocaleLowerCase()));
+  const filteredStudies = displayedStudies.filter(study => study.name.toLocaleLowerCase().includes(studyQuery.toLocaleLowerCase()));
 
   // Sorting state for studies
   type SortField = 'name' | 'modified' | 'created';
@@ -107,6 +142,13 @@ const Dashboard = () => {
   }, [isSortMenuOpen]);
 
   const sortedStudies = [...filteredStudies].sort((a, b) => {
+    if (workspaceSubTab === 'archive') {
+      const aTime = a.archivedAt ? new Date(a.archivedAt).getTime() : 0;
+      const bTime = b.archivedAt ? new Date(b.archivedAt).getTime() : 0;
+      if (aTime && bTime && aTime !== bTime) {
+        return sortOrder === 'asc' ? aTime - bTime : bTime - aTime;
+      }
+    }
     const aPinned = Boolean(a.isPinned);
     const bPinned = Boolean(b.isPinned);
     if (aPinned !== bPinned) {
@@ -485,9 +527,60 @@ const Dashboard = () => {
             <div style={{flex: '1', display: 'flex', flexDirection: 'column'}}>
               <div className="studies-header">
                 <div className="studies-header__left" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  {isStudySearchOpen ? <div className="inline-search-wrap"><input autoFocus className="studies-inline-search" value={studyQuery} onChange={event => setStudyQuery(event.target.value)} onBlur={() => { if (!studyQuery) setIsStudySearchOpen(false); }} placeholder="Filter studies…" />{studyQuery && <button className="inline-search-clear" type="button" aria-label="Clear study search" onMouseDown={event => event.preventDefault()} onClick={() => setStudyQuery('')}>×</button>}</div> : <span style={{ color: 'var(--color-text-secondary)' }}>Studies</span>}
-                  <button type="button" style={{padding: '2px', borderRadius: 'var(--radius-sm)', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', background: 'transparent', cursor: 'pointer'}} title="Filter studies" onClick={() => { setIsStudySearchOpen(open => !open); if (isStudySearchOpen) setStudyQuery(''); }}>
-                    <span className="material-symbols-outlined" style={{fontSize: '15px'}}>search</span>
+                  {isStudySearchOpen ? (
+                    <div className="inline-search-wrap">
+                      <input
+                        autoFocus
+                        className="studies-inline-search"
+                        value={studyQuery}
+                        onChange={(event) => setStudyQuery(event.target.value)}
+                        onBlur={() => {
+                          if (!studyQuery) setIsStudySearchOpen(false);
+                        }}
+                        placeholder={workspaceSubTab === 'studies' ? "Filter studies…" : "Filter archive…"}
+                      />
+                      {studyQuery && (
+                        <button
+                          className="inline-search-clear"
+                          type="button"
+                          aria-label="Clear study search"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => setStudyQuery('')}
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <span style={{ color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span>{workspaceSubTab === 'studies' ? 'Studies' : 'Workspace Archive'}</span>
+                      <span className="study-row__count" style={{ fontSize: '10px', padding: '1px 5px' }}>
+                        {displayedStudies.length}
+                      </span>
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    style={{
+                      padding: '2px',
+                      borderRadius: 'var(--radius-sm)',
+                      color: 'var(--color-text-muted)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      border: 'none',
+                      background: 'transparent',
+                      cursor: 'pointer',
+                    }}
+                    title="Filter studies"
+                    onClick={() => {
+                      setIsStudySearchOpen((open) => !open);
+                      if (isStudySearchOpen) setStudyQuery('');
+                    }}
+                  >
+                    <span className="material-symbols-outlined" style={{ fontSize: '15px' }}>
+                      search
+                    </span>
                   </button>
                 </div>
                 <div style={{display: 'flex', alignItems: 'center', gap: '16px'}}>
@@ -598,7 +691,9 @@ const Dashboard = () => {
               <div className="studies-list" id="studies-container">
                 {sortedStudies.length === 0 && (
                   <div className="empty-state animate-fade-in" style={{ padding: '32px 16px', textAlign: 'center' }}>
-                    <div style={{fontSize: 'var(--text-md)', color: studyQuery ? 'var(--color-danger)' : 'var(--color-text-secondary)'}}>{studyQuery ? 'No studies found' : 'Create a new study to get started.'}</div>
+                    <div style={{fontSize: 'var(--text-md)', color: studyQuery ? 'var(--color-danger)' : 'var(--color-text-secondary)'}}>
+                      {studyQuery ? 'No studies found' : (workspaceSubTab === 'archive' ? 'No archived studies in this workspace.' : 'Create a new study to get started.')}
+                    </div>
                   </div>
                 )}
                 
@@ -611,7 +706,7 @@ const Dashboard = () => {
                   const isExpanded = expandedStudies.has(study.id);
                   
                   return (
-                    <div key={study.id} className="study-entry">
+                    <div key={study.id} className={`study-entry ${study.isArchived ? 'archive-entry' : ''}`}>
                           <div 
                             key={study.id} 
                             className={`study-row ${study.isPinned ? 'study-row--pinned' : ''}`}
@@ -619,6 +714,37 @@ const Dashboard = () => {
                             onContextMenu={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
+                              if (study.isArchived) {
+                                useStore.getState().openContextMenu(e.clientX, e.clientY, [
+                                  {
+                                    id: 'restore-study',
+                                    label: 'Restore Study',
+                                    icon: 'unarchive',
+                                    action: () => restoreStudy(study.id),
+                                  },
+                                  {
+                                    id: 'export-project',
+                                    label: 'Export Project…',
+                                    icon: 'archive',
+                                    action: () => handleExportProject(study),
+                                  },
+                                  {
+                                    id: 'delete-permanent',
+                                    label: 'Delete Permanently',
+                                    icon: 'delete',
+                                    danger: true,
+                                    action: () => {
+                                      requestDelete({
+                                        title: 'Delete Archived Study',
+                                        itemName: study.name,
+                                        message: 'Are you sure? This archived study and all its models and datasets will be permanently deleted and cannot be recovered.',
+                                        onConfirm: () => deleteStudy(study.id),
+                                      });
+                                    }
+                                  }
+                                ]);
+                                return;
+                              }
                               useStore.getState().openContextMenu(e.clientX, e.clientY, [
                                 {
                                   id: 'pin-study',
@@ -632,6 +758,12 @@ const Dashboard = () => {
                                   icon: 'add',
                                   action: () => { setModelModalStudyId(study.id); setModelName(''); setModelType('PLS-SEM'); setModelModalOpen(true); },
                                 },
+                                ...(studySnapshots.length >= 2 ? [{
+                                  id: 'compare-models',
+                                  label: 'Compare Models…',
+                                  icon: 'compare_arrows',
+                                  action: () => setComparisonStudy(study),
+                                }] : []),
                                 {
                                   id: 'new-study',
                                   label: 'New Study',
@@ -649,6 +781,12 @@ const Dashboard = () => {
                                   } 
                                 },
                                 { id: 'duplicate', label: 'Duplicate Study', icon: 'content_copy', action: () => duplicateStudy(study.id) },
+                                {
+                                  id: 'archive-study',
+                                  label: 'Archive Study',
+                                  icon: 'inventory_2',
+                                  action: () => archiveStudy(study.id),
+                                },
                                 {
                                   id: 'move-study',
                                   label: 'Move to Workspace…',
@@ -685,8 +823,11 @@ const Dashboard = () => {
                             }}
                           >
                         <div className="study-row__left">
-                          <span className="material-symbols-outlined study-folder" style={isEmpty ? {color: 'var(--color-text-hint)', fontVariationSettings: "'FILL' 0"} : {}}>
-                            {isExpanded && !isEmpty ? 'folder_open' : 'folder'}
+                          <span 
+                            className="material-symbols-outlined study-folder" 
+                            style={isEmpty ? {color: 'var(--color-text-hint)', fontVariationSettings: "'FILL' 0"} : {}}
+                          >
+                            {study.isArchived ? 'inventory_2' : (isExpanded && !isEmpty ? 'folder_open' : 'folder')}
                           </span>
                           {editingStudyId === study.id ? (
                             <input
@@ -711,10 +852,12 @@ const Dashboard = () => {
                               {study.name}
                             </span>
                           )}
-                          <span className="study-row__count">
-                            {isEmpty ? 'Empty' : `${totalItems} item${totalItems === 1 ? '' : 's'}`}
-                          </span>
-                          {isEmpty && (
+                          {!study.isArchived && (
+                            <span className="study-row__count">
+                              {isEmpty ? 'Empty' : `${totalItems} item${totalItems === 1 ? '' : 's'}`}
+                            </span>
+                          )}
+                          {!study.isArchived && isEmpty && (
                             <div className="study-row__actions" onClick={(e) => e.stopPropagation()}>
                               <button className="study-action-btn" type="button" onClick={(e) => { e.stopPropagation(); setImportingStudyId(study.id); fileInputRef.current?.click(); }}>
                                 <span className="material-symbols-outlined">upload_file</span>
@@ -727,29 +870,108 @@ const Dashboard = () => {
                             </div>
                           )}
                         </div>
-                        <div className="study-row__meta">
-                          <button
-                            type="button"
-                            className={`study-pin-btn ${study.isPinned ? 'active' : ''}`}
-                            title={study.isPinned ? 'Unpin study' : 'Pin study to top'}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              togglePinStudy(study.id);
-                            }}
-                          >
-                            <span className="material-symbols-outlined" style={{ fontSize: '15px' }}>push_pin</span>
-                          </button>
-                          <span className="study-row__time">{study.lastModified}</span>
-                          <span className="study-row__chevron">
-                            <span className="material-symbols-outlined study-chevron" style={{transform: isExpanded || isEmpty ? 'rotate(90deg)' : 'rotate(90deg)'}}>
-                              {isExpanded && !isEmpty ? 'expand_more' : 'chevron_right'}
-                            </span>
-                          </span>
+                        <div className="study-row__meta" style={study.isArchived ? { gap: '8px', alignItems: 'center' } : undefined}>
+                          {study.isArchived ? (
+                            <>
+                              <span
+                                className="file-row__time"
+                                style={{
+                                  fontSize: '11.5px',
+                                  color: 'var(--color-text-muted)',
+                                  marginRight: '2px',
+                                  cursor: 'default',
+                                }}
+                                title={formatFullDate(study.archivedAt)}
+                              >
+                                {formatDisplayDate(study.archivedAt)}
+                              </span>
+                              <button 
+                                className="archive-restore-btn" 
+                                type="button" 
+                                onClick={(e) => { 
+                                  e.stopPropagation(); 
+                                  restoreStudy(study.id); 
+                                }}
+                              >
+                                Restore
+                              </button>
+                              <span className="study-row__chevron" style={{ marginLeft: '-2px' }}>
+                                <span className="material-symbols-outlined study-chevron">
+                                  {isExpanded ? 'expand_less' : 'expand_more'}
+                                </span>
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                <button
+                                  type="button"
+                                  className="study-pin-btn"
+                                  title="Archive study"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    archiveStudy(study.id);
+                                  }}
+                                >
+                                  <span className="material-symbols-outlined" style={{ fontSize: '15px' }}>inventory_2</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className={`study-pin-btn ${study.isPinned ? 'active' : ''}`}
+                                  title={study.isPinned ? 'Unpin study' : 'Pin study to top'}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    togglePinStudy(study.id);
+                                  }}
+                                >
+                                  <span className="material-symbols-outlined" style={{ fontSize: '15px' }}>push_pin</span>
+                                </button>
+                              </span>
+                              <span className="study-row__time">{study.lastModified}</span>
+                              <span className="study-row__chevron">
+                                <span className="material-symbols-outlined study-chevron" style={{transform: isExpanded || isEmpty ? 'rotate(90deg)' : 'rotate(90deg)'}}>
+                                  {isExpanded && !isEmpty ? 'expand_more' : 'chevron_right'}
+                                </span>
+                              </span>
+                            </>
+                          )}
                         </div>
                       </div>
                       
-                      <div className={`study-children ${!isExpanded ? 'hidden' : ''}`} id={`study-children-${study.id}`}>
-                        {isEmpty ? (
+                      <div className={`study-children ${study.isArchived ? 'archive-children' : ''} ${!isExpanded ? 'hidden' : ''}`} id={`study-children-${study.id}`}>
+                        {study.isArchived ? (
+                          isEmpty ? (
+                            <div className="archive-empty">No datasets or models in this study.</div>
+                          ) : (
+                            <>
+                              {studyDatasets.map((ds) => (
+                                <div className="file-row archive-readonly" key={ds.id || ds.filename}>
+                                  <div className="file-row__left">
+                                    <span className="material-symbols-outlined">dataset</span>
+                                    <span>{ds.filename}</span>
+                                    <span className="file-badge file-badge--default">
+                                      {ds.rows?.length ?? 0} rows
+                                    </span>
+                                  </div>
+                                </div>
+                              ))}
+                              {studyModels.map((model) => (
+                                <div className="file-row archive-readonly" key={model.id}>
+                                  <div className="file-row__left">
+                                    <span className="material-symbols-outlined">account_tree</span>
+                                    <span>{model.name}</span>
+                                    <span className="file-badge file-badge--model-tag">
+                                      {formatModelType(model.type)}
+                                    </span>
+                                  </div>
+                                  <div className="file-row__meta">
+                                    <span className="file-row__time">{model.lastModified}</span>
+                                  </div>
+                                </div>
+                              ))}
+                            </>
+                          )
+                        ) : isEmpty ? (
                           <div style={{padding: '10px 16px', marginLeft: '26px'}}>
                             <div style={{color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', fontStyle: 'italic'}}>
                               No files yet.
@@ -996,6 +1218,29 @@ const Dashboard = () => {
                   );
                 })}
               </div>
+
+              <div className="workspace-bottom-tabs">
+                <button
+                  type="button"
+                  className={`workspace-bottom-tab ${workspaceSubTab === 'studies' ? 'active' : ''}`}
+                  onClick={() => setWorkspaceSubTab('studies')}
+                >
+                  <span className="material-symbols-outlined">folder</span>
+                  <span>Studies</span>
+                  <span className="workspace-bottom-tab__count">{activeStudies.length}</span>
+                </button>
+                <button
+                  type="button"
+                  className={`workspace-bottom-tab ${workspaceSubTab === 'archive' ? 'active' : ''}`}
+                  onClick={() => setWorkspaceSubTab('archive')}
+                >
+                  <span className="material-symbols-outlined">inventory_2</span>
+                  <span>Archive</span>
+                  {archivedStudies.length > 0 && (
+                    <span className="workspace-bottom-tab__count">{archivedStudies.length}</span>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </main>
@@ -1068,6 +1313,15 @@ const Dashboard = () => {
           </div>
         </div>
       </div>
+      )}
+
+      {comparisonStudy && (
+        <ModelComparisonModal
+          isOpen={!!comparisonStudy}
+          onClose={() => setComparisonStudy(null)}
+          projectPath={comparisonStudy.path || ''}
+          studyName={comparisonStudy.name}
+        />
       )}
     </>
   );

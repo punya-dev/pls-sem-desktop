@@ -2,6 +2,7 @@
  * StatSEM Model Canvas Engine
  * Pure Vanilla JS + SVG implementation for professional vector diagramming.
  */
+import { performAutoLayout, resolveBadgePositions } from './semLayoutEngine';
 
 export function getCanvasGridColors(bgColor) {
   const isDark = typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark';
@@ -784,6 +785,10 @@ export function initModelCanvas() {
   document.getElementById('hud-snap')?.addEventListener('click', toggleSnapToGrid);
 
   function exportCanvasAsImage() {
+    if (typeof window !== 'undefined' && typeof window.openExportDiagramModal === 'function') {
+      window.openExportDiagramModal();
+      return;
+    }
     try {
       const svgClone = svg.cloneNode(true);
       const hints = svgClone.querySelector('#canvas-empty-hint');
@@ -1419,69 +1424,35 @@ export function initModelCanvas() {
 
   // Auto-Align Model
   document.querySelector('.tb-btn[title="Auto-Align Model"]')?.addEventListener('click', () => {
-    // Reset all arrow bends / waypoints
-    edges.forEach(e => {
-      e.waypoints = [];
-      delete e.waypoints;
-      e.curved = false;
+    if (nodes.length === 0) return;
+    const rect = svg.getBoundingClientRect();
+    const result = performAutoLayout(nodes, edges, {
+      containerWidth: rect.width || 1200,
+      containerHeight: rect.height || 800,
     });
 
-    const depths = new Map();
-    nodes.forEach(n => { if (n.isLatent !== false) depths.set(n.id, 0); });
-    
-    let changed = true;
-    let iterations = 0;
-    while(changed && iterations < 100) {
-      changed = false;
-      iterations++;
-      edges.forEach(e => {
-        const sourceDepth = depths.get(e.sourceId);
-        const targetDepth = depths.get(e.targetId);
-        if (sourceDepth !== undefined && targetDepth !== undefined) {
-          if (targetDepth <= sourceDepth) {
-            depths.set(e.targetId, sourceDepth + 1);
-            changed = true;
-          }
-        }
-      });
-    }
-
-    const maxDepth = Math.max(0, ...Array.from(depths.values()));
-    const columns = Array.from({length: maxDepth + 1}, () => []);
-    
-    depths.forEach((depth, id) => {
-      const node = nodes.find(n => n.id === id);
-      if (node) columns[depth].push(node);
+    // Update nodes in-place to preserve references
+    result.nodes.forEach(rn => {
+      const existing = nodes.find(n => n.id === rn.id);
+      if (existing) {
+        existing.x = rn.x;
+        existing.y = rn.y;
+      }
     });
 
-    const colWidth = 360;
-    const rowHeight = 220;
-    
-    // Calculate layout coordinates
-    const center = getSvgCenter();
-    const startX = center.x - (columns.length - 1) * colWidth / 2;
-
-    columns.forEach((colNodes, colIdx) => {
-      const startY = center.y - (colNodes.length - 1) * rowHeight / 2;
-      colNodes.forEach((node, rowIdx) => {
-        node.x = startX + (colIdx * colWidth);
-        node.y = startY + (rowIdx * rowHeight);
-      });
-    });
-
-    // Auto-align indicators as well based on column
-    columns.forEach((colNodes, colIdx) => {
-      colNodes.forEach(node => {
-        selectedIds.clear();
-        selectedIds.add(node.id);
-        if (colIdx === columns.length - 1 && columns.length > 1) {
-          alignIndicators('right');
+    result.edges.forEach(re => {
+      const existing = edges.find(e => e.id === re.id || (e.sourceId === re.sourceId && e.targetId === re.targetId));
+      if (existing) {
+        existing.curved = re.curved || false;
+        if (typeof re.curvature === 'number') {
+          existing.curvature = re.curvature;
         } else {
-          alignIndicators('left');
+          delete existing.curvature;
         }
-      });
+        delete existing.waypoints;
+      }
     });
-    
+
     selectedIds.clear();
 
     // Synchronously compute fit & center transform to eliminate model jump/glitch
@@ -2694,8 +2665,9 @@ export function initModelCanvas() {
       const dx = x2 - x1;
       const dy = y2 - y1;
       const len = Math.sqrt(dx * dx + dy * dy) || 1;
-      const cx = mx + (-dy / len) * 40;
-      const cy = my + (dx / len) * 40;
+      const curveVal = typeof edge.curvature === 'number' ? edge.curvature : 40;
+      const cx = mx + (-dy / len) * curveVal;
+      const cy = my + (dx / len) * curveVal;
 
       const samplePts = [];
       const steps = 10;
@@ -3539,6 +3511,26 @@ export function initModelCanvas() {
     nodesLayer.innerHTML = '';
     edgesLayer.innerHTML = '';
     
+    // Pre-calculate edge coordinates and anti-collision badge positions
+    const edgesWithCoords = edges.map(edge => {
+      const source = nodes.find(n => n.id === edge.sourceId);
+      const target = nodes.find(n => n.id === edge.targetId);
+      if (!source || !target) return null;
+      const { x1, y1, x2, y2 } = getEdgeCoordinates(source, target, edge);
+      const coef = getPathCoefficient(source, target);
+      return {
+        id: edge.id,
+        sourceId: edge.sourceId,
+        targetId: edge.targetId,
+        x1, y1, x2, y2,
+        curved: edge.curved,
+        curvature: edge.curvature,
+        hasBadge: coef !== null && coef !== undefined,
+      };
+    }).filter(Boolean);
+
+    const badgePosMap = resolveBadgePositions(edgesWithCoords);
+
     // Edges
     edges.forEach(edge => {
       const source = nodes.find(n => n.id === edge.sourceId);
@@ -3556,8 +3548,9 @@ export function initModelCanvas() {
         const dx = x2 - x1;
         const dy = y2 - y1;
         const len = Math.sqrt(dx*dx + dy*dy) || 1;
-        const cx = mx + (-dy / len) * 40;
-        const cy = my + (dx / len) * 40;
+        const curveVal = typeof edge.curvature === 'number' ? edge.curvature : 40;
+        const cx = mx + (-dy / len) * curveVal;
+        const cy = my + (dx / len) * curveVal;
         d += ` Q ${cx} ${cy} ${x2} ${y2}`;
       } else {
         if (edge.waypoints && edge.waypoints.length > 0) {
@@ -3776,8 +3769,9 @@ export function initModelCanvas() {
             const dx = x2 - x1;
             const dy = y2 - y1;
             const len = Math.sqrt(dx * dx + dy * dy) || 1;
-            const cx = mx + (-dy / len) * 40;
-            const cy = my + (dx / len) * 40;
+            const curveVal = typeof edge.curvature === 'number' ? edge.curvature : 40;
+            const cx = mx + (-dy / len) * curveVal;
+            const cy = my + (dx / len) * curveVal;
             const invT = 1 - t;
             midX = invT * invT * x1 + 2 * invT * t * cx + t * t * x2;
             midY = invT * invT * y1 + 2 * invT * t * cy + t * t * y2;
@@ -3804,13 +3798,21 @@ export function initModelCanvas() {
             const dx = x2 - x1;
             const dy = y2 - y1;
             const len = Math.sqrt(dx * dx + dy * dy) || 1;
-            const cx = mx + (-dy / len) * 40;
-            const cy = my + (dx / len) * 40;
+            const curveVal = typeof edge.curvature === 'number' ? edge.curvature : 40;
+            const cx = mx + (-dy / len) * curveVal;
+            const cy = my + (dx / len) * curveVal;
             midX = 0.25 * x1 + 0.5 * cx + 0.25 * x2;
             midY = 0.25 * y1 + 0.5 * cy + 0.25 * y2;
           } else {
-            midX = (x1 + x2) / 2;
-            midY = (y1 + y2) / 2;
+            const badgeKey = edge.id || `${edge.sourceId}->${edge.targetId}`;
+            const bPos = badgePosMap.get(badgeKey);
+            if (bPos) {
+              midX = bPos.x;
+              midY = bPos.y;
+            } else {
+              midX = (x1 + x2) / 2;
+              midY = (y1 + y2) / 2;
+            }
           }
         }
 
@@ -3840,7 +3842,7 @@ export function initModelCanvas() {
         txt.setAttribute('text-anchor', 'middle');
         txt.setAttribute('dominant-baseline', 'central');
         txt.setAttribute('font-size', '10.5');
-        txt.setAttribute('font-family', 'var(--font-mono, monospace)');
+        txt.setAttribute('font-family', 'var(--font-mono)');
         txt.setAttribute('font-weight', '600');
         txt.setAttribute('fill', 'var(--canvas-badge-text)');
         txt.style.fill = 'var(--canvas-badge-text)';
@@ -4655,6 +4657,10 @@ export function initModelCanvas() {
         }
 
         // Label
+        const metrics = getConstructMetrics(node);
+        const hasR2 = !!(metrics && metrics.r2 !== null && metrics.r2 !== undefined);
+        const isTextInside = node.textInside !== false;
+
         const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         text.textContent = node.label;
         text.setAttribute('text-anchor', 'middle');
@@ -4667,12 +4673,15 @@ export function initModelCanvas() {
         let labelY = h/2 + 24;
         let textAnchor = 'middle';
 
-        if (node.textInside) {
+        if (isTextInside) {
           labelX = 0;
-          labelY = 5;
+          labelY = hasR2 ? -6 : 0;
           textAnchor = 'middle';
           text.setAttribute('x', '0');
-          text.setAttribute('y', '5');
+          text.setAttribute('y', String(labelY));
+          if (!hasR2) {
+            text.setAttribute('dominant-baseline', 'central');
+          }
           text.setAttribute('text-anchor', 'middle');
           text.setAttribute('fill', node.color || 'var(--canvas-latent-text)');
           text.style.fill = node.color || 'var(--canvas-latent-text)';
@@ -4797,24 +4806,23 @@ export function initModelCanvas() {
         }
 
         // Display R² inside circle for endogenous latent constructs
-        const metrics = getConstructMetrics(node);
-        if (metrics && metrics.r2 !== null && metrics.r2 !== undefined) {
+        if (hasR2) {
           const r2Group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
           r2Group.setAttribute('class', 'latent-r2-display');
           r2Group.setAttribute('pointer-events', 'none');
 
           const r2Val = metrics.r2.toFixed(3);
 
-          if (node.textInside) {
+          if (node.textInside !== false) {
             const r2Text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
             r2Text.setAttribute('text-anchor', 'middle');
             r2Text.setAttribute('dominant-baseline', 'central');
-            r2Text.setAttribute('y', 19);
+            r2Text.setAttribute('y', 14);
             r2Text.setAttribute('font-size', '10.5');
-            r2Text.setAttribute('font-weight', '600');
-            r2Text.setAttribute('font-family', 'var(--font-mono, monospace)');
-            r2Text.setAttribute('fill', 'var(--canvas-latent-text)');
-            r2Text.style.fill = 'var(--canvas-latent-text)';
+            r2Text.setAttribute('font-weight', '500');
+            r2Text.setAttribute('font-family', 'var(--font-mono)');
+            r2Text.setAttribute('fill', 'var(--canvas-latent-r2, #a5b4fc)');
+            r2Text.style.fill = 'var(--canvas-latent-r2, #a5b4fc)';
             r2Text.textContent = `R²: ${r2Val}`;
             r2Group.appendChild(r2Text);
           } else {
@@ -4837,7 +4845,7 @@ export function initModelCanvas() {
             r2Text.setAttribute('y', 8);
             r2Text.setAttribute('font-size', '12.5');
             r2Text.setAttribute('font-weight', '600');
-            r2Text.setAttribute('font-family', 'var(--font-mono, monospace)');
+            r2Text.setAttribute('font-family', 'var(--font-mono)');
             r2Text.setAttribute('fill', 'var(--canvas-latent-text)');
             r2Text.style.fill = 'var(--canvas-latent-text)';
             r2Text.textContent = r2Val;
@@ -5267,7 +5275,7 @@ export function initModelCanvas() {
               txt.setAttribute('text-anchor', 'middle');
               txt.setAttribute('dominant-baseline', 'central');
               txt.setAttribute('font-size', '9.5');
-              txt.setAttribute('font-family', 'var(--font-mono, monospace)');
+              txt.setAttribute('font-family', 'var(--font-mono)');
               txt.setAttribute('font-weight', '500');
               txt.setAttribute('fill', 'var(--canvas-badge-text)');
               txt.textContent = textVal;
@@ -6245,6 +6253,41 @@ export function initModelCanvas() {
       sY = edge.waypoints[edge.waypoints.length - 1].y;
     }
     
+    let srcPortAngle = 0;
+    let tgtPortAngle = 0;
+    if (edge && Array.isArray(edges) && !edge.waypoints?.length) {
+      if (source.shape !== 'rectangle' && source.isLatent !== false) {
+        const outgoing = edges.filter(e => e && e.sourceId === source.id && !e.targetEdgeId && !e.sourceEdgeId);
+        if (outgoing.length > 1) {
+          outgoing.sort((a, b) => {
+            const tA = nodes.find(n => n.id === a.targetId);
+            const tB = nodes.find(n => n.id === b.targetId);
+            return (tA ? tA.y : 0) - (tB ? tB.y : 0);
+          });
+          const idx = outgoing.findIndex(e => e.id === edge.id || (e.sourceId === edge.sourceId && e.targetId === edge.targetId));
+          if (idx !== -1) {
+            const maxSpread = 0.28;
+            srcPortAngle = -maxSpread / 2 + (idx / (outgoing.length - 1)) * maxSpread;
+          }
+        }
+      }
+      if (target.shape !== 'rectangle' && target.isLatent !== false) {
+        const incoming = edges.filter(e => e && e.targetId === target.id && !e.targetEdgeId && !e.sourceEdgeId);
+        if (incoming.length > 1) {
+          incoming.sort((a, b) => {
+            const sA = nodes.find(n => n.id === a.sourceId);
+            const sB = nodes.find(n => n.id === b.sourceId);
+            return (sA ? sA.y : 0) - (sB ? sB.y : 0);
+          });
+          const idx = incoming.findIndex(e => e.id === edge.id || (e.sourceId === edge.sourceId && e.targetId === edge.targetId));
+          if (idx !== -1) {
+            const maxSpread = 0.28;
+            tgtPortAngle = -maxSpread / 2 + (idx / (incoming.length - 1)) * maxSpread;
+          }
+        }
+      }
+    }
+
     const getIntersectionOffset = (node, ptX, ptY, isTarget) => {
       const dx = ptX - node.x;
       const dy = ptY - node.y;
@@ -6260,6 +6303,12 @@ export function initModelCanvas() {
       if (shape === 'circle') {
         const rx = w / 2;
         const ry = h / 2;
+        const portOffset = isTarget ? tgtPortAngle : srcPortAngle;
+        if (portOffset !== 0) {
+          const baseAngle = Math.atan2(dirY, dirX);
+          const angle = baseAngle + portOffset;
+          return { x: Math.cos(angle) * rx, y: Math.sin(angle) * ry };
+        }
         return { x: (dirX / distance) * rx, y: (dirY / distance) * ry };
       } else {
         const rx = w / 2;
@@ -6287,8 +6336,9 @@ export function initModelCanvas() {
       const len = Math.sqrt(dx*dx + dy*dy) || 1;
       const mx = (source.x + target.x) / 2;
       const my = (source.y + target.y) / 2;
-      const cx = mx - (dy / len) * 40;
-      const cy = my + (dx / len) * 40;
+      const curveVal = typeof edge.curvature === 'number' ? edge.curvature : 40;
+      const cx = mx + (-dy / len) * curveVal;
+      const cy = my + (dx / len) * curveVal;
 
       // 2nd pass: intersect from control point
       const newSrcOff = getIntersectionOffset(source, cx, cy, false);

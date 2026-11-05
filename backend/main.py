@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect, Response
+from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect, Response, Depends
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -82,7 +82,7 @@ from engine.pls.copula import analyze_gaussian_copula
 from engine.pls.nca import analyze_nca
 from engine.pls.predict import run_pls_predict
 from reporting.tables import TABLE_EXTRACTORS, export_table_to_format
-from reporting.narrative import generate_narrative_report
+from reporting.narrative import generate_narrative_report, generate_structured_narrative
 from reporting.pdf_export import generate_pdf_report
 
 
@@ -95,6 +95,23 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# License guard middleware: gates computation routes behind license validation.
+# In dev mode (default), this is a no-op pass-through.
+import license_guard
+
+@app.middleware("http")
+async def license_middleware(request, call_next):
+    """Check license for gated computation routes."""
+    if license_guard.is_gated_route(request.url.path):
+        try:
+            await license_guard.verify_license(request)
+        except Exception as e:
+            from fastapi.responses import JSONResponse
+            status = getattr(e, 'status_code', 403)
+            detail = getattr(e, 'detail', str(e))
+            return JSONResponse(status_code=status, content={"error": detail})
+    return await call_next(request)
 
 
 class SaveDataJsonRequest(BaseModel):
@@ -1272,6 +1289,65 @@ def delete_project_from_ws(folder_path: str, project_filename: str):
         return {"status": "deleted", "workspace": ws}
     except Exception as e:
         return {"error": str(e)}
+
+
+@app.post("/workspace/archive-project")
+def archive_project_in_ws(folder_path: str, project_filename: str):
+    try:
+        ws = workspace_io.archive_project_in_workspace(folder_path, project_filename)
+        base_name = os.path.splitext(os.path.basename(project_filename))[0]
+        archived_entry = next((p for p in ws.get("archived_projects", []) if p.get("name") == base_name or os.path.basename(p.get("path", "")) == os.path.basename(project_filename)), None)
+        new_path = archived_entry.get("path") if archived_entry else None
+        return {"status": "archived", "workspace": ws, "new_path": new_path}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/workspace/restore-project")
+def restore_project_in_ws(folder_path: str, project_filename: str):
+    try:
+        ws = workspace_io.restore_project_in_workspace(folder_path, project_filename)
+        base_name = os.path.splitext(os.path.basename(project_filename))[0]
+        restored_entry = next((p for p in ws.get("projects", []) if p.get("name") == base_name or os.path.basename(p.get("path", "")) == os.path.basename(project_filename)), None)
+        new_path = restored_entry.get("path") if restored_entry else None
+        return {"status": "restored", "workspace": ws, "new_path": new_path}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/workspace/delete-archived-project")
+def delete_archived_project_from_ws(folder_path: str, project_filename: str):
+    try:
+        ws = workspace_io.delete_archived_project_from_workspace(folder_path, project_filename)
+        return {"status": "deleted", "workspace": ws}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/workspace/archive")
+def archive_workspace_endpoint(folder_path: str):
+    try:
+        res = workspace_io.archive_workspace(folder_path)
+        return res
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/workspace/restore")
+def restore_workspace_endpoint(folder_path: str):
+    try:
+        res = workspace_io.restore_workspace(folder_path)
+        return res
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/workspace/archived-list")
+def list_archived_workspaces_endpoint():
+    try:
+        return {"status": "success", "workspaces": workspace_io.get_statsem_archived_workspaces()}
+    except Exception as e:
+        return {"error": str(e), "workspaces": []}
 
 
 class SmartPlsDetectRequest(BaseModel):
@@ -3012,6 +3088,32 @@ def api_export_report_pdf(req: PdfReportRequest):
         )
     except Exception as e:
         return {"error": str(e)}
+
+
+class NarrativeRequest(BaseModel):
+    results: Optional[Dict[str, Any]] = None
+    project_path: Optional[str] = None
+    model_id: Optional[str] = None
+    style: Optional[str] = "apa"
+    sections: Optional[List[str]] = None
+
+
+@app.post("/reporting/narrative")
+def api_generate_narrative(req: NarrativeRequest):
+    try:
+        results = req.results
+        if not results and req.project_path:
+            res_data = project_io.load_results(req.project_path, algorithm="pls", model_id=req.model_id)
+            if res_data:
+                results = res_data.get("results")
+        if not results:
+            return {"error": "No results provided or found in project"}
+
+        data = generate_structured_narrative(results, style=req.style or "apa")
+        return data
+    except Exception as e:
+        return {"error": str(e)}
+
 
 
 

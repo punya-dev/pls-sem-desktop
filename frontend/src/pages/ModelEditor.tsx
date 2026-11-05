@@ -6,6 +6,8 @@ import { BootstrapModal } from '../components/BootstrapModal';
 import { AnalysisModal } from '../components/AnalysisModal';
 import { AdvancedResultPanels } from '../components/AdvancedResultPanels';
 import RedundancyWizardModal from '../components/RedundancyWizardModal';
+import { HypothesisTestingPanel } from '../components/HypothesisTestingPanel';
+import { DiagramExportModal } from '../components/DiagramExportModal';
 import type { ParsedDataset } from '../utils/dataset-parser';
 import { parseDatasetFile, processData } from '../utils/dataset-parser';
 import { api, type ValidationResponse } from '../utils/api';
@@ -456,8 +458,10 @@ const ModelEditor = () => {
   const [snapshotName, setSnapshotName] = useState('');
   const [snapshotTargetStudyId, setSnapshotTargetStudyId] = useState<string>('');
   const [isSavingSnapshot, setIsSavingSnapshot] = useState(false);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
 
   useEffect(() => {
+    (window as any).openExportDiagramModal = () => setIsExportModalOpen(true);
     (window as any)._customClearCanvasHandler = (e: any) => {
       e?.preventDefault?.();
       e?.stopPropagation?.();
@@ -1314,11 +1318,12 @@ const ModelEditor = () => {
   <meta charset="utf-8">
   <title>${activeModel?.name || 'Model'} Results - ${reportTabDetails.title}</title>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 32px; color: #1e293b; }
-    h1 { margin-bottom: 4px; font-size: 20px; }
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 32px; color: #1e293b; }
+    h1 { margin-bottom: 4px; font-size: 20px; font-weight: 600; }
     p { margin-top: 0; color: #64748b; font-size: 14px; margin-bottom: 24px; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { border: 1px solid #e2e8f0; padding: 8px 12px; text-align: left; }
+    td:not(:first-child) { font-family: 'JetBrains Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
     th { background: #f8fafc; font-weight: 600; }
     tr:nth-child(even) { background: #f8fafc; }
   </style>
@@ -2811,33 +2816,37 @@ const ModelEditor = () => {
 
               <div className="tb-divider" style={{width: '100%', height: '1px', margin: '4px 0 8px', opacity: 0.2}}></div>
 
-              {/* Border Weight Stepper (- / +) */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)' }}>Border Weight</span>
-                <div style={{ display: 'flex', alignItems: 'center', background: 'var(--color-bg-base)', borderRadius: '6px', border: '1px solid var(--color-border-subtle, #e2e8f0)', padding: '2px' }}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const newWeight = Math.max(0, Math.round((activeBorderWeight - 0.5) * 10) / 10);
-                      setActiveBorderWeight(newWeight);
-                      document.dispatchEvent(new CustomEvent('border-weight-change', { detail: { weight: newWeight } }));
-                    }}
-                    style={{ width: '22px', height: '22px', border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', fontSize: '12px' }}
-                    title="Decrease Border Weight"
-                  >−</button>
-                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', width: '32px', textAlign: 'center', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-                    {activeBorderWeight}px
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const newWeight = Math.min(20, Math.round((activeBorderWeight + 0.5) * 10) / 10);
-                      setActiveBorderWeight(newWeight);
-                      document.dispatchEvent(new CustomEvent('border-weight-change', { detail: { weight: newWeight } }));
-                    }}
-                    style={{ width: '22px', height: '22px', border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', fontSize: '12px' }}
-                    title="Increase Border Weight"
-                  >+</button>
+              {/* Border Weight Quick Pills */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <span style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)' }}>Border Weight</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--color-text-primary)' }}>{activeBorderWeight}px</span>
+                </div>
+                <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                  {[0, 1, 1.5, 2, 3, 4].map((w) => (
+                    <button
+                      key={w}
+                      type="button"
+                      style={{
+                        flex: 1,
+                        height: '24px',
+                        border: activeBorderWeight === w ? '1px solid var(--color-accent)' : '1px solid var(--color-border-subtle, #cbd5e1)',
+                        background: activeBorderWeight === w ? 'var(--color-accent-subtle)' : 'var(--color-bg-base)',
+                        color: activeBorderWeight === w ? 'var(--color-accent)' : 'var(--color-text-primary)',
+                        borderRadius: '4px',
+                        fontSize: '11px',
+                        fontWeight: activeBorderWeight === w ? 600 : 400,
+                        cursor: 'pointer',
+                        padding: 0
+                      }}
+                      onClick={() => {
+                        setActiveBorderWeight(w);
+                        document.dispatchEvent(new CustomEvent('border-weight-change', { detail: { weight: w } }));
+                      }}
+                    >
+                      {w}px
+                    </button>
+                  ))}
                 </div>
               </div>
             </div>
@@ -3314,6 +3323,18 @@ const ModelEditor = () => {
             <Trash2 size={16} color="#ef4444" />
           </div>
 
+          <div className="hud-divider" />
+          <div
+            className="hud-btn"
+            id="hud-export-diagram"
+            title="Export Publication Diagram (Vector SVG, 300/600 DPI, Journal B&W)"
+            onClick={() => setIsExportModalOpen(true)}
+            style={{ color: 'var(--color-accent)', padding: '0 8px', display: 'flex', alignItems: 'center', gap: 4 }}
+          >
+            <Download size={14} />
+            <span style={{ fontSize: 11, fontWeight: 600 }}>Export</span>
+          </div>
+
           {/* Popover confirmation matching canvas-hud pill dimensions & aesthetic */}
           {hudConfirm === 'reset' && (
             <div
@@ -3538,6 +3559,24 @@ const ModelEditor = () => {
                 onClick={(e) => { e.preventDefault(); setActiveResultTab('path_coefficients'); }}
               >
                 Path coefficients
+              </a>
+              <a
+                href="#"
+                className={`tree-item ${activeResultTab === 'hypotheses' ? 'active' : ''}`}
+                onClick={(e) => { e.preventDefault(); setActiveResultTab('hypotheses'); }}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+              >
+                <span>Hypotheses Testing</span>
+                <span style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  padding: '1px 5px',
+                  borderRadius: 4,
+                  background: 'rgba(99, 102, 241, 0.15)',
+                  color: 'var(--color-accent)',
+                }}>
+                  APA
+                </span>
               </a>
               <a
                 href="#"
@@ -4096,6 +4135,11 @@ const ModelEditor = () => {
                 <h3 style={{ margin: '0 0 8px', fontSize: '16px', fontWeight: 600, color: '#334155' }}>No Results Calculated Yet</h3>
                 <p style={{ margin: 0, fontSize: '13px' }}>Return to the model canvas and click <strong>Calculate</strong> to run the PLS-SEM algorithm on your data.</p>
               </div>
+            ) : activeResultTab === 'hypotheses' ? (
+              <HypothesisTestingPanel
+                results={plsResults}
+                onExportExcel={handleExportExcel}
+              />
             ) : activeResultTab === 'path_coefficients' ? (
               getTableMode('path_coefficients') === 'matrix' ? (
                 <table className="scientific-table">
@@ -5275,6 +5319,14 @@ const ModelEditor = () => {
     dataset={activeDataset}
     projectPath={activeStudy?.path || ''}
     onModelsCreated={handleRedundancyModelsCreated}
+  />
+
+  <DiagramExportModal
+    isOpen={isExportModalOpen}
+    onClose={() => setIsExportModalOpen(false)}
+    svgElement={typeof document !== 'undefined' ? (document.getElementById('model-svg') as unknown as SVGSVGElement) : null}
+    modelName={activeModel?.name || 'model_diagram'}
+    results={plsResults}
   />
 
   {/* ─── Validation Error Modal ─── */}

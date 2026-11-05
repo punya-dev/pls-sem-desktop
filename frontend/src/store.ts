@@ -2,6 +2,15 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { ParsedDataset } from './utils/dataset-parser';
 import { api } from './utils/api';
+import {
+  type LicenseStatus,
+  getLicenseStatus,
+  activateLicense,
+  deactivateLicense,
+  getMachineFingerprint,
+  devMintToken,
+  clearCachedToken,
+} from './utils/license';
 
 export type ShapeType = 'circle' | 'rect' | 'hexagon' | 'octagon';
 
@@ -9,6 +18,7 @@ export interface Workspace {
   id: string;
   name: string;
   path: string;
+  originalPath?: string;
   archivedAt?: string;
   createdAt?: string;
   modifiedAt?: string;
@@ -45,6 +55,8 @@ export interface Study {
   path: string;
   createdAt?: string;
   isPinned?: boolean;
+  isArchived?: boolean;
+  archivedAt?: string;
 }
 
 export interface Variable {
@@ -103,7 +115,7 @@ export interface AppSettings {
   keyboardLayout: 'qwerty' | 'azerty' | 'qwertz';
   flipOrientation: boolean;
   accentColor: string;
-  sidebarPosition: 'left' | 'right';
+  sidebarPosition: 'left' | 'right' | 'hidden';
   lockExpandedSidebar: boolean;
   canvasGrid?: 'dots' | 'grid' | 'blank';
   canvasBgColor?: string;
@@ -158,6 +170,13 @@ interface AppState {
   openSettings: (tab?: 'about' | 'appearance' | 'calculation' | 'canvas') => void;
   isLicenseActive: boolean;
   setIsLicenseActive: (active: boolean) => void;
+  licenseStatus: LicenseStatus | null;
+  isLicenseLoading: boolean;
+  machineFingerprint: string;
+  loadLicenseStatus: () => Promise<void>;
+  activateLicenseKey: (tokenString: string) => Promise<{ success: boolean; error?: string }>;
+  deactivateLicenseKey: () => Promise<{ success: boolean; error?: string }>;
+  devMintLicense: (licensee: string, tier: string, mode: string, daysValid: number) => Promise<string>;
   isSidebarCollapsed: boolean;
   toggleSidebar: () => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
@@ -199,9 +218,9 @@ interface AppState {
 
   addWorkspace: (ws: Workspace) => void;
   removeWorkspace: (id: string) => void;
-  archiveWorkspace: (id: string) => void;
-  restoreWorkspace: (id: string) => void;
-  deleteWorkspace: (id: string) => void;
+  archiveWorkspace: (id: string) => void | Promise<void>;
+  restoreWorkspace: (id: string) => void | Promise<void>;
+  deleteWorkspace: (id: string) => void | Promise<void>;
   deleteStudy: (id: string) => void;
   deleteModel: (id: string) => void;
   deleteDataset: (studyId: string, datasetId?: string) => void;
@@ -210,8 +229,10 @@ interface AppState {
   togglePinWorkspace: (id: string) => void;
   setActiveWorkspace: (id: string) => void;
   addStudy: (study: Study) => void;
-  syncWorkspaceStudies: (workspaceId: string, diskProjects: Array<{ path: string; name: string; fullPath: string }>) => void;
+  syncWorkspaceStudies: (workspaceId: string, diskProjects: Array<{ path: string; name: string; fullPath: string; isArchived?: boolean; archivedAt?: string }>) => void;
   removeStudy: (id: string) => void;
+  archiveStudy: (id: string) => void;
+  restoreStudy: (id: string) => void;
   renameStudy: (id: string, name: string) => void;
   duplicateStudy: (id: string) => void;
   togglePinStudy: (id: string) => void;
@@ -329,6 +350,63 @@ export const useStore = create<AppState>()(
       openSettings: (tab = 'about') => set({ isSettingsOpen: true, settingsActiveTab: tab }),
       isLicenseActive: true,
       setIsLicenseActive: (active) => set({ isLicenseActive: active }),
+      licenseStatus: null,
+      isLicenseLoading: false,
+      machineFingerprint: '',
+      loadLicenseStatus: async () => {
+        set({ isLicenseLoading: true });
+        try {
+          const [status, fp] = await Promise.all([
+            getLicenseStatus(),
+            getMachineFingerprint().catch(() => ''),
+          ]);
+          set({
+            licenseStatus: status,
+            isLicenseActive: status.is_valid,
+            machineFingerprint: fp || status.machine_id,
+            isLicenseLoading: false,
+          });
+        } catch (err) {
+          console.error('[store] loadLicenseStatus error:', err);
+          set({ isLicenseLoading: false });
+        }
+      },
+      activateLicenseKey: async (tokenString: string) => {
+        set({ isLicenseLoading: true });
+        try {
+          const status = await activateLicense(tokenString);
+          clearCachedToken();
+          set({
+            licenseStatus: status,
+            isLicenseActive: status.is_valid,
+            isLicenseLoading: false,
+          });
+          return { success: status.is_valid, error: status.error || undefined };
+        } catch (err: any) {
+          set({ isLicenseLoading: false });
+          return { success: false, error: String(err?.message || err) };
+        }
+      },
+      deactivateLicenseKey: async () => {
+        set({ isLicenseLoading: true });
+        try {
+          await deactivateLicense();
+          clearCachedToken();
+          const status = await getLicenseStatus();
+          set({
+            licenseStatus: status,
+            isLicenseActive: status.is_valid,
+            isLicenseLoading: false,
+          });
+          return { success: true };
+        } catch (err: any) {
+          set({ isLicenseLoading: false });
+          return { success: false, error: String(err?.message || err) };
+        }
+      },
+      devMintLicense: async (licensee: string, tier: string, mode: string, daysValid: number) => {
+        return await devMintToken(licensee, tier, mode, daysValid);
+      },
       isSidebarCollapsed: false,
       toggleSidebar: () => set((state) => {
         if (state.settings.lockExpandedSidebar) {
@@ -743,51 +821,177 @@ export const useStore = create<AppState>()(
         studies: state.studies.filter(s => s.workspaceId !== id),
         datasetsByStudy: Object.fromEntries(Object.entries(state.datasetsByStudy).filter(([studyId]) => state.studies.find(study => study.id === studyId)?.workspaceId !== id)),
       })),
-      archiveWorkspace: (id) => set((state) => {
+      archiveWorkspace: async (id) => {
+        const state = get();
         const workspace = state.workspaces.find(item => item.id === id);
-        return workspace ? {
-          workspaces: state.workspaces.filter(item => item.id !== id),
-          archivedWorkspaces: [...state.archivedWorkspaces, { ...workspace, archivedAt: workspace.archivedAt || new Date().toISOString() }],
-          activeWorkspaceId: state.activeWorkspaceId === id ? (state.workspaces.find(item => item.id !== id)?.id || null) : state.activeWorkspaceId
-        } : state;
-      }),
-      restoreWorkspace: (id) => set((state) => {
+        if (!workspace) return;
+
+        let newPath = workspace.path;
+        let originalPath = workspace.path;
+        if (workspace.path) {
+          try {
+            const res = await api.archiveWorkspace(workspace.path);
+            if (res && res.new_path) {
+              newPath = res.new_path;
+              originalPath = res.old_path || workspace.path;
+            }
+          } catch (err) {
+            console.warn('Could not physically archive workspace:', err);
+          }
+        }
+
+        const nextActiveId = state.activeWorkspaceId === id ? (state.workspaces.find(item => item.id !== id)?.id || null) : state.activeWorkspaceId;
+        const now = new Date().toISOString();
+
+        set((curr) => ({
+          workspaces: curr.workspaces.filter(item => item.id !== id),
+          archivedWorkspaces: [
+            ...curr.archivedWorkspaces.filter(item => item.id !== id && item.id !== newPath),
+            { ...workspace, id: newPath, path: newPath, originalPath, archivedAt: now }
+          ],
+          activeWorkspaceId: nextActiveId,
+          studies: curr.studies.map(s => s.workspaceId === id ? { ...s, workspaceId: newPath } : s),
+        }));
+      },
+      restoreWorkspace: async (id) => {
+        const state = get();
         const workspace = state.archivedWorkspaces.find(item => item.id === id);
-        return workspace ? {
-          workspaces: [...state.workspaces, workspace],
-          archivedWorkspaces: state.archivedWorkspaces.filter(item => item.id !== id)
-        } : state;
-      }),
-      deleteWorkspace: (id) => set((state) => {
+        if (!workspace) return;
+
+        let restoredPath = workspace.originalPath || workspace.path;
+        if (workspace.path) {
+          try {
+            const res = await api.restoreWorkspace(workspace.path);
+            if (res && res.new_path) {
+              restoredPath = res.new_path;
+            }
+          } catch (err) {
+            console.warn('Could not physically restore workspace:', err);
+          }
+        }
+
+        set((curr) => ({
+          workspaces: [
+            ...curr.workspaces.filter(item => item.id !== restoredPath),
+            { ...workspace, id: restoredPath, path: restoredPath, originalPath: undefined, archivedAt: undefined }
+          ],
+          archivedWorkspaces: curr.archivedWorkspaces.filter(item => item.id !== id),
+          studies: curr.studies.map(s => s.workspaceId === id ? { ...s, workspaceId: restoredPath } : s),
+        }));
+      },
+      deleteWorkspace: async (id) => {
+        const state = get();
+        const ws = state.workspaces.find(w => w.id === id) || state.archivedWorkspaces.find(w => w.id === id);
+        if (ws?.path) {
+          try {
+            await api.deleteWorkspace(ws.path);
+          } catch (err) {
+            console.warn('Could not delete workspace on disk:', err);
+          }
+        }
         const workspaceStudies = state.studies.filter(study => study.workspaceId === id);
         const studyIds = new Set(workspaceStudies.map(study => study.id));
         const remainingTabs = state.tabs.filter(tab => tab.workspaceId !== id);
         const nextTabs = remainingTabs.length > 0 ? remainingTabs : [{ id: 'get-started', type: 'get-started' as const, title: 'Home' }];
         const nextActiveTabId = nextTabs.some(t => t.id === state.activeTabId) ? state.activeTabId : nextTabs[0].id;
-        return {
-          workspaces: state.workspaces.filter(item => item.id !== id),
-          archivedWorkspaces: state.archivedWorkspaces.filter(item => item.id !== id),
-          studies: state.studies.filter(study => study.workspaceId !== id),
-          models: state.models.filter(model => !studyIds.has(model.studyId)),
-          datasetsByStudy: Object.fromEntries(Object.entries(state.datasetsByStudy).filter(([studyId]) => !studyIds.has(studyId))),
-          activeWorkspaceId: state.activeWorkspaceId === id ? state.workspaces.find(item => item.id !== id)?.id ?? null : state.activeWorkspaceId,
+        set((curr) => ({
+          workspaces: curr.workspaces.filter(item => item.id !== id),
+          archivedWorkspaces: curr.archivedWorkspaces.filter(item => item.id !== id),
+          studies: curr.studies.filter(study => study.workspaceId !== id),
+          models: curr.models.filter(model => !studyIds.has(model.studyId)),
+          datasetsByStudy: Object.fromEntries(Object.entries(curr.datasetsByStudy).filter(([studyId]) => !studyIds.has(studyId))),
+          activeWorkspaceId: curr.activeWorkspaceId === id ? curr.workspaces.find(item => item.id !== id)?.id ?? null : curr.activeWorkspaceId,
           tabs: nextTabs,
           activeTabId: nextActiveTabId,
-        };
-      }),
-      deleteStudy: (id) => set((state) => {
+        }));
+      },
+      deleteStudy: (id) => {
+        const state = get();
+        const study = state.studies.find(item => item.id === id);
+        if (study?.path) {
+          const ws = state.workspaces.find(w => w.id === study.workspaceId);
+          if (ws?.path) {
+            const filename = study.path.split(/[/\\]/).pop();
+            if (filename) {
+              if (study.isArchived) {
+                api.deleteArchivedProject(ws.path, filename).catch(console.warn);
+              } else {
+                api.deleteProject(ws.path, filename).catch(console.warn);
+              }
+            }
+          }
+        }
         const remainingTabs = state.tabs.filter(tab => tab.studyId !== id);
         const nextTabs = remainingTabs.length > 0 ? remainingTabs : [{ id: 'get-started', type: 'get-started' as const, title: 'Home' }];
         const nextActiveTabId = nextTabs.some(t => t.id === state.activeTabId) ? state.activeTabId : nextTabs[0].id;
-        return {
+        set({
           studies: state.studies.filter(item => item.id !== id),
           models: state.models.filter(model => model.studyId !== id),
           datasetsByStudy: Object.fromEntries(Object.entries(state.datasetsByStudy).filter(([studyId]) => studyId !== id)),
           activeStudyId: state.activeStudyId === id ? null : state.activeStudyId,
           tabs: nextTabs,
           activeTabId: nextActiveTabId,
-        };
-      }),
+        });
+      },
+      archiveStudy: async (id) => {
+        const state = get();
+        const study = state.studies.find(s => s.id === id);
+        if (!study) return;
+
+        const remainingTabs = state.tabs.filter(tab => tab.studyId !== id);
+        const nextTabs = remainingTabs.length > 0 ? remainingTabs : [{ id: 'get-started', type: 'get-started' as const, title: 'Home' }];
+        const nextActiveTabId = nextTabs.some(t => t.id === state.activeTabId) ? state.activeTabId : nextTabs[0].id;
+
+        const now = new Date().toISOString();
+        set({
+          studies: state.studies.map(s => s.id === id ? { ...s, isArchived: true, archivedAt: now, isPinned: false } : s),
+          tabs: nextTabs,
+          activeTabId: nextActiveTabId,
+        });
+
+        if (study.path) {
+          const ws = state.workspaces.find(w => w.id === study.workspaceId);
+          if (ws?.path) {
+            try {
+              const res = await api.archiveProject(ws.path, study.path);
+              if (res?.new_path) {
+                const newPath = res.new_path;
+                set((curr) => ({
+                  studies: curr.studies.map((s) => s.id === id ? { ...s, path: newPath } : s),
+                }));
+              }
+            } catch (err) {
+              console.warn('Could not archive project on disk:', err);
+            }
+          }
+        }
+      },
+      restoreStudy: async (id) => {
+        const state = get();
+        const study = state.studies.find(s => s.id === id);
+        if (!study) return;
+
+        set({
+          studies: state.studies.map(s => s.id === id ? { ...s, isArchived: false, archivedAt: undefined } : s),
+        });
+
+        if (study.path) {
+          const ws = state.workspaces.find(w => w.id === study.workspaceId);
+          if (ws?.path) {
+            try {
+              const res = await api.restoreProject(ws.path, study.path);
+              if (res?.new_path) {
+                const newPath = res.new_path;
+                set((curr) => ({
+                  studies: curr.studies.map((s) => s.id === id ? { ...s, path: newPath } : s),
+                }));
+              }
+            } catch (err) {
+              console.warn('Could not restore project on disk:', err);
+            }
+          }
+        }
+      },
       deleteModel: (id) => set((state) => {
         const remainingTabs = state.tabs.filter(tab => tab.modelId !== id);
         const nextTabs = remainingTabs.length > 0 ? remainingTabs : [{ id: 'get-started', type: 'get-started' as const, title: 'Home' }];
@@ -864,7 +1068,9 @@ export const useStore = create<AppState>()(
               ...existing,
               id: existing.id || dp.fullPath,
               name: dp.name,
-              path: dp.fullPath
+              path: dp.fullPath,
+              isArchived: dp.isArchived !== undefined ? dp.isArchived : existing.isArchived,
+              archivedAt: dp.archivedAt !== undefined ? dp.archivedAt : existing.archivedAt,
             });
           } else {
             merged.push({
@@ -873,8 +1079,10 @@ export const useStore = create<AppState>()(
               name: dp.name,
               type: 'PLS-SEM',
               description: '',
-              lastModified: 'Saved',
-              path: dp.fullPath
+              lastModified: dp.isArchived ? 'Archived' : 'Saved',
+              path: dp.fullPath,
+              isArchived: dp.isArchived || false,
+              archivedAt: dp.archivedAt,
             });
           }
         }

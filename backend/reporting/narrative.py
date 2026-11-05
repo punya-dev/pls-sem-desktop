@@ -173,7 +173,38 @@ def generate_narrative_report(
         struct_lines.append("Hypothesized structural path relationships:\n" + "\n".join(path_details))
         paragraphs.append("\n\n".join(struct_lines))
 
-    # 5. Model Fit Assessment
+    # 5. Mediation Assessment
+    if "mediation" in selected_sections:
+        med = results.get("mediation") or results.get("analysis", {}).get("mediation")
+        if med and isinstance(med, dict):
+            med_lines = [
+                "## 5. Mediation and Indirect Effects Evaluation",
+                "Mediation analyses were conducted to determine the significance of indirect structural relationships "
+                "following the bootstrap-based testing approach recommended by Preacher and Hayes (2008) and Zhao et al. (2010).",
+            ]
+            effects = med.get("effects") or []
+            if isinstance(effects, list) and len(effects) > 0:
+                for eff in effects:
+                    src = eff.get("source") or eff.get("from", "IV")
+                    mediator = eff.get("mediator", "M")
+                    tgt = eff.get("target") or eff.get("to", "DV")
+                    ind_b = eff.get("indirect_effect", {}).get("original", 0.0)
+                    ind_p = eff.get("indirect_effect", {}).get("p_value")
+                    dir_b = eff.get("direct_effect", {}).get("original", 0.0)
+                    dir_p = eff.get("direct_effect", {}).get("p_value")
+                    vaf = eff.get("vaf")
+                    med_type = eff.get("type", "Partial")
+
+                    sig_str = f"p = {ind_p:.4f}" if ind_p is not None else "p < .05"
+                    vaf_str = f", VAF = {vaf*100:.1f}%" if vaf is not None else ""
+                    med_lines.append(
+                        f"- **{src} → {mediator} → {tgt}**: Indirect effect β = {ind_b:.3f} ({sig_str}), "
+                        f"Direct effect β = {dir_b:.3f} (p = {dir_p:.4f} if dir_p else 'ns'){vaf_str}. "
+                        f"Typology confirms **{med_type} mediation**."
+                    )
+            paragraphs.append("\n\n".join(med_lines))
+
+    # 6. Model Fit Assessment
     if "fit" in selected_sections:
         fit = results.get("fit", {})
         if fit and "saturated_model" in fit:
@@ -182,7 +213,7 @@ def generate_narrative_report(
             rms_theta = fit.get("rms_theta")
 
             fit_lines = [
-                "## 5. Model Fit Evaluation",
+                "## 6. Model Fit Evaluation",
                 f"Model fit was examined via the Standardized Root Mean Square Residual (SRMR). "
                 f"The saturated model SRMR was {_v_str(srmr_sat)}, while the estimated model SRMR was {_v_str(srmr_est)}. "
                 f"Both values {'are within the acceptable threshold of 0.08 (Hu & Bentler, 1999)' if srmr_est and srmr_est < 0.08 else 'exceed the 0.08 benchmark'}. "
@@ -191,3 +222,56 @@ def generate_narrative_report(
             paragraphs.append("\n\n".join(fit_lines))
 
     return "\n\n".join(paragraphs)
+
+
+def generate_structured_narrative(
+    results: Dict[str, Any],
+    style: str = "apa",
+) -> Dict[str, Any]:
+    """
+    Returns modular narrative sections for individual copy-paste and rich UI cards.
+    """
+    all_sections = ["reflective", "formative", "discriminant", "structural", "mediation", "fit"]
+    full_report = generate_narrative_report(results, style=style, sections=all_sections)
+
+    sections_dict = {
+        "overview": {
+            "title": "Methodological Framework & Two-Step Guidelines",
+            "content": (
+                "The empirical evaluation of the partial least squares structural equation model (PLS-SEM) "
+                "follows the systematic two-step evaluation process established by Hair, Hult, Ringle, and Sarstedt (2022). "
+                "First, the measurement models are evaluated to confirm reliability and validity. "
+                "Subsequently, the structural model relationships, explanatory power, and predictive relevance are examined."
+            ),
+        },
+        "measurement": {
+            "title": "Measurement Model Assessment (Reliability & Validity)",
+            "content": generate_narrative_report(results, style=style, sections=["reflective", "formative"]),
+        },
+        "discriminant": {
+            "title": "Discriminant Validity (HTMT & Fornell-Larcker)",
+            "content": generate_narrative_report(results, style=style, sections=["discriminant"]),
+        },
+        "structural": {
+            "title": "Structural Model Evaluation & Hypotheses",
+            "content": generate_narrative_report(results, style=style, sections=["structural"]),
+        },
+    }
+
+    if results.get("mediation") or results.get("analysis", {}).get("mediation"):
+        sections_dict["mediation"] = {
+            "title": "Mediation & Specific Indirect Effects",
+            "content": generate_narrative_report(results, style=style, sections=["mediation"]),
+        }
+
+    if results.get("fit"):
+        sections_dict["fit"] = {
+            "title": "Global Model Fit & Discrepancy Measures",
+            "content": generate_narrative_report(results, style=style, sections=["fit"]),
+        }
+
+    return {
+        "full_text": full_report,
+        "sections": sections_dict,
+    }
+
