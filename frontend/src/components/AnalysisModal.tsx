@@ -195,6 +195,7 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({
             rows: datasetRows,
             dataset_name: datasetName,
             model_id: modelId,
+            settings: { consistent: true },
           });
           break;
         }

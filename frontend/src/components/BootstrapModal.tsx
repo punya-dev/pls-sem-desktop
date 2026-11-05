@@ -11,6 +11,7 @@ interface BootstrapModalProps {
   datasetName?: string;
   modelId?: string;
   diagramLayout?: any;
+  isConsistent?: boolean;
   onComplete: (results: any) => void;
   onClose: () => void;
 }
@@ -24,6 +25,7 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
   datasetName,
   modelId,
   diagramLayout,
+  isConsistent = false,
   onComplete,
   onClose,
 }) => {
@@ -85,12 +87,15 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
         dataset_name: datasetName,
         model_id: modelId,
         diagram_layout: diagramLayout,
-        settings: hasGcTerms ? {
-          gc: {
-            ecdf: ecdfMethod,
-            copula_transform: copulaTransform,
-          }
-        } : undefined,
+        settings: {
+          ...(hasGcTerms ? {
+            gc: {
+              ecdf: ecdfMethod,
+              copula_transform: copulaTransform,
+            }
+          } : {}),
+          ...(isConsistent ? { consistent: true } : {}),
+        },
       });
 
       if (startRes.error || !startRes.job_id) {
@@ -255,7 +260,7 @@ export const BootstrapModal: React.FC<BootstrapModalProps> = ({
         }}>
           <div>
             <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: 'var(--color-text-primary, #0f172a)' }}>
-              PLS-SEM Bootstrapping
+              {isConsistent ? 'Consistent PLS-SEM Bootstrapping' : 'PLS-SEM Bootstrapping'}
             </h3>
             <p style={{ margin: '2px 0 0', fontSize: '12px', color: 'var(--color-text-muted, #64748b)' }}>
               Multi-core significance testing for path coefficients &amp; loadings

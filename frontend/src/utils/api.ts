@@ -447,6 +447,7 @@ export const api = {
       dataset_name?: string;
       model_id?: string;
       diagram_layout?: any;
+      settings?: any;
     }
   ): Promise<{ status?: string; algorithm?: string; results?: any; validation?: ValidationResponse; error?: string }> {
     try {
@@ -466,6 +467,7 @@ export const api = {
           dataset_name: options?.dataset_name || undefined,
           model_id: options?.model_id || undefined,
           diagram_layout: options?.diagram_layout || undefined,
+          settings: options?.settings || undefined,
         }),
       });
       return await res.json();

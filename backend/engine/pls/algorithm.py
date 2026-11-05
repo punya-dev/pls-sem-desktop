@@ -784,6 +784,7 @@ def run_pipeline(
                     )
                     diag["id"] = q["id"]
                     diag["predictor"] = pred
+                    diag["source"] = pred
                     diag["target"] = tgt
                     diag["predictor_name"] = q["predictor_name"]
                     diag["target_name"] = q["target_name"]
@@ -1052,8 +1053,12 @@ class PLSAlgorithm:
         if self.custom_settings:
             if isinstance(self.custom_settings, PipelineSettings):
                 settings.gc = self.custom_settings.gc
-            elif isinstance(self.custom_settings, dict) and "gc" in self.custom_settings:
-                settings.gc = GCSettings(**self.custom_settings["gc"])
+                settings.consistent = self.custom_settings.consistent
+            elif isinstance(self.custom_settings, dict):
+                if "gc" in self.custom_settings:
+                    settings.gc = GCSettings(**self.custom_settings["gc"])
+                if "consistent" in self.custom_settings:
+                    settings.consistent = bool(self.custom_settings["consistent"])
         settings._is_bootstrap = is_bootstrap
         return run_pipeline(data, model_spec, settings)
 
