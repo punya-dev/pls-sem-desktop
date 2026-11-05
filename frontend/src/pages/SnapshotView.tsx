@@ -17,9 +17,14 @@ import {
   Code,
   FileCheck,
   LayoutGrid,
-  RotateCcw
+  RotateCcw,
+  GitCompare,
 } from 'lucide-react';
 import { getCanvasGridColors } from '../utils/model-canvas';
+import { HypothesisTestingPanel } from '../components/HypothesisTestingPanel';
+import { DiagramExportModal } from '../components/DiagramExportModal';
+import { ModelComparisonModal } from '../components/ModelComparisonModal';
+import { performAutoLayout, resolveBadgePositions } from '../utils/semLayoutEngine';
 import '../model-canvas.css';
 import '../results.css';
 
@@ -127,6 +132,8 @@ export const SnapshotView: React.FC = () => {
   const [canvasGrid, setCanvasGrid] = useState<string>(settings?.canvasGrid || 'dots');
   const [hudConfirm, setHudConfirm] = useState<'reset' | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
+  const [isCompareModalOpen, setIsCompareModalOpen] = useState<boolean>(false);
   const [contextMenuPos, setContextMenuPos] = useState<{ x: number; y: number; targetNodeId?: string | null } | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [hoveredLatent, setHoveredLatent] = useState<{
@@ -152,6 +159,7 @@ export const SnapshotView: React.FC = () => {
 
   // Dragging and interactive layout nodes
   const [layoutNodes, setLayoutNodes] = useState<any[]>([]);
+  const [layoutEdges, setLayoutEdges] = useState<any[]>([]);
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
   const dragStartPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const initialNodesPosRef = useRef<Map<string, { x: number; y: number }>>(new Map());
@@ -219,6 +227,9 @@ export const SnapshotView: React.FC = () => {
       const cloned = JSON.parse(JSON.stringify(layout.nodes));
       originalLayoutNodesRef.current = JSON.parse(JSON.stringify(layout.nodes));
       setLayoutNodes(cloned);
+      if (layout.edges) {
+        setLayoutEdges(JSON.parse(JSON.stringify(layout.edges)));
+      }
       setTimeout(() => {
         centerDiagram(cloned);
       }, 50);
@@ -352,6 +363,33 @@ export const SnapshotView: React.FC = () => {
       } else {
         return { x: dx * (ry / Math.abs(dy)), y: Math.sign(dy) * ry };
       }
+    }
+  };
+
+  const getPortOffset = (
+    node: any,
+    targetPt: { x: number; y: number },
+    edgeIdx: number,
+    totalEdges: number,
+    isTarget: boolean
+  ) => {
+    const dx = targetPt.x - node.x;
+    const dy = targetPt.y - node.y;
+
+    const isLatent = node.isLatent !== false && !node.isText;
+    const shape = node.shape || (isLatent ? 'circle' : 'rect');
+
+    if (shape === 'circle') {
+      let baseAngle = Math.atan2(dy, dx);
+      if (totalEdges > 1) {
+        const maxSpread = Math.min(0.55, (totalEdges - 1) * 0.16);
+        const offset = -maxSpread / 2 + (edgeIdx / (totalEdges - 1)) * maxSpread;
+        baseAngle += isTarget ? -offset : offset;
+      }
+      const r = node.r || 36;
+      return { x: r * Math.cos(baseAngle), y: r * Math.sin(baseAngle) };
+    } else {
+      return getNodeIntersectionOffset(node, targetPt.x, targetPt.y);
     }
   };
 
@@ -498,68 +536,24 @@ export const SnapshotView: React.FC = () => {
 
   const handleAutoAlign = () => {
     if (!layoutNodes || layoutNodes.length === 0) return;
-    const newNodes = JSON.parse(JSON.stringify(layoutNodes));
-    const edges = layout?.edges || [];
-
-    // Topological sort of latent constructs
-    const depths = new Map<string, number>();
-    newNodes.forEach((n: any) => {
-      if (n.isLatent !== false && !n.isText) depths.set(n.id, 0);
-    });
-
-    let changed = true;
-    let iterations = 0;
-    while (changed && iterations < 50) {
-      changed = false;
-      iterations++;
-      edges.forEach((e: any) => {
-        const sourceDepth = depths.get(e.sourceId);
-        const targetDepth = depths.get(e.targetId);
-        if (sourceDepth !== undefined && targetDepth !== undefined) {
-          if (targetDepth <= sourceDepth) {
-            depths.set(e.targetId, sourceDepth + 1);
-            changed = true;
-          }
-        }
-      });
-    }
-
-    const maxDepth = Math.max(0, ...Array.from(depths.values()));
-    const columns: any[][] = Array.from({ length: maxDepth + 1 }, () => []);
-
-    depths.forEach((depth, id) => {
-      const node = newNodes.find((n: any) => n.id === id);
-      if (node) columns[depth].push(node);
-    });
-
-    const colWidth = 320;
-    const rowHeight = 200;
-
     const container = containerRef.current;
-    const centerX = (container?.clientWidth || 900) / 2;
-    const centerY = (container?.clientHeight || 600) / 2;
+    const width = container?.clientWidth || 1000;
+    const height = container?.clientHeight || 700;
 
-    const startX = centerX - ((columns.length - 1) * colWidth) / 2;
-
-    columns.forEach((colNodes, colIdx) => {
-      const startY = centerY - ((colNodes.length - 1) * rowHeight) / 2;
-      colNodes.forEach((node, rowIdx) => {
-        const oldX = node.x;
-        const oldY = node.y;
-        node.x = Math.round((startX + colIdx * colWidth) / 20) * 20;
-        node.y = Math.round((startY + rowIdx * rowHeight) / 20) * 20;
-        const dx = node.x - oldX;
-        const dy = node.y - oldY;
-        // Move child indicators with latent construct
-        newNodes.filter((child: any) => child.parentId === node.id).forEach((child: any) => {
-          child.x += dx;
-          child.y += dy;
-        });
-      });
+    const currentEdges = layoutEdges.length > 0 ? layoutEdges : (layout?.edges || []);
+    const { nodes: alignedNodes, edges: alignedEdges } = performAutoLayout(layoutNodes, currentEdges, {
+      containerWidth: width,
+      containerHeight: height,
     });
 
-    setLayoutNodes(newNodes);
-    centerDiagram(newNodes);
+    setLayoutNodes(alignedNodes);
+    if (alignedEdges) {
+      setLayoutEdges(alignedEdges);
+      if (layout) {
+        layout.edges = alignedEdges;
+      }
+    }
+    centerDiagram(alignedNodes);
   };
 
   const handleDownloadPNG = () => {
@@ -1038,6 +1032,24 @@ export const SnapshotView: React.FC = () => {
                       </a>
                       <a
                         href="#"
+                        className={`tree-item ${activeResultTab === 'hypotheses' ? 'active' : ''}`}
+                        onClick={(e) => { e.preventDefault(); setActiveResultTab('hypotheses'); }}
+                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+                      >
+                        <span>Hypotheses Testing</span>
+                        <span style={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          padding: '1px 5px',
+                          borderRadius: 4,
+                          background: 'rgba(99, 102, 241, 0.15)',
+                          color: 'var(--color-accent)',
+                        }}>
+                          APA
+                        </span>
+                      </a>
+                      <a
+                        href="#"
                         className={`tree-item ${activeResultTab === 'total_indirect_effects' ? 'active' : ''}`}
                         onClick={(e) => { e.preventDefault(); setActiveResultTab('total_indirect_effects'); }}
                       >
@@ -1183,6 +1195,15 @@ export const SnapshotView: React.FC = () => {
                     <Download size={13} />
                     <span>Export JSON</span>
                   </button>
+                  <button
+                    className="results-tool-btn results-tool-btn--accent"
+                    type="button"
+                    onClick={() => setIsCompareModalOpen(true)}
+                    title="Compare models side-by-side"
+                  >
+                    <GitCompare size={13} />
+                    <span>Compare Models</span>
+                  </button>
                 </div>
 
                 {/* Header Area with Inline Title and Table Actions */}
@@ -1224,7 +1245,13 @@ export const SnapshotView: React.FC = () => {
                 {/* Table Container */}
                 <div className="table-container">
                   <div className="scientific-table-wrap">
-                    {activeResultTab === 'path_coefficients' ? (
+                    {activeResultTab === 'hypotheses' ? (
+                      <HypothesisTestingPanel
+                        results={results}
+                        model={snapshot?.model_state || snapshot?.model}
+                        onExportExcel={handleExportCSV}
+                      />
+                    ) : activeResultTab === 'path_coefficients' ? (
                       getTableMode('path_coefficients') === 'matrix' ? (
                         <table className="scientific-table">
                           <thead>
@@ -2185,11 +2212,20 @@ export const SnapshotView: React.FC = () => {
 
               <div
                 className="hud-btn"
-                onClick={handleDownloadPNG}
-                title="Download Diagram as High-Resolution PNG"
+                onClick={() => setIsExportModalOpen(true)}
+                title="Export Diagram (Vector SVG, 300/600 DPI, Journal B&W)"
               >
                 <Download size={13} />
-                <span>Download PNG</span>
+                <span>Export Diagram</span>
+              </div>
+
+              <div
+                className="hud-btn"
+                onClick={() => setIsCompareModalOpen(true)}
+                title="Compare this model side-by-side with other models"
+              >
+                <GitCompare size={13} />
+                <span>Compare</span>
               </div>
 
               <div className="hud-divider" />
@@ -2645,11 +2681,11 @@ export const SnapshotView: React.FC = () => {
                     title="Export diagram as high-resolution image"
                     onClick={() => {
                       setContextMenuPos(null);
-                      handleDownloadPNG();
+                      setIsExportModalOpen(true);
                     }}
                   >
                     <Download size={15} style={{ color: 'var(--color-text-secondary)' }} />
-                    <span style={{ flex: 1 }}>Export as Image</span>
+                    <span style={{ flex: 1 }}>Export Publication Diagram</span>
                   </div>
 
                   <div className="canvas-ctx-divider" />
@@ -2902,7 +2938,7 @@ export const SnapshotView: React.FC = () => {
                                   textAnchor="middle"
                                   dominantBaseline="central"
                                   fontSize="9.5"
-                                  fontFamily="var(--font-mono, monospace)"
+                                  fontFamily="var(--font-mono)"
                                   fontWeight="500"
                                   fill="var(--canvas-badge-text, #0f172a)"
                                 >
@@ -2915,78 +2951,104 @@ export const SnapshotView: React.FC = () => {
                       })}
 
                     {/* 2. Structural Paths (Latent to Latent Edges) */}
-                    {layout?.edges?.map((edge: any) => {
-                      const srcNode = displayNodes.find((n: any) => n.id === edge.sourceId);
-                      const tgtNode = displayNodes.find((n: any) => n.id === edge.targetId);
-                      if (!srcNode || !tgtNode) return null;
+                    {(() => {
+                      const activeEdges = layoutEdges.length > 0 ? layoutEdges : (layout?.edges || []);
+                      const edgesWithCoords = activeEdges.map((edge: any) => {
+                        const srcNode = displayNodes.find((n: any) => n.id === edge.sourceId);
+                        const tgtNode = displayNodes.find((n: any) => n.id === edge.targetId);
+                        if (!srcNode || !tgtNode) return null;
 
-                      const srcOff = getNodeIntersectionOffset(srcNode, tgtNode.x, tgtNode.y);
-                      const tgtOff = getNodeIntersectionOffset(tgtNode, srcNode.x, srcNode.y);
-                      const x1 = srcNode.x + srcOff.x;
-                      const y1 = srcNode.y + srcOff.y;
-                      const x2 = tgtNode.x + tgtOff.x;
-                      const y2 = tgtNode.y + tgtOff.y;
+                        const outgoing = activeEdges.filter((e: any) => e.sourceId === srcNode.id);
+                        outgoing.sort((a: any, b: any) => (displayNodes.find((n: any) => n.id === a.targetId)?.y || 0) - (displayNodes.find((n: any) => n.id === b.targetId)?.y || 0));
+                        const srcIdx = outgoing.findIndex((e: any) => e.id === edge.id || (e.sourceId === edge.sourceId && e.targetId === edge.targetId));
 
-                      let d = `M ${x1} ${y1}`;
-                      let midX = (x1 + x2) / 2;
-                      let midY = (y1 + y2) / 2;
+                        const incoming = activeEdges.filter((e: any) => e.targetId === tgtNode.id);
+                        incoming.sort((a: any, b: any) => (displayNodes.find((n: any) => n.id === a.sourceId)?.y || 0) - (displayNodes.find((n: any) => n.id === b.sourceId)?.y || 0));
+                        const tgtIdx = incoming.findIndex((e: any) => e.id === edge.id || (e.sourceId === edge.sourceId && e.targetId === edge.targetId));
 
-                      if (edge.curved) {
-                        const mx = (x1 + x2) / 2;
-                        const my = (y1 + y2) / 2;
-                        const dx = x2 - x1;
-                        const dy = y2 - y1;
-                        const len = Math.hypot(dx, dy) || 1;
-                        const cx = mx + (-dy / len) * 40;
-                        const cy = my + (dx / len) * 40;
-                        d += ` Q ${cx} ${cy} ${x2} ${y2}`;
-                        midX = 0.25 * x1 + 0.5 * cx + 0.25 * x2;
-                        midY = 0.25 * y1 + 0.5 * cy + 0.25 * y2;
-                      } else {
-                        d += ` L ${x2} ${y2}`;
-                      }
+                        const srcOff = getPortOffset(srcNode, tgtNode, srcIdx, outgoing.length, false);
+                        const tgtOff = getPortOffset(tgtNode, srcNode, tgtIdx, incoming.length, true);
+                        const coef = getPathCoefficient(srcNode, tgtNode);
 
-                      const coef = getPathCoefficient(srcNode, tgtNode);
-                      const pillW = coef !== null ? Math.max(34, coef.toFixed(3).length * 7.5 + 10) : 34;
-                      const pillH = 18;
+                        return {
+                          ...edge,
+                          srcNode,
+                          tgtNode,
+                          x1: srcNode.x + srcOff.x,
+                          y1: srcNode.y + srcOff.y,
+                          x2: tgtNode.x + tgtOff.x,
+                          y2: tgtNode.y + tgtOff.y,
+                          hasBadge: coef !== null,
+                          coef,
+                        };
+                      }).filter(Boolean);
 
-                      return (
-                        <g key={edge.id || `${edge.sourceId}-${edge.targetId}`}>
-                          <title>{srcNode.label} → {tgtNode.label}{coef !== null ? ` (Path Coefficient β = ${coef.toFixed(3)})` : ''}</title>
-                          <path
-                            d={d}
-                            fill="none"
-                            stroke="var(--canvas-edge-stroke, #64748b)"
-                            strokeWidth="2"
-                            markerEnd="url(#snap-arrowhead)"
-                          />
-                          {coef !== null && (
-                            <g transform={`translate(${midX}, ${midY})`} pointerEvents="none">
-                              <rect
-                                x={-pillW / 2}
-                                y={-pillH / 2}
-                                width={pillW}
-                                height={pillH}
-                                rx="4"
-                                fill="var(--canvas-badge-bg, #ffffff)"
-                                stroke="var(--canvas-badge-border, #cbd5e1)"
-                                strokeWidth="1"
-                              />
-                              <text
-                                textAnchor="middle"
-                                dominantBaseline="central"
-                                fontSize="10.5"
-                                fontFamily="var(--font-mono, monospace)"
-                                fontWeight="600"
-                                fill="var(--canvas-badge-text, #0f172a)"
-                              >
-                                {coef.toFixed(3)}
-                              </text>
-                            </g>
-                          )}
-                        </g>
-                      );
-                    })}
+                      const badgePosMap = resolveBadgePositions(edgesWithCoords);
+
+                      return edgesWithCoords.map((edge: any) => {
+                        const { x1, y1, x2, y2, srcNode, tgtNode, coef } = edge;
+
+                        let d = `M ${x1} ${y1}`;
+                        if (edge.curved) {
+                          const mx = (x1 + x2) / 2;
+                          const my = (y1 + y2) / 2;
+                          const dx = x2 - x1;
+                          const dy = y2 - y1;
+                          const len = Math.hypot(dx, dy) || 1;
+                          const curveVal = typeof edge.curvature === 'number' ? edge.curvature : 40;
+                          const cx = mx + (-dy / len) * curveVal;
+                          const cy = my + (dx / len) * curveVal;
+                          d += ` Q ${cx} ${cy} ${x2} ${y2}`;
+                        } else {
+                          d += ` L ${x2} ${y2}`;
+                        }
+
+                        const badgeKey = edge.id || `${edge.sourceId}->${edge.targetId}`;
+                        const badgePos = badgePosMap.get(badgeKey);
+                        const badgeX = badgePos ? badgePos.x : (x1 + x2) / 2;
+                        const badgeY = badgePos ? badgePos.y : (y1 + y2) / 2;
+
+                        const pillW = coef !== null ? Math.max(34, coef.toFixed(3).length * 7.5 + 10) : 34;
+                        const pillH = 18;
+
+                        return (
+                          <g key={edge.id || `${edge.sourceId}-${edge.targetId}`}>
+                            <title>{srcNode.label} → {tgtNode.label}{coef !== null ? ` (Path Coefficient β = ${coef.toFixed(3)})` : ''}</title>
+                            <path
+                              d={d}
+                              fill="none"
+                              stroke="var(--canvas-edge-stroke, #64748b)"
+                              strokeWidth="2"
+                              markerEnd="url(#snap-arrowhead)"
+                            />
+                            {coef !== null && (
+                              <g transform={`translate(${badgeX}, ${badgeY})`} pointerEvents="none">
+                                <rect
+                                  x={-pillW / 2}
+                                  y={-pillH / 2}
+                                  width={pillW}
+                                  height={pillH}
+                                  rx="4"
+                                  fill="var(--canvas-badge-bg, #ffffff)"
+                                  stroke="var(--canvas-badge-border, #cbd5e1)"
+                                  strokeWidth="1"
+                                />
+                                <text
+                                  textAnchor="middle"
+                                  dominantBaseline="central"
+                                  fontSize="10.5"
+                                  fontFamily="var(--font-mono)"
+                                  fontWeight="600"
+                                  fill="var(--canvas-badge-text, #0f172a)"
+                                >
+                                  {coef.toFixed(3)}
+                                </text>
+                              </g>
+                            )}
+                          </g>
+                        );
+                      });
+                    })()}
 
                     {/* 3. Nodes */}
                     {displayNodes
@@ -3066,12 +3128,13 @@ export const SnapshotView: React.FC = () => {
                                 stroke={node.stroke || "var(--canvas-latent-stroke, #1e293b)"}
                                 strokeWidth="2"
                               />
-                              {node.textInside ? (
+                              {node.textInside !== false ? (
                                 <>
                                   <text
                                     textAnchor="middle"
-                                    y={r2 !== undefined ? -4 : 4}
-                                    fontSize="12"
+                                    y={r2 !== undefined ? -6 : 0}
+                                    dominantBaseline={r2 !== undefined ? "auto" : "central"}
+                                    fontSize={r2 !== undefined ? "12" : "13"}
                                     fontWeight="600"
                                     fill={node.textColor || "var(--canvas-latent-text, #ffffff)"}
                                     style={{ userSelect: 'none' }}
@@ -3081,10 +3144,10 @@ export const SnapshotView: React.FC = () => {
                                   {r2 !== undefined && (
                                     <text
                                       textAnchor="middle"
-                                      y="14"
-                                      fontSize="10"
+                                      y="12"
+                                      fontSize="11"
                                       fontWeight="500"
-                                      fill="var(--color-accent, #6366f1)"
+                                      fill="var(--canvas-latent-r2, #a5b4fc)"
                                       style={{ userSelect: 'none' }}
                                     >
                                       R² = {fmt(r2, 3)}
@@ -3093,16 +3156,45 @@ export const SnapshotView: React.FC = () => {
                                 </>
                               ) : (
                                 <>
-                                  <text
-                                    textAnchor="middle"
-                                    y={(node.r || 36) + 18}
-                                    fontSize="12"
-                                    fontWeight="600"
-                                    fill="var(--color-text-primary, #0f172a)"
-                                    style={{ userSelect: 'none' }}
-                                  >
-                                    {node.label}
-                                  </text>
+                                  {(() => {
+                                    const r = node.r || 36;
+                                    const textPos = node.textPosition || 'bottom';
+                                    let lx = 0;
+                                    let ly = r + 18;
+                                    let tAnchor: "middle" | "start" | "end" = "middle";
+
+                                    if (textPos === 'top') {
+                                      lx = 0;
+                                      ly = -r - 10;
+                                      tAnchor = "middle";
+                                    } else if (textPos === 'left') {
+                                      lx = -r - 10;
+                                      ly = 4;
+                                      tAnchor = "end";
+                                    } else if (textPos === 'right') {
+                                      lx = r + 10;
+                                      ly = 4;
+                                      tAnchor = "start";
+                                    } else { // 'bottom'
+                                      lx = 0;
+                                      ly = r + 18;
+                                      tAnchor = "middle";
+                                    }
+
+                                    return (
+                                      <text
+                                        x={lx}
+                                        y={ly}
+                                        textAnchor={tAnchor}
+                                        fontSize="12"
+                                        fontWeight="600"
+                                        fill="var(--color-text-primary, #0f172a)"
+                                        style={{ userSelect: 'none' }}
+                                      >
+                                        {node.label}
+                                      </text>
+                                    );
+                                  })()}
                                   {r2 !== undefined && (
                                     <text
                                       textAnchor="middle"
@@ -3123,8 +3215,29 @@ export const SnapshotView: React.FC = () => {
                                 const childInds = displayNodes.filter((n: any) => n.parentId === node.id && !n.isLatent);
                                 if (childInds.length === 0) return null;
                                 const labelLen = (node.label || '').length * 8;
-                                const eyeX = (labelLen / 2) + 12;
-                                const eyeY = node.textInside ? (r2 !== undefined ? -4 : 4) : ((node.r || 36) + 18);
+                                const r = node.r || 36;
+                                const textPos = node.textPosition || 'bottom';
+                                let eyeX = (labelLen / 2) + 12;
+                                let eyeY = r + 18;
+
+                                if (node.textInside) {
+                                  eyeX = (labelLen / 2) + 12;
+                                  eyeY = r2 !== undefined ? -4 : 4;
+                                } else {
+                                  if (textPos === 'top') {
+                                    eyeX = (labelLen / 2) + 12;
+                                    eyeY = -r - 10;
+                                  } else if (textPos === 'left') {
+                                    eyeX = -r - 10 + 12;
+                                    eyeY = 4;
+                                  } else if (textPos === 'right') {
+                                    eyeX = r + 10 + labelLen + 12;
+                                    eyeY = 4;
+                                  } else {
+                                    eyeX = (labelLen / 2) + 12;
+                                    eyeY = r + 18;
+                                  }
+                                }
                                 return (
                                   <g
                                     className="canvas-hidden-indicators-icon-btn"
@@ -3190,19 +3303,44 @@ export const SnapshotView: React.FC = () => {
                               >
                                 {node.label}
                               </text>
-                            ) : (
-                              <text
-                                x="35"
-                                y="42"
-                                textAnchor="middle"
-                                fontSize="11"
-                                fontWeight="500"
-                                fill="var(--color-text-primary, #0f172a)"
-                                style={{ userSelect: 'none' }}
-                              >
-                                {node.label}
-                              </text>
-                            )}
+                            ) : (() => {
+                              const pos = node.textPosition || 'bottom';
+                              let ix = 35;
+                              let iy = 42;
+                              let iAnchor: "middle" | "start" | "end" = "middle";
+
+                              if (pos === 'top') {
+                                ix = 35;
+                                iy = -8;
+                                iAnchor = "middle";
+                              } else if (pos === 'left') {
+                                ix = -8;
+                                iy = 18;
+                                iAnchor = "end";
+                              } else if (pos === 'right') {
+                                ix = 78;
+                                iy = 18;
+                                iAnchor = "start";
+                              } else { // 'bottom'
+                                ix = 35;
+                                iy = 42;
+                                iAnchor = "middle";
+                              }
+
+                              return (
+                                <text
+                                  x={ix}
+                                  y={iy}
+                                  textAnchor={iAnchor}
+                                  fontSize="11"
+                                  fontWeight="500"
+                                  fill="var(--color-text-primary, #0f172a)"
+                                  style={{ userSelect: 'none' }}
+                                >
+                                  {node.label}
+                                </text>
+                              );
+                            })()}
                           </g>
                         );
                       })}
@@ -3418,6 +3556,24 @@ export const SnapshotView: React.FC = () => {
             <span style={{ color: '#10b981' }}>✓</span> {copyToast}
           </div>
         )}
+
+        {/* ═══ Publication Diagram Exporter Modal ═══ */}
+        <DiagramExportModal
+          isOpen={isExportModalOpen}
+          onClose={() => setIsExportModalOpen(false)}
+          svgElement={svgRef.current}
+          modelName={snapshot?.name || 'snapshot_model'}
+          results={results}
+        />
+
+        {/* ═══ Multi-Model Comparison Modal ═══ */}
+        <ModelComparisonModal
+          isOpen={isCompareModalOpen}
+          onClose={() => setIsCompareModalOpen(false)}
+          projectPath={activeStudy?.path || ''}
+          initialSnapshotId={activeTab?.snapshotId || snapshot?.id}
+          studyName={activeStudy?.name}
+        />
 
       </div>
     </div>

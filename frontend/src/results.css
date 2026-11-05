@@ -404,7 +404,7 @@
   justify-content: space-between;
   padding: 0 16px;
   font-size: 11px;
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
   color: var(--color-text-muted);
   flex-shrink: 0;
   user-select: none;

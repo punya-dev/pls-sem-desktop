@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { HypothesisTestingPanel } from './HypothesisTestingPanel';
+import { NarrativeDraftPanel } from './NarrativeDraftPanel';
 
 interface AdvancedResultPanelsProps {
   activeTab: string;
@@ -610,7 +612,7 @@ export const AdvancedResultPanels: React.FC<AdvancedResultPanelsProps> = ({
                         <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 600, color: isSig ? '#16a34a' : 'var(--color-text-secondary)' }}>
                           {eff.interaction_p_value !== null ? fmt(eff.interaction_p_value) : '—'}
                         </td>
-                        <td style={{ padding: '10px 14px', textAlign: 'center', fontFamily: 'monospace', fontSize: 11 }}>
+                        <td style={{ padding: '10px 14px', textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: 11 }}>
                           [{fmt(eff.interaction_ci_lower)}, {fmt(eff.interaction_ci_upper)}]
                         </td>
                         <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700, color: ratingColor }}>
@@ -873,7 +875,7 @@ export const AdvancedResultPanels: React.FC<AdvancedResultPanelsProps> = ({
                                 <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, color: isRowSig ? '#16a34a' : 'var(--color-text-secondary)' }}>
                                   {row.p_value !== undefined ? fmt(row.p_value) : '—'}
                                 </td>
-                                <td style={{ padding: '10px 16px', textAlign: 'center', fontFamily: 'monospace', fontSize: 11 }}>
+                                <td style={{ padding: '10px 16px', textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: 11 }}>
                                   [{fmt(row.ci_lower)}, {fmt(row.ci_upper)}]
                                 </td>
                                 <td style={{ padding: '10px 16px', textAlign: 'right', color: 'var(--color-text-secondary)' }}>
@@ -2999,69 +3001,14 @@ export const AdvancedResultPanels: React.FC<AdvancedResultPanelsProps> = ({
     );
   }
 
-  // 18. EXECUTIVE SUMMARY & APA NARRATIVE
+  // 18. EXECUTIVE SUMMARY & APA NARRATIVE ("DRAFT MY PAPER")
   if (activeTab === 'report_narrative') {
     return (
-      <div className="results-content-pane">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-          <div>
-            <h3 style={{ margin: '0 0 4px', fontSize: 18, fontWeight: 600, color: 'var(--color-text-primary)' }}>
-              Executive Summary &amp; APA Publication Narrative
-            </h3>
-            <p style={{ margin: 0, fontSize: 13, color: 'var(--color-text-muted)' }}>
-              Automated empirical results narrative ready for inclusion in academic manuscripts and research papers.
-            </p>
-          </div>
-          <div style={{ display: 'flex', gap: 10 }}>
-            <button
-              className="results-tool-btn results-tool-btn--accent"
-              onClick={onExportPdf}
-            >
-              Export Full PDF
-            </button>
-            <button
-              className="results-tool-btn"
-              onClick={onExportExcel}
-            >
-              Export Excel Tables
-            </button>
-          </div>
-        </div>
-
-        <div style={{
-          backgroundColor: '#fff',
-          border: '1px solid var(--color-border-subtle)',
-          borderRadius: 10,
-          padding: 24,
-          lineHeight: '1.7',
-          fontSize: 14,
-          color: '#334155',
-        }}>
-          <h4 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 700, color: '#0f172a' }}>
-            Results of the Measurement Model Evaluation
-          </h4>
-          <p style={{ marginBottom: 16 }}>
-            In accordance with the guidelines established by Hair et al. (2017), the evaluation of the reflective measurement models was performed through the assessment of indicator reliability, internal consistency reliability, convergent validity, and discriminant validity.
-            All composite reliability values exceeded the conservative threshold of 0.70, establishing satisfactory internal consistency reliability. Furthermore, the average variance extracted (AVE) for all reflective constructs surpassed the recommended cut-off value of 0.50, demonstrating adequate convergent validity.
-          </p>
-
-          <h4 style={{ margin: '16px 0 12px', fontSize: 16, fontWeight: 700, color: '#0f172a' }}>
-            Discriminant Validity Assessment
-          </h4>
-          <p style={{ marginBottom: 16 }}>
-            Discriminant validity was established using both the traditional Fornell-Larcker criterion and the modern heterotrait-monotrait ratio of correlations (HTMT).
-            All HTMT values remained safely below the conservative threshold of 0.85 (Henseler et al., 2015), confirming that each construct captures phenomena not represented by other constructs in the path model.
-          </p>
-
-          <h4 style={{ margin: '16px 0 12px', fontSize: 16, fontWeight: 700, color: '#0f172a' }}>
-            Structural Model Evaluation &amp; Hypotheses Testing
-          </h4>
-          <p style={{ marginBottom: 16 }}>
-            Collinearity among predictor constructs was examined prior to structural evaluation; all variance inflation factors (VIF) were well below the stringent ceiling of 3.0, ruling out multicollinearity issues.
-            Nonparametric bootstrapping (5,000 resamples) was utilized to assess the significance of path coefficients, standard errors, and confidence intervals.
-          </p>
-        </div>
-      </div>
+      <NarrativeDraftPanel
+        results={results}
+        onExportPdf={onExportPdf}
+        onExportExcel={onExportExcel}
+      />
     );
   }
 
@@ -3103,6 +3050,16 @@ export const AdvancedResultPanels: React.FC<AdvancedResultPanelsProps> = ({
           )}
         </div>
       </div>
+    );
+  }
+
+  // 19. AUTOMATED HYPOTHESIS TESTING SUMMARY TABLE (APA 7TH)
+  if (activeTab === 'hypotheses' || activeTab === 'hypothesis_testing') {
+    return (
+      <HypothesisTestingPanel
+        results={results}
+        onExportExcel={onExportExcel}
+      />
     );
   }
 

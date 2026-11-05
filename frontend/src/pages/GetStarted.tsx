@@ -55,16 +55,14 @@ const GetStarted = () => {
     });
   };
 
-  const handleOpenWorkspaceItem = async (ws: { id: string; name: string; path?: string }) => {
-    if (ws.path) {
-      try {
-        await api.openWorkspace(ws.path);
-      } catch (err) {
-        console.warn('Failed opening workspace path:', err);
-      }
-    }
+  const handleOpenWorkspaceItem = (ws: { id: string; name: string; path?: string }) => {
     setActiveWorkspace(ws.id);
     openTab({ type: 'workspace', title: ws.name, workspaceId: ws.id });
+    if (ws.path) {
+      api.openWorkspace(ws.path).catch((err) => {
+        console.warn('Failed opening workspace path:', err);
+      });
+    }
   };
 
   const handleExportWorkspace = async (ws: { id: string; name: string; path?: string }) => {
@@ -253,6 +251,7 @@ const GetStarted = () => {
                         cursor: 'pointer',
                         position: 'relative',
                         borderLeft: ws.isPinned ? '3px solid var(--color-accent)' : undefined,
+                        paddingRight: '68px',
                       }}
                       onClick={() => handleOpenWorkspaceItem(ws)}
                       onContextMenu={(e) => {
@@ -326,36 +325,48 @@ const GetStarted = () => {
                         ]);
                       }}
                     >
-                      <div className="project-card__content" style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
-                        <div className="project-card__info" style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
+                      <div
+                        className={`project-card__hover-actions ${ws.isPinned ? 'has-active' : ''}`}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {!ws.isPinned && (
                           <button
                             type="button"
+                            className="project-card-action-btn"
+                            title="Archive workspace"
                             onClick={(e) => {
                               e.stopPropagation();
-                              togglePinWorkspace(ws.id);
+                              useStore.getState().archiveWorkspace(ws.id);
                             }}
-                            title={ws.isPinned ? 'Unpin workspace' : 'Pin workspace to top'}
+                          >
+                            <span className="material-symbols-outlined">inventory_2</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className={`project-card-action-btn ${ws.isPinned ? 'active' : ''}`}
+                          title={ws.isPinned ? 'Unpin workspace' : 'Pin workspace to top'}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            togglePinWorkspace(ws.id);
+                          }}
+                        >
+                          <span className="material-symbols-outlined">push_pin</span>
+                        </button>
+                      </div>
+
+                      <div className="project-card__content" style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+                        <div className="project-card__info" style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
+                          <span
+                            className="material-symbols-outlined"
                             style={{
-                              background: 'none',
-                              border: 'none',
-                              padding: 0,
-                              cursor: 'pointer',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
+                              fontSize: '20px',
+                              color: ws.isPinned ? 'var(--color-accent)' : undefined,
                               flexShrink: 0,
                             }}
                           >
-                            <span
-                              className="material-symbols-outlined"
-                              style={{
-                                fontSize: '20px',
-                                color: ws.isPinned ? 'var(--color-accent)' : undefined,
-                              }}
-                            >
-                              {ws.isPinned ? 'push_pin' : 'folder'}
-                            </span>
-                          </button>
+                            folder
+                          </span>
                           <div style={{ minWidth: 0, flex: 1 }}>
                             <h3 className="project-card__title">
                               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>{ws.name}</span>
