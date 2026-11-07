@@ -3066,6 +3066,149 @@ const ModelEditor = () => {
                     )}
                   </div>
                 ))}
+
+                <div className="tb-divider" style={{width: '100%', height: '1px', margin: '6px 0 8px', opacity: 0.2, background: 'var(--color-border-subtle, #cbd5e1)'}} />
+
+                <div>
+                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px'}}>
+                    <span style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)'}}>
+                      Thickness
+                    </span>
+                    <span style={{fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--color-text-primary)'}}>
+                      {edgeStrokeWidth}px
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                    <div
+                      style={{
+                        flex: 1,
+                        background: 'var(--color-bg-base)',
+                        borderRadius: '6px',
+                        border: '1px solid var(--color-border-subtle, #cbd5e1)',
+                        padding: '2px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between'
+                      }}
+                    >
+                      <button
+                        type="button"
+                        title="Decrease thickness (−0.5px)"
+                        style={{
+                          width: '26px',
+                          height: '24px',
+                          border: 'none',
+                          background: 'transparent',
+                          cursor: 'pointer',
+                          borderRadius: '4px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '16px',
+                          fontWeight: 600,
+                          color: 'var(--color-text-secondary)',
+                          userSelect: 'none'
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const next = Math.max(0.5, Math.round((edgeStrokeWidth - 0.5) * 10) / 10);
+                          setEdgeStrokeWidth(next);
+                          document.dispatchEvent(new CustomEvent('edge-stroke-width-change', { detail: { width: next } }));
+                        }}
+                      >
+                        −
+                      </button>
+
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1 }}>
+                        <input
+                          type="number"
+                          step="0.5"
+                          min="0.5"
+                          max="20"
+                          value={edgeStrokeWidth}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value);
+                            if (!isNaN(val) && val > 0) {
+                              const clamped = Math.max(0.5, Math.min(20, Math.round(val * 10) / 10));
+                              setEdgeStrokeWidth(clamped);
+                              document.dispatchEvent(new CustomEvent('edge-stroke-width-change', { detail: { width: clamped } }));
+                            }
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{
+                            width: '40px',
+                            textAlign: 'center',
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            border: 'none',
+                            background: 'transparent',
+                            color: 'var(--color-text-primary)',
+                            outline: 'none',
+                            padding: 0
+                          }}
+                        />
+                        <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginLeft: '-2px' }}>px</span>
+                      </div>
+
+                      <button
+                        type="button"
+                        title="Increase thickness (+0.5px)"
+                        style={{
+                          width: '26px',
+                          height: '24px',
+                          border: 'none',
+                          background: 'transparent',
+                          cursor: 'pointer',
+                          borderRadius: '4px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '16px',
+                          fontWeight: 600,
+                          color: 'var(--color-text-secondary)',
+                          userSelect: 'none'
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const next = Math.min(20, Math.round((edgeStrokeWidth + 0.5) * 10) / 10);
+                          setEdgeStrokeWidth(next);
+                          document.dispatchEvent(new CustomEvent('edge-stroke-width-change', { detail: { width: next } }));
+                        }}
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{display: 'flex', gap: '4px', alignItems: 'center'}}>
+                    {[1, 1.5, 2, 3, 4].map((w) => (
+                      <button
+                        key={w}
+                        type="button"
+                        style={{
+                          flex: 1,
+                          height: '22px',
+                          border: edgeStrokeWidth === w ? '1px solid var(--color-accent)' : '1px solid var(--color-border-subtle, #cbd5e1)',
+                          background: edgeStrokeWidth === w ? 'var(--color-accent-subtle)' : 'var(--color-bg-base)',
+                          color: edgeStrokeWidth === w ? 'var(--color-accent)' : 'var(--color-text-primary)',
+                          borderRadius: '4px',
+                          fontSize: '10px',
+                          fontWeight: edgeStrokeWidth === w ? 600 : 400,
+                          cursor: 'pointer',
+                          padding: 0
+                        }}
+                        onClick={() => {
+                          setEdgeStrokeWidth(w);
+                          document.dispatchEvent(new CustomEvent('edge-stroke-width-change', { detail: { width: w } }));
+                        }}
+                      >
+                        {w}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -3177,7 +3320,7 @@ const ModelEditor = () => {
               <button
                 className={`tb-dropdown-btn ${openDropdown === 'arrow-color' ? 'active' : ''}`}
                 type="button"
-                title="Arrow Color"
+                title="Arrow Color & Thickness"
                 id="btn-arrow-color"
                 onClick={(e) => { e.stopPropagation(); setOpenDropdown(prev => prev === 'arrow-color' ? null : 'arrow-color'); }}
               >
@@ -3189,7 +3332,7 @@ const ModelEditor = () => {
                 className={`tb-dropdown-menu ${openDropdown === 'arrow-color' ? 'show' : ''}`}
                 id="menu-arrow-color"
                 style={{
-                  width: '202px',
+                  width: '210px',
                   boxSizing: 'border-box',
                   padding: '10px 12px',
                   borderRadius: '8px',
@@ -3201,9 +3344,118 @@ const ModelEditor = () => {
                 }}
               >
                 <div style={{marginBottom: '10px'}}>
-                  <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '6px'}}>
-                    Line Weight
+                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px'}}>
+                    <span style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)'}}>
+                      Thickness
+                    </span>
+                    <span style={{fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--color-text-primary)'}}>
+                      {edgeStrokeWidth}px
+                    </span>
                   </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                    <div
+                      style={{
+                        flex: 1,
+                        background: 'var(--color-bg-base)',
+                        borderRadius: '6px',
+                        border: '1px solid var(--color-border-subtle, #cbd5e1)',
+                        padding: '2px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between'
+                      }}
+                    >
+                      <button
+                        type="button"
+                        title="Decrease thickness (−0.5px)"
+                        style={{
+                          width: '26px',
+                          height: '24px',
+                          border: 'none',
+                          background: 'transparent',
+                          cursor: 'pointer',
+                          borderRadius: '4px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '16px',
+                          fontWeight: 600,
+                          color: 'var(--color-text-secondary)',
+                          userSelect: 'none'
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const next = Math.max(0.5, Math.round((edgeStrokeWidth - 0.5) * 10) / 10);
+                          setEdgeStrokeWidth(next);
+                          document.dispatchEvent(new CustomEvent('edge-stroke-width-change', { detail: { width: next } }));
+                        }}
+                      >
+                        −
+                      </button>
+
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1 }}>
+                        <input
+                          type="number"
+                          step="0.5"
+                          min="0.5"
+                          max="20"
+                          value={edgeStrokeWidth}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value);
+                            if (!isNaN(val) && val > 0) {
+                              const clamped = Math.max(0.5, Math.min(20, Math.round(val * 10) / 10));
+                              setEdgeStrokeWidth(clamped);
+                              document.dispatchEvent(new CustomEvent('edge-stroke-width-change', { detail: { width: clamped } }));
+                            }
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{
+                            width: '40px',
+                            textAlign: 'center',
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            border: 'none',
+                            background: 'transparent',
+                            color: 'var(--color-text-primary)',
+                            outline: 'none',
+                            padding: 0
+                          }}
+                        />
+                        <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginLeft: '-2px' }}>px</span>
+                      </div>
+
+                      <button
+                        type="button"
+                        title="Increase thickness (+0.5px)"
+                        style={{
+                          width: '26px',
+                          height: '24px',
+                          border: 'none',
+                          background: 'transparent',
+                          cursor: 'pointer',
+                          borderRadius: '4px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '16px',
+                          fontWeight: 600,
+                          color: 'var(--color-text-secondary)',
+                          userSelect: 'none'
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const next = Math.min(20, Math.round((edgeStrokeWidth + 0.5) * 10) / 10);
+                          setEdgeStrokeWidth(next);
+                          document.dispatchEvent(new CustomEvent('edge-stroke-width-change', { detail: { width: next } }));
+                        }}
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+
                   <div style={{display: 'flex', gap: '4px', alignItems: 'center'}}>
                     {[1, 1.5, 2, 3, 4].map((w) => (
                       <button
@@ -3211,12 +3463,12 @@ const ModelEditor = () => {
                         type="button"
                         style={{
                           flex: 1,
-                          height: '24px',
+                          height: '22px',
                           border: edgeStrokeWidth === w ? '1px solid var(--color-accent)' : '1px solid var(--color-border-subtle, #cbd5e1)',
                           background: edgeStrokeWidth === w ? 'var(--color-accent-subtle)' : 'var(--color-bg-base)',
                           color: edgeStrokeWidth === w ? 'var(--color-accent)' : 'var(--color-text-primary)',
                           borderRadius: '4px',
-                          fontSize: '11px',
+                          fontSize: '10px',
                           fontWeight: edgeStrokeWidth === w ? 600 : 400,
                           cursor: 'pointer',
                           padding: 0
@@ -3226,7 +3478,7 @@ const ModelEditor = () => {
                           document.dispatchEvent(new CustomEvent('edge-stroke-width-change', { detail: { width: w } }));
                         }}
                       >
-                        {w}px
+                        {w}
                       </button>
                     ))}
                   </div>
