@@ -286,7 +286,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ activeNav }) => {
                       )}
                     </span>
                     {!isSidebarCollapsed && (
-                      <span className="sidebar-ws-actions" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginLeft: 'auto', flexShrink: 0 }}>
+                      <span className="sidebar-ws-actions" style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', marginLeft: 'auto', flexShrink: 0 }}>
                         <button
                           type="button"
                           className="sidebar-ws-pin-btn"

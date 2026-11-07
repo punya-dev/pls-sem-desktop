@@ -908,7 +908,7 @@ const Dashboard = () => {
                             </>
                           ) : (
                             <>
-                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
                                 <button
                                   type="button"
                                   className="study-pin-btn"
