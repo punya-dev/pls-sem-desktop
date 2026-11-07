@@ -154,6 +154,61 @@ class TestSmartPLSImporter(unittest.TestCase):
         finally:
             shutil.rmtree(temp_spls_ws, ignore_errors=True)
 
+    def test_formative_indicators_in_extended_model(self):
+        model_file = os.path.join(self.sample_dir, "2 Extended model.splsm")
+        with open(model_file, "r") as f:
+            encrypted = f.read()
+
+        raw_json = decrypt_smartpls_content(encrypted)
+        model_data = json.loads(raw_json)
+        spec, layout = convert_smartpls_model(model_data)
+
+        # 8 constructs in 2 Extended model
+        self.assertEqual(len(spec["constructs"]), 8)
+
+        construct_map = {c["name"]: c for c in spec["constructs"]}
+        # Formative constructs
+        self.assertIn("ATTR", construct_map)
+        self.assertEqual(construct_map["ATTR"]["type"], "formative")
+        self.assertEqual(construct_map["ATTR"]["outer_mode"], "B")
+        self.assertEqual(len(construct_map["ATTR"]["indicators"]), 3)
+
+        self.assertIn("QUAL", construct_map)
+        self.assertEqual(construct_map["QUAL"]["type"], "formative")
+        self.assertEqual(construct_map["QUAL"]["outer_mode"], "B")
+        self.assertEqual(len(construct_map["QUAL"]["indicators"]), 8)
+
+        self.assertIn("PERF", construct_map)
+        self.assertEqual(construct_map["PERF"]["type"], "formative")
+        self.assertEqual(construct_map["PERF"]["outer_mode"], "B")
+        self.assertEqual(len(construct_map["PERF"]["indicators"]), 5)
+
+        self.assertIn("CSOR", construct_map)
+        self.assertEqual(construct_map["CSOR"]["type"], "formative")
+        self.assertEqual(construct_map["CSOR"]["outer_mode"], "B")
+        self.assertEqual(len(construct_map["CSOR"]["indicators"]), 5)
+
+        # Reflective constructs
+        self.assertEqual(construct_map["COMP"]["type"], "reflective")
+        self.assertEqual(construct_map["COMP"]["outer_mode"], "A")
+        self.assertEqual(len(construct_map["COMP"]["indicators"]), 3)
+
+        # Verify all manifest nodes in layout have parentId assigned (no orphaned floating indicators)
+        manifest_nodes = [n for n in layout["nodes"] if n.get("isLatent") is False and not n.get("isCopula")]
+        for mn in manifest_nodes:
+            self.assertIsNotNone(mn.get("parentId"), f"Manifest node {mn.get('id')} ({mn.get('label')}) has no parentId")
+        self.assertEqual(len(manifest_nodes), 31)
+
+        # Run PLS algorithm on Complete data with this model spec
+        data_file = os.path.join(self.sample_dir, "Complete data.txt")
+        df, _ = parse_smartpls_dataset(data_file)
+        algo = PLSAlgorithm()
+        fit_res = algo.fit(df, spec)
+        self.assertTrue(fit_res["converged"])
+        cusl_id = construct_map["CUSL"]["id"]
+        self.assertIn(cusl_id, fit_res["r2"])
+        self.assertAlmostEqual(fit_res["r2"][cusl_id], 0.562, places=2)
+
     def test_import_smartpls_workspace(self):
         temp_spls_ws = tempfile.mkdtemp(prefix="spls_ws_import_test_")
         try:

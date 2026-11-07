@@ -199,6 +199,7 @@ const ModelEditor = () => {
 
   const [isImporting, setIsImporting] = useState(false);
   const [isBootstrapModalOpen, setIsBootstrapModalOpen] = useState(false);
+  const [isConsistentBootstrap, setIsConsistentBootstrap] = useState(false);
   const [isAnalysisModalOpen, setIsAnalysisModalOpen] = useState(false);
   const [analysisModalType, setAnalysisModalType] = useState<string>('blindfolding');
   const [analysisResultsMap, setAnalysisResultsMap] = useState<Record<string, any>>({});
@@ -2072,9 +2073,9 @@ const ModelEditor = () => {
           <span className="material-symbols-outlined" style={{ fontSize: 16, marginLeft: -1 }}>expand_more</span>
         </button>
         {isCalcMenuOpen && (
-          <div className="subheader__dropdown-menu" style={{ minWidth: 280, maxHeight: '82vh', overflowY: 'auto', padding: '6px' }}>
-            <div style={{ padding: '6px 10px 2px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--color-text-muted)', letterSpacing: '0.5px' }}>
-              PLS-SEM Algorithms
+          <div className="subheader__dropdown-menu" style={{ minWidth: 310, maxHeight: '82vh', overflowY: 'auto', padding: '6px' }}>
+            <div style={{ padding: '6px 10px 4px', fontSize: 12, fontWeight: 600, color: 'var(--color-text-muted)' }}>
+              Standard algorithms
             </div>
             <button
               type="button"
@@ -2084,66 +2085,20 @@ const ModelEditor = () => {
                 handleCalculate();
               }}
             >
-              PLS-SEM Algorithm
+              <span className="material-symbols-outlined" style={{ fontSize: 16, marginRight: 10, opacity: 0.85, flexShrink: 0 }}>settings</span>
+              <span>PLS-SEM algorithm</span>
             </button>
             <button
               type="button"
               className="subheader__dropdown-item"
               onClick={() => {
                 setIsCalcMenuOpen(false);
-                setAnalysisModalType('consistent_pls');
-                setIsAnalysisModalOpen(true);
-              }}
-            >
-              Consistent PLS-SEM (PLSc)...
-            </button>
-            <button
-              type="button"
-              className="subheader__dropdown-item"
-              onClick={() => {
-                setIsCalcMenuOpen(false);
+                setIsConsistentBootstrap(false);
                 setIsBootstrapModalOpen(true);
               }}
             >
-              Bootstrapping...
-            </button>
-
-            <div style={{ height: 1, background: 'var(--color-border-subtle)', margin: '4px 0' }} />
-            <div style={{ padding: '6px 10px 2px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--color-text-muted)', letterSpacing: '0.5px' }}>
-              Prediction &amp; Model Fit
-            </div>
-            <button
-              type="button"
-              className="subheader__dropdown-item"
-              onClick={() => {
-                setIsCalcMenuOpen(false);
-                setActiveResultTab('model_fit');
-                switchView('results');
-              }}
-            >
-              Model Fit (SRMR &amp; Exact Fit)
-            </button>
-            <button
-              type="button"
-              className="subheader__dropdown-item"
-              onClick={() => {
-                setIsCalcMenuOpen(false);
-                setAnalysisModalType('blindfolding');
-                setIsAnalysisModalOpen(true);
-              }}
-            >
-              Blindfolding (Q² &amp; q²)...
-            </button>
-            <button
-              type="button"
-              className="subheader__dropdown-item"
-              onClick={() => {
-                setIsCalcMenuOpen(false);
-                setAnalysisModalType('predict');
-                setIsAnalysisModalOpen(true);
-              }}
-            >
-              PLSpredict (Out-of-sample)...
+              <span className="material-symbols-outlined" style={{ fontSize: 16, marginRight: 10, opacity: 0.85, flexShrink: 0 }}>settings</span>
+              <span>Bootstrapping</span>
             </button>
             <button
               type="button"
@@ -2154,94 +2109,32 @@ const ModelEditor = () => {
                 setIsAnalysisModalOpen(true);
               }}
             >
-              Confirmatory Tetrads (CTA-PLS)...
-            </button>
-
-            <div style={{ height: 1, background: 'var(--color-border-subtle)', margin: '4px 0' }} />
-            <div style={{ padding: '6px 10px 2px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--color-text-muted)', letterSpacing: '0.5px' }}>
-              Advanced Relationships
-            </div>
-            <button
-              type="button"
-              className="subheader__dropdown-item"
-              onClick={() => {
-                setIsCalcMenuOpen(false);
-                setAnalysisModalType('mediation');
-                setIsAnalysisModalOpen(true);
-              }}
-            >
-              Mediation Analysis...
+              <span className="material-symbols-outlined" style={{ fontSize: 16, marginRight: 10, opacity: 0.85, flexShrink: 0 }}>settings</span>
+              <span>Confirmatory tetrad analyses (CTA)</span>
             </button>
             <button
               type="button"
               className="subheader__dropdown-item"
               onClick={() => {
                 setIsCalcMenuOpen(false);
-                setAnalysisModalType('moderation');
+                setAnalysisModalType('ipma');
                 setIsAnalysisModalOpen(true);
               }}
             >
-              Moderation &amp; Simple Slopes...
+              <span className="material-symbols-outlined" style={{ fontSize: 16, marginRight: 10, opacity: 0.85, flexShrink: 0 }}>settings</span>
+              <span>Importance-performance map analysis (IPMA)</span>
             </button>
             <button
               type="button"
               className="subheader__dropdown-item"
               onClick={() => {
                 setIsCalcMenuOpen(false);
-                setAnalysisModalType('quadratic');
+                setAnalysisModalType('predict');
                 setIsAnalysisModalOpen(true);
               }}
             >
-              Non-linear / Quadratic Effects...
-            </button>
-            <button
-              type="button"
-              className="subheader__dropdown-item"
-              onClick={() => {
-                setIsCalcMenuOpen(false);
-                setAnalysisModalType('hcm');
-                setIsAnalysisModalOpen(true);
-              }}
-            >
-              Higher-Order Constructs (HCM)...
-            </button>
-
-            <div style={{ height: 1, background: 'var(--color-border-subtle)', margin: '4px 0' }} />
-            <div style={{ padding: '6px 10px 2px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--color-text-muted)', letterSpacing: '0.5px' }}>
-              Groups &amp; Segmentation
-            </div>
-            <button
-              type="button"
-              className="subheader__dropdown-item"
-              onClick={() => {
-                setIsCalcMenuOpen(false);
-                setAnalysisModalType('micom');
-                setIsAnalysisModalOpen(true);
-              }}
-            >
-              Measurement Invariance (MICOM)...
-            </button>
-            <button
-              type="button"
-              className="subheader__dropdown-item"
-              onClick={() => {
-                setIsCalcMenuOpen(false);
-                setAnalysisModalType('mga');
-                setIsAnalysisModalOpen(true);
-              }}
-            >
-              Multigroup Analysis (MGA)...
-            </button>
-            <button
-              type="button"
-              className="subheader__dropdown-item"
-              onClick={() => {
-                setIsCalcMenuOpen(false);
-                setAnalysisModalType('otg');
-                setIsAnalysisModalOpen(true);
-              }}
-            >
-              Omnibus Group Differences (OTG)...
+              <span className="material-symbols-outlined" style={{ fontSize: 16, marginRight: 10, opacity: 0.85, flexShrink: 0 }}>settings</span>
+              <span>PLSpredict / CVPAT</span>
             </button>
             <button
               type="button"
@@ -2252,7 +2145,8 @@ const ModelEditor = () => {
                 setIsAnalysisModalOpen(true);
               }}
             >
-              Finite Mixture (FIMIX-PLS)...
+              <span className="material-symbols-outlined" style={{ fontSize: 16, marginRight: 10, opacity: 0.85, flexShrink: 0 }}>pie_chart</span>
+              <span>Finite mixture (FIMIX) segmentation</span>
             </button>
             <button
               type="button"
@@ -2263,112 +2157,53 @@ const ModelEditor = () => {
                 setIsAnalysisModalOpen(true);
               }}
             >
-              Prediction-Oriented Segmentation (POS)...
+              <span className="material-symbols-outlined" style={{ fontSize: 16, marginRight: 10, opacity: 0.85, flexShrink: 0 }}>pie_chart</span>
+              <span>Prediction-oriented segmentation (POS)</span>
             </button>
             <button
               type="button"
               className="subheader__dropdown-item"
               onClick={() => {
                 setIsCalcMenuOpen(false);
-                setAnalysisModalType('ex_post');
+                setAnalysisModalType('mga');
                 setIsAnalysisModalOpen(true);
               }}
             >
-              Ex Post Segmentation...
+              <span className="material-symbols-outlined" style={{ fontSize: 16, marginRight: 10, opacity: 0.85, flexShrink: 0 }}>pie_chart</span>
+              <span>Bootstrap multigroup analysis (MGA)</span>
             </button>
 
-            <div style={{ height: 1, background: 'var(--color-border-subtle)', margin: '4px 0' }} />
-            <div style={{ padding: '6px 10px 2px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--color-text-muted)', letterSpacing: '0.5px' }}>
-              Diagnostics &amp; Reporting
+            <div style={{ height: 1, background: 'var(--color-border-subtle)', margin: '6px 0' }} />
+            <div style={{ padding: '6px 10px 4px', fontSize: 12, fontWeight: 600, color: 'var(--color-text-muted)' }}>
+              Consistent algorithms
             </div>
             <button
               type="button"
               className="subheader__dropdown-item"
               onClick={() => {
                 setIsCalcMenuOpen(false);
-                setAnalysisModalType('ipma');
+                setAnalysisModalType('consistent_pls');
                 setIsAnalysisModalOpen(true);
               }}
             >
-              Importance-Performance Map (IPMA)...
+              <span className="material-symbols-outlined" style={{ fontSize: 16, marginRight: 10, opacity: 0.85, flexShrink: 0 }}>settings</span>
+              <span>Consistent PLS-SEM algorithm</span>
             </button>
             <button
               type="button"
               className="subheader__dropdown-item"
               onClick={() => {
                 setIsCalcMenuOpen(false);
-                setAnalysisModalType('power');
-                setIsAnalysisModalOpen(true);
+                setIsConsistentBootstrap(true);
+                setIsBootstrapModalOpen(true);
               }}
             >
-              Sample Size &amp; Power Calculator...
-            </button>
-            <button
-              type="button"
-              className="subheader__dropdown-item"
-              onClick={() => {
-                setIsCalcMenuOpen(false);
-                setAnalysisModalType('copula');
-                setIsAnalysisModalOpen(true);
-              }}
-            >
-              Gaussian Copula Endogeneity...
-            </button>
-            <button
-              type="button"
-              className="subheader__dropdown-item"
-              onClick={() => {
-                setIsCalcMenuOpen(false);
-                setAnalysisModalType('nca');
-                setIsAnalysisModalOpen(true);
-              }}
-            >
-              Necessary Condition Analysis (NCA)...
-            </button>
-            <button
-              type="button"
-              className="subheader__dropdown-item"
-              onClick={() => {
-                setIsCalcMenuOpen(false);
-                setAnalysisModalType('report');
-                setIsAnalysisModalOpen(true);
-              }}
-            >
-              Executive Report (PDF / APA)...
-            </button>
-            <div style={{ height: 1, background: 'var(--color-border-subtle)', margin: '4px 0' }} />
-            <div style={{ padding: '6px 10px 2px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--color-text-muted)', letterSpacing: '0.5px' }}>
-              Validation Tools
-            </div>
-            <button
-              type="button"
-              className="subheader__dropdown-item"
-              onClick={() => {
-                setIsCalcMenuOpen(false);
-                setWizardTargetConstructId(null);
-                setIsRedundancyWizardOpen(true);
-              }}
-            >
-              Create redundancy analysis...
+              <span className="material-symbols-outlined" style={{ fontSize: 16, marginRight: 10, opacity: 0.85, flexShrink: 0 }}>settings</span>
+              <span>Consistent PLS-SEM bootstrapping</span>
             </button>
           </div>
         )}
       </div>
-
-      {/* Tools Button */}
-      <button
-        className="subheader__btn"
-        type="button"
-        onClick={() => {
-          setWizardTargetConstructId(null);
-          setIsRedundancyWizardOpen(true);
-        }}
-        title="Redundancy analysis wizard for formative constructs"
-        style={{ gap: 4 }}
-      >
-        <span className="material-symbols-outlined" style={{ fontSize: 16 }}>analytics</span>
-        <span>Tools</span>
-      </button>
     </div>
   </div>
   {/* ═══ APP BODY ═══ */}
@@ -5403,6 +5238,7 @@ const ModelEditor = () => {
 
   <BootstrapModal
     isOpen={isBootstrapModalOpen}
+    isConsistent={isConsistentBootstrap}
     projectPath={activeStudy?.path || ''}
     spec={exportModelSpec()}
     modelId={effectiveModelId || undefined}

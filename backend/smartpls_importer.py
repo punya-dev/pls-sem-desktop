@@ -111,10 +111,28 @@ def convert_smartpls_model(splsm_dict: Dict[str, Any]) -> Tuple[Dict[str, Any], 
     edges = []
 
     # Map manifest variable ID to parent latent ID via connections
+    # In SmartPLS:
+    # - For reflective constructs: sourceId is LATENT_VARIABLE, targetId is STANDARD_MANIFEST_VARIABLE
+    # - For formative constructs: sourceId is STANDARD_MANIFEST_VARIABLE, targetId is LATENT_VARIABLE
+    latent_ids = {n.get("id") for n in splsm_dict.get("nodes", []) if n.get("modelType") == "LATENT_VARIABLE"}
+    manifest_ids = {n.get("id") for n in splsm_dict.get("nodes", []) if n.get("modelType") != "LATENT_VARIABLE" and n.get("modelType") != "POSTIT"}
+
     ind_to_parent: Dict[str, str] = {}
     for conn in splsm_dict.get("connections", []):
-        if conn.get("modelType") == "CONNECTION_BETWEEN_LV_AND_MV":
-            ind_to_parent[conn.get("targetId")] = conn.get("sourceId")
+        ctype = conn.get("modelType")
+        if ctype == "CONNECTION_BETWEEN_LV_AND_MV" or (conn.get("sourceId") in manifest_ids and conn.get("targetId") in latent_ids) or (conn.get("sourceId") in latent_ids and conn.get("targetId") in manifest_ids):
+            sid = conn.get("sourceId")
+            tid = conn.get("targetId")
+            if sid in latent_ids:
+                ind_to_parent[tid] = sid
+            elif tid in latent_ids:
+                ind_to_parent[sid] = tid
+            elif sid in manifest_ids:
+                ind_to_parent[sid] = tid
+            elif tid in manifest_ids:
+                ind_to_parent[tid] = sid
+            else:
+                ind_to_parent[tid] = sid
 
     # 1. Convert Nodes
     for n in splsm_dict.get("nodes", []):
@@ -136,6 +154,7 @@ def convert_smartpls_model(splsm_dict: Dict[str, Any]) -> Tuple[Dict[str, Any], 
                 "y": round(cy, 1),
                 "isLatent": True,
                 "type": meas_type,
+                "outer_mode": "B" if meas_type == "formative" else "A",
             })
         elif mtype == "STANDARD_MANIFEST_VARIABLE":
             parent_id = ind_to_parent.get(nid)
@@ -227,10 +246,12 @@ def convert_smartpls_model(splsm_dict: Dict[str, Any]) -> Tuple[Dict[str, Any], 
     for ln in latent_nodes:
         lid = ln["id"]
         c_inds = [m["id"] for m in manifest_nodes if m.get("parentId") == lid]
+        is_formative = ln.get("type") == "formative"
         constructs.append({
             "id": lid,
             "name": ln["label"],
             "type": ln.get("type", "reflective"),
+            "outer_mode": "B" if is_formative else "A",
             "indicators": c_inds,
         })
 

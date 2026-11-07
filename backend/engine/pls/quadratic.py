@@ -207,7 +207,7 @@ def compute_quadratic_diagnostics(
     # Effect plot points across observed range (or [-3, +3])
     x_plot_min = max(min_x, -3.0)
     x_plot_max = min(max_x, 3.0)
-    x_grid = np.linspace(x_plot_min, x_plot_max, 51)
+    x_grid = np.linspace(x_plot_min, x_plot_max, 21)
     curve_points = []
     for x in x_grid:
         y_q = float(b1_linear * x + b2_quad_unstd * (x ** 2 - mean_sq))
@@ -244,20 +244,38 @@ def compute_quadratic_diagnostics(
             f"Direction and strength of the effect vary depending on the level of the predictor."
         )
 
+    r2_lin = f2_info.get("r2_excluded") if f2_info else None
+    r2_quad = f2_info.get("r2_included") if f2_info else None
+    table_012 = [
+        {"source_level": lv, "marginal_effect": round(float(b1_linear + 2.0 * b2_quad_unstd * lv), 4)}
+        for lv in [0.0, 1.0, 2.0]
+    ]
+
     return {
         "linear_effect": round(float(b1_linear), 4),
         "quadratic_effect": round(float(b2_quad_unstd), 4),
         "quadratic_effect_std": round(float(b2_quad_std), 4),
+        "linear_path": round(float(b1_linear), 4),
+        "quadratic_path": round(float(b2_quad_unstd), 4),
         "scale": round(float(scale), 4),
         "mean_sq": round(float(mean_sq), 4),
         "turning_point": round(float(turning_point), 4) if turning_point is not None else None,
         "turning_point_in_range": turning_in_range,
         "shape": shape,
+        "shape_classification": shape,
         "interpretation": interpretation,
+        "decision_recommendation": (
+            "The quadratic effect is not statistically significant; retain the simpler linear model."
+            if not is_sig
+            else "The quadratic effect is statistically significant; retain the quadratic model."
+        ),
         "marginal_effects": marginal_effects,
+        "effect_table_0_1_2": table_012,
         "curve_points": curve_points,
         "f_squared": f2_info.get("f_squared") if f2_info else None,
         "f_squared_rating": f2_info.get("rating") if f2_info else None,
+        "r_squared_linear": r2_lin,
+        "r_squared_quadratic": r2_quad,
         "p_value": round(float(p_value), 4) if p_value is not None else None,
         "ci_lower": round(float(ci_lower), 4) if ci_lower is not None else None,
         "ci_upper": round(float(ci_upper), 4) if ci_upper is not None else None,
@@ -316,19 +334,23 @@ def attach_bootstrap_to_quadratic(
             b2 = item.get("quadratic_effect", 0.0)
             if not is_sig:
                 item["shape"] = "Linear (no significant curvature)"
+                item["shape_classification"] = "Linear (no significant curvature)"
                 item["interpretation"] = (
                     "The quadratic term is not statistically significant. "
                     "A linear relationship is supported; the nonlinear term can be disregarded."
                 )
+                item["decision_recommendation"] = "The quadratic effect is not statistically significant; retain the simpler linear model."
             else:
                 shape = "Inverted U-shape (diminishing returns)" if b2 < 0 else "U-shape (accelerating returns)"
                 item["shape"] = shape
+                item["shape_classification"] = shape
                 tp = item.get("turning_point")
                 in_rng = item.get("turning_point_in_range", False)
                 tp_text = f"The turning point x* = {round(tp, 3)} SD lies within the observed range." if (tp is not None and in_rng) else "The turning point lies outside the observed range; the relationship is monotonic within the data."
                 item["interpretation"] = (
                     f"A significant quadratic effect ({shape}) is observed (p = {item['p_value']}). {tp_text}"
                 )
+                item["decision_recommendation"] = "The quadratic effect is statistically significant; retain the quadratic model."
 
 
 def analyze_quadratic_effect(

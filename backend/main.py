@@ -1846,6 +1846,7 @@ def run_project_pls(req: RunPlsRequest):
             tol=req.tol,
             missing_treatment=req.missing_treatment or "mean",
             missing_values=req.missing_values,
+            settings=req.settings,
         )
         res = algo.fit(df, spec)
         if req.bootstrap:
