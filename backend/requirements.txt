@@ -22,4 +22,5 @@ scipy
 cryptography
 reportlab
 matplotlib
+pyinstaller
 

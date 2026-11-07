@@ -64,12 +64,12 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ activeNav }) => {
   };
 
   const filteredWorkspaces = workspaces
-    .filter((ws) => ws.name.toLowerCase().includes(workspaceQuery.toLowerCase()))
+    .filter((ws) => (ws.name || '').toLowerCase().includes(workspaceQuery.toLowerCase()))
     .sort((a, b) => {
       if (Boolean(a.isPinned) !== Boolean(b.isPinned)) {
         return a.isPinned ? -1 : 1;
       }
-      return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+      return (a.name || '').localeCompare(b.name || '', undefined, { numeric: true, sensitivity: 'base' });
     });
 
   const commitWsRename = (wsId: string) => {
@@ -286,7 +286,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ activeNav }) => {
                       )}
                     </span>
                     {!isSidebarCollapsed && (
-                      <span className="sidebar-ws-actions" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginLeft: 'auto', flexShrink: 0 }}>
+                      <span className="sidebar-ws-actions" style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', marginLeft: 'auto', flexShrink: 0 }}>
                         <button
                           type="button"
                           className="sidebar-ws-pin-btn"

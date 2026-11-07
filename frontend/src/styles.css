@@ -1964,7 +1964,7 @@ body.is-tab-sliding * {
 .sidebar-ws-actions {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 1px;
   margin-left: auto;
   flex-shrink: 0;
 }
@@ -1973,8 +1973,8 @@ body.is-tab-sliding * {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 18px;
+  height: 18px;
   border: none;
   background: transparent !important;
   color: var(--color-text-muted) !important;
@@ -1983,7 +1983,7 @@ body.is-tab-sliding * {
   padding: 0;
   opacity: 0;
   pointer-events: none;
-  transition: opacity var(--transition-fast), color var(--transition-fast);
+  transition: opacity var(--transition-fast), color var(--transition-fast), background-color var(--transition-fast);
   flex-shrink: 0;
 }
 
@@ -2000,8 +2000,12 @@ body.is-tab-sliding * {
 }
 
 .sidebar-ws-pin-btn:hover {
-  background: transparent !important;
+  background: rgba(0, 0, 0, 0.06) !important;
   color: var(--color-accent) !important;
+}
+
+[data-theme="dark"] .sidebar-ws-pin-btn:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
 }
 
 .sidebar-ws-pin-btn .material-symbols-outlined {
@@ -2015,7 +2019,7 @@ body.is-tab-sliding * {
   right: 8px;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 1px;
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--transition-fast);
@@ -2032,19 +2036,24 @@ body.is-tab-sliding * {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 18px;
+  height: 18px;
   border: none;
+  border-radius: var(--radius-sm);
   background: transparent !important;
   color: var(--color-text-muted) !important;
   cursor: pointer;
   padding: 0;
-  transition: color var(--transition-fast);
+  transition: color var(--transition-fast), background-color var(--transition-fast);
 }
 
 .project-card-action-btn:hover {
-  background: transparent !important;
+  background: rgba(0, 0, 0, 0.06) !important;
   color: var(--color-accent) !important;
+}
+
+[data-theme="dark"] .project-card-action-btn:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
 }
 
 .project-card-action-btn.active {
@@ -2054,7 +2063,7 @@ body.is-tab-sliding * {
 }
 
 .project-card-action-btn .material-symbols-outlined {
-  font-size: 15px;
+  font-size: 14px;
   color: inherit !important;
 }
 
@@ -3531,8 +3540,8 @@ body.is-tab-sliding * {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 22px;
-      height: 22px;
+      width: 18px;
+      height: 18px;
       border: none;
       background: transparent !important;
       color: var(--color-text-muted) !important;
@@ -3541,7 +3550,7 @@ body.is-tab-sliding * {
       padding: 0;
       opacity: 0;
       pointer-events: none;
-      transition: opacity var(--transition-fast), color var(--transition-fast);
+      transition: opacity var(--transition-fast), color var(--transition-fast), background-color var(--transition-fast);
       flex-shrink: 0;
     }
     .study-row:hover .study-pin-btn,
@@ -3555,11 +3564,14 @@ body.is-tab-sliding * {
       opacity: 1;
     }
     .study-pin-btn:hover {
-      background: transparent !important;
+      background: rgba(0, 0, 0, 0.06) !important;
       color: var(--color-accent) !important;
     }
+    [data-theme="dark"] .study-pin-btn:hover {
+      background: rgba(255, 255, 255, 0.08) !important;
+    }
     .study-pin-btn .material-symbols-outlined {
-      font-size: 15px;
+      font-size: 13px;
       color: inherit !important;
     }
 

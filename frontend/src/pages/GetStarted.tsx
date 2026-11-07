@@ -22,7 +22,7 @@ const GetStarted = () => {
   } = useStore();
   const sortedWorkspaces = [...workspaces].sort((a, b) => {
     if (Boolean(a.isPinned) !== Boolean(b.isPinned)) return a.isPinned ? -1 : 1;
-    return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+    return (a.name || '').localeCompare(b.name || '', undefined, { numeric: true, sensitivity: 'base' });
   });
   const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = useState(false);
   const [isImportMenuOpen, setIsImportMenuOpen] = useState(false);
@@ -59,7 +59,26 @@ const GetStarted = () => {
     setActiveWorkspace(ws.id);
     openTab({ type: 'workspace', title: ws.name, workspaceId: ws.id });
     if (ws.path) {
-      api.openWorkspace(ws.path).catch((err) => {
+      api.openWorkspace(ws.path).then((res) => {
+        if (res?.workspace) {
+          const allProjects = [
+            ...(res.workspace.projects || []).map((p: any) => ({
+              name: p.name,
+              path: p.path,
+              fullPath: p.path.startsWith('/') ? p.path : `${ws.path}/${p.path}`,
+              isArchived: false,
+            })),
+            ...(res.workspace.archived_projects || []).map((p: any) => ({
+              name: p.name,
+              path: p.path,
+              fullPath: p.path.startsWith('/') ? p.path : `${ws.path}/${p.path}`,
+              isArchived: true,
+              archivedAt: p.archived_at,
+            })),
+          ];
+          useStore.getState().syncWorkspaceStudies(ws.id, allProjects);
+        }
+      }).catch((err) => {
         console.warn('Failed opening workspace path:', err);
       });
     }
@@ -107,55 +126,7 @@ const GetStarted = () => {
   };
 
   const handleOpenWorkspace = async () => {
-    try {
-      const { open } = await import('@tauri-apps/plugin-dialog');
-      const selected = await open({
-        directory: true,
-        multiple: false,
-        title: 'Open Workspace Folder'
-      });
-      if (selected && typeof selected === 'string') {
-        const res = await api.openWorkspace(selected);
-        if (res?.error) {
-          alert(res.error);
-          return;
-        }
-        const wsName = res?.workspace?.name || selected.replace(/[/\\]+$/, '').split(/[/\\]/).filter(Boolean).pop() || 'Workspace';
-        const existing = workspaces.find(w => w.path === selected);
-        const wsId = existing ? existing.id : selected;
-        if (!existing) {
-          addWorkspace({
-            id: wsId,
-            name: wsName,
-            path: selected
-          });
-        }
-        setActiveWorkspace(wsId);
-        openTab({ type: 'workspace', title: wsName, workspaceId: wsId });
-      }
-    } catch (err) {
-      console.warn('Tauri open dialog error:', err);
-      const fallback = window.prompt('Enter workspace directory path:');
-      if (fallback) {
-        const res = await api.openWorkspace(fallback);
-        if (res?.error) {
-          alert(res.error);
-          return;
-        }
-        const wsName = res?.workspace?.name || fallback.replace(/[/\\]+$/, '').split(/[/\\]/).filter(Boolean).pop() || 'Workspace';
-        const existing = workspaces.find(w => w.path === fallback);
-        const wsId = existing ? existing.id : fallback;
-        if (!existing) {
-          addWorkspace({
-            id: wsId,
-            name: wsName,
-            path: fallback
-          });
-        }
-        setActiveWorkspace(wsId);
-        openTab({ type: 'workspace', title: wsName, workspaceId: wsId });
-      }
-    }
+    await promptOpenWorkspaceFolder('folder');
   };
 
   return (

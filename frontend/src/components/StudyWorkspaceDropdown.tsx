@@ -101,7 +101,7 @@ export const StudyWorkspaceDropdown: React.FC<StudyWorkspaceDropdownProps> = ({
     const query = searchQuery.toLowerCase().trim();
     const result = query
       ? list.filter((w) =>
-          w.name.toLowerCase().includes(query) || (w.path && w.path.toLowerCase().includes(query))
+          (w.name || '').toLowerCase().includes(query) || (w.path && w.path.toLowerCase().includes(query))
         )
       : list;
 
@@ -109,7 +109,7 @@ export const StudyWorkspaceDropdown: React.FC<StudyWorkspaceDropdownProps> = ({
       const aPinned = Boolean(a.isPinned);
       const bPinned = Boolean(b.isPinned);
       if (aPinned !== bPinned) return aPinned ? -1 : 1;
-      return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+      return (a.name || '').localeCompare(b.name || '', undefined, { numeric: true, sensitivity: 'base' });
     });
   }, [allWorkspaces, study, mode, searchQuery, workspaces]);
 

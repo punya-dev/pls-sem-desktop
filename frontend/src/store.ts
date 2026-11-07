@@ -1060,7 +1060,7 @@ export const useStore = create<AppState>()(
           seenKeys.add(key);
 
           const existing = currentStudies.find(
-            s => s.id === dp.fullPath || s.path === dp.fullPath || s.name.toLowerCase() === dp.name.toLowerCase()
+            s => s.id === dp.fullPath || s.path === dp.fullPath || (s.name && dp.name && s.name.toLowerCase() === dp.name.toLowerCase())
           );
 
           if (existing) {
@@ -1084,6 +1084,23 @@ export const useStore = create<AppState>()(
               isArchived: dp.isArchived || false,
               archivedAt: dp.archivedAt,
             });
+          }
+        }
+
+        // Avoid triggering unnecessary re-renders & localStorage writes if studies haven't changed
+        if (currentStudies.length === merged.length) {
+          const isIdentical = currentStudies.every((cs, idx) => {
+            const m = merged[idx];
+            return (
+              cs.id === m.id &&
+              cs.name === m.name &&
+              cs.path === m.path &&
+              Boolean(cs.isArchived) === Boolean(m.isArchived) &&
+              cs.archivedAt === m.archivedAt
+            );
+          });
+          if (isIdentical) {
+            return state;
           }
         }
 

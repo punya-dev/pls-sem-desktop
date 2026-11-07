@@ -39,6 +39,12 @@ __pycache__/
 venv/
 backend/venv/
 backend/~/
+backend/build/
+backend/dist/
+
+# Packaging & Sidecar binaries
+src-tauri/binaries/*
+!src-tauri/binaries/.gitkeep
 
 # Reports
 report/

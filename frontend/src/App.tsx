@@ -28,51 +28,9 @@ function App() {
 
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
 
-  // Two-way workspace synchronization with disk (using existing backend API)
+  // Check license status on startup
   useEffect(() => {
-    let isMounted = true;
-
-    const syncWorkspaces = async () => {
-      const state = useStore.getState();
-      const allWorkspaces = [...state.workspaces, ...state.archivedWorkspaces];
-      const targets = allWorkspaces.filter(w => !!w.path);
-      if (targets.length === 0) return;
-
-      await Promise.all(
-        targets.map(async (ws) => {
-          try {
-            const res = await api.openWorkspace(ws.path);
-            if (!isMounted) return;
-            // Existing backend returns 'Not a valid workspace' when the folder or workspace.json was deleted
-            if (res?.error === 'Not a valid workspace') {
-              console.log(`Pruning workspace missing on disk: ${ws.name} (${ws.path})`);
-              state.deleteWorkspace(ws.id);
-            }
-          } catch {
-            // If backend is offline or unreachable, do not prune
-          }
-        })
-      );
-    };
-
-    // Check on startup
-    syncWorkspaces();
     useStore.getState().loadLicenseStatus();
-
-    // Check when window regains focus (user deleted folder in Finder/Terminal and clicked back to app)
-    const handleFocus = () => {
-      syncWorkspaces();
-    };
-    window.addEventListener('focus', handleFocus);
-
-    // Periodic safety check every 60 seconds
-    const interval = setInterval(syncWorkspaces, 60000);
-
-    return () => {
-      isMounted = false;
-      window.removeEventListener('focus', handleFocus);
-      clearInterval(interval);
-    };
   }, []);
 
   // Apply theme & accent preference to document

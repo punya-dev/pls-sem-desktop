@@ -95,15 +95,15 @@ export async function promptOpenWorkspaceFolder(targetType: 'folder' | 'zip' = '
             isArchived: s.isArchived || false,
             archivedAt: s.archivedAt,
           });
-          try {
-            const dRes = await api.loadProjectData(s.path);
+          // Load dataset in the background without blocking workspace open
+          api.loadProjectData(s.path).then((dRes) => {
             if (dRes?.rows && dRes?.columns) {
               const parsed = processData(dRes.dataset_name || s.name, dRes.columns, dRes.rows);
-              state.setStudyDataset(s.id, parsed);
+              useStore.getState().setStudyDataset(s.id, parsed);
             }
-          } catch (e) {
+          }).catch((e) => {
             console.warn('Could not load data for study', s.name, e);
-          }
+          });
         }
         state.setActiveStudy(res.studies[0].id);
       }
@@ -137,6 +137,7 @@ export async function promptOpenWorkspaceFolder(targetType: 'folder' | 'zip' = '
       const wsName = detection.name || selectedPath.replace(/[/\\]+$/, '').split(/[/\\]/).filter(Boolean).pop() || 'Workspace';
       const state = useStore.getState();
       const existing = state.workspaces.find(w => w.path === selectedPath);
+      const wsId = existing ? existing.id : selectedPath;
       if (!existing) {
         state.addWorkspace({
           id: selectedPath,
@@ -144,11 +145,29 @@ export async function promptOpenWorkspaceFolder(targetType: 'folder' | 'zip' = '
           path: selectedPath,
         });
       }
-      state.setActiveWorkspace(selectedPath);
+      if (res?.workspace) {
+        const allProjects = [
+          ...(res.workspace.projects || []).map((p: any) => ({
+            name: p.name,
+            path: p.path,
+            fullPath: p.path.startsWith('/') ? p.path : `${selectedPath}/${p.path}`,
+            isArchived: false,
+          })),
+          ...(res.workspace.archived_projects || []).map((p: any) => ({
+            name: p.name,
+            path: p.path,
+            fullPath: p.path.startsWith('/') ? p.path : `${selectedPath}/${p.path}`,
+            isArchived: true,
+            archivedAt: p.archived_at,
+          })),
+        ];
+        state.syncWorkspaceStudies(wsId, allProjects);
+      }
+      state.setActiveWorkspace(wsId);
       state.openTab({
         type: 'workspace',
         title: wsName,
-        workspaceId: selectedPath,
+        workspaceId: wsId,
       });
       return;
     }
@@ -182,15 +201,15 @@ export async function promptOpenWorkspaceFolder(targetType: 'folder' | 'zip' = '
             path: s.path,
             createdAt: s.createdAt,
           });
-          try {
-            const dRes = await api.loadProjectData(s.path);
+          // Load dataset in the background without blocking workspace open
+          api.loadProjectData(s.path).then((dRes) => {
             if (dRes?.rows && dRes?.columns) {
               const parsed = processData(dRes.dataset_name || s.name, dRes.columns, dRes.rows);
-              state.setStudyDataset(s.id, parsed);
+              useStore.getState().setStudyDataset(s.id, parsed);
             }
-          } catch (e) {
+          }).catch((e) => {
             console.warn('Could not load data for study', s.name, e);
-          }
+          });
         }
         state.setActiveStudy(res.studies[0].id);
       }

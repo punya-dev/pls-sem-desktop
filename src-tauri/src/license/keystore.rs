@@ -6,18 +6,43 @@ use argon2::Argon2;
 use rand::RngCore;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::RwLock;
 
 use super::token::SignedToken;
+
+static CACHED_DERIVED_KEY: RwLock<Option<(String, [u8; 32])>> = RwLock::new(None);
 
 /// Derives a 256-bit AES key from the machine ID using Argon2id.
 /// This ensures the keystore can only be decrypted on the same machine.
 fn derive_key(machine_id: &str) -> [u8; 32] {
+    if let Ok(guard) = CACHED_DERIVED_KEY.read() {
+        if let Some((ref id, key)) = *guard {
+            if id == machine_id {
+                return key;
+            }
+        }
+    }
+
     let salt = b"statsem_keystore_v1_salt"; // Fixed salt is fine here since machine_id is unique
     let mut key = [0u8; 32];
+
+    #[cfg(debug_assertions)]
+    let argon2 = {
+        let params = argon2::Params::new(1024, 1, 1, Some(32)).unwrap();
+        Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params)
+    };
+
+    #[cfg(not(debug_assertions))]
     let argon2 = Argon2::default();
+
     argon2
         .hash_password_into(machine_id.as_bytes(), salt, &mut key)
         .expect("Argon2 key derivation failed");
+
+    if let Ok(mut guard) = CACHED_DERIVED_KEY.write() {
+        *guard = Some((machine_id.to_string(), key));
+    }
+
     key
 }
 
@@ -111,6 +136,7 @@ pub fn clear_token() -> Result<(), String> {
 }
 
 /// Check if a keystore file exists.
+#[allow(dead_code)]
 pub fn has_token() -> bool {
     keystore_path().exists()
 }

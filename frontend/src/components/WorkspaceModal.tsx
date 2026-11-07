@@ -140,15 +140,15 @@ const WorkspaceModal = ({
               isArchived: s.isArchived || false,
               archivedAt: s.archivedAt,
             });
-            try {
-              const dRes = await api.loadProjectData(s.path);
+            // Load dataset in background so workspace creation finishes immediately
+            api.loadProjectData(s.path).then((dRes) => {
               if (dRes?.rows && dRes?.columns) {
                 const parsed = processData(dRes.dataset_name || s.name, dRes.columns, dRes.rows);
                 setStudyDataset(s.id, parsed);
               }
-            } catch (e) {
+            }).catch((e) => {
               console.warn('Could not load data for study', s.name, e);
-            }
+            });
           }
           if (importRes.studies.length > 0) {
             setActiveStudy(importRes.studies[0].id);
