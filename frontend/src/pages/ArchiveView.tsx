@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useStore, getStudyDatasets } from '../store';
 import AppSidebar from '../components/AppSidebar';
-import { formatModelType } from './Dashboard';
+import { formatModelType } from '../utils/modelHelpers';
 
 export const ArchiveView: React.FC = () => {
   const { 

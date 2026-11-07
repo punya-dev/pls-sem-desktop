@@ -1087,6 +1087,23 @@ export const useStore = create<AppState>()(
           }
         }
 
+        // Avoid triggering unnecessary re-renders & localStorage writes if studies haven't changed
+        if (currentStudies.length === merged.length) {
+          const isIdentical = currentStudies.every((cs, idx) => {
+            const m = merged[idx];
+            return (
+              cs.id === m.id &&
+              cs.name === m.name &&
+              cs.path === m.path &&
+              Boolean(cs.isArchived) === Boolean(m.isArchived) &&
+              cs.archivedAt === m.archivedAt
+            );
+          });
+          if (isIdentical) {
+            return state;
+          }
+        }
+
         return {
           studies: [...otherStudies, ...merged]
         };

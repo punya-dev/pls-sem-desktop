@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useStore, getStudyDatasets, type Study } from '../store';
 import WorkspaceModal from '../components/WorkspaceModal';
@@ -10,15 +10,7 @@ import { parseDatasetFile } from '../utils/dataset-parser';
 import type { ParsedDataset } from '../utils/dataset-parser';
 import { api } from '../utils/api';
 import AppSidebar from '../components/AppSidebar';
-
-export const formatModelType = (type?: string): string => {
-  if (!type) return 'PLS-SEM';
-  const clean = type.trim().toLowerCase().replace(/[-_\s]+/g, '');
-  if (clean === 'pls' || clean === 'plssem') return 'PLS-SEM';
-  if (clean === 'cbsem' || clean === 'cb') return 'CB-SEM';
-  if (clean === 'regression') return 'Regression';
-  return type.toUpperCase();
-};
+import { formatModelType } from '../utils/modelHelpers';
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -38,6 +30,7 @@ const Dashboard = () => {
   } = useStore();
 
   const loadedSnapshotsRef = useRef<Set<string>>(new Set());
+  const lastSyncedWorkspacePathRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!activeWorkspaceId && workspaces.length > 0) {
@@ -50,6 +43,10 @@ const Dashboard = () => {
     if (!activeWorkspaceId) return;
     const ws = workspaces.find(w => w.id === activeWorkspaceId);
     if (ws?.path) {
+      if (lastSyncedWorkspacePathRef.current === ws.path) {
+        return;
+      }
+      lastSyncedWorkspacePathRef.current = ws.path;
       api.openWorkspace(ws.path).then(res => {
         if (res?.workspace && Array.isArray(res.workspace.projects)) {
           const allProjects = [
@@ -72,22 +69,6 @@ const Dashboard = () => {
       }).catch(() => {});
     }
   }, [activeWorkspaceId, workspaces, syncWorkspaceStudies]);
-
-  // Load snapshots once per study without re-triggering loops
-  useEffect(() => {
-    if (!activeWorkspaceId) return;
-    const wsStudies = studies.filter(s => s.workspaceId === activeWorkspaceId);
-    wsStudies.forEach(study => {
-      if (study.path && !loadedSnapshotsRef.current.has(study.path)) {
-        loadedSnapshotsRef.current.add(study.path);
-        api.listSnapshots(study.path).then(snaps => {
-          if (Array.isArray(snaps)) {
-            setStudySnapshots(study.path, snaps);
-          }
-        }).catch(() => {});
-      }
-    });
-  }, [activeWorkspaceId, studies, setStudySnapshots]);
 
   const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = useState(false);
   const [isWorkspaceSearchOpen, setIsWorkspaceSearchOpen] = useState(false);
@@ -144,14 +125,28 @@ const Dashboard = () => {
     }
   };
 
-  const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId);
-  const allWorkspaceStudies = studies.filter(s => s.workspaceId === activeWorkspaceId);
-  const activeStudies = allWorkspaceStudies.filter(s => !s.isArchived);
-  const archivedStudies = allWorkspaceStudies.filter(s => s.isArchived);
+  const activeWorkspace = useMemo(() => workspaces.find(w => w.id === activeWorkspaceId), [workspaces, activeWorkspaceId]);
+  
+  const { activeStudies, archivedStudies } = useMemo(() => {
+    const all = studies.filter(s => s.workspaceId === activeWorkspaceId);
+    return {
+      activeStudies: all.filter(s => !s.isArchived),
+      archivedStudies: all.filter(s => s.isArchived),
+    };
+  }, [studies, activeWorkspaceId]);
 
   const displayedStudies = workspaceSubTab === 'studies' ? activeStudies : archivedStudies;
-  const filteredWorkspaces = workspaces.filter(workspace => workspace.name.toLocaleLowerCase().includes(workspaceQuery.toLocaleLowerCase()));
-  const filteredStudies = displayedStudies.filter(study => study.name.toLocaleLowerCase().includes(studyQuery.toLocaleLowerCase()));
+  const filteredWorkspaces = useMemo(() => {
+    const q = workspaceQuery.trim().toLocaleLowerCase();
+    if (!q) return workspaces;
+    return workspaces.filter(workspace => workspace.name.toLocaleLowerCase().includes(q));
+  }, [workspaces, workspaceQuery]);
+
+  const filteredStudies = useMemo(() => {
+    const q = studyQuery.trim().toLocaleLowerCase();
+    if (!q) return displayedStudies;
+    return displayedStudies.filter(study => study.name.toLocaleLowerCase().includes(q));
+  }, [displayedStudies, studyQuery]);
 
   // Sorting state for studies
   type SortField = 'name' | 'modified' | 'created';
@@ -173,43 +168,45 @@ const Dashboard = () => {
     }
   }, [isSortMenuOpen]);
 
-  const sortedStudies = [...filteredStudies].sort((a, b) => {
-    if (workspaceSubTab === 'archive') {
-      const aTime = a.archivedAt ? new Date(a.archivedAt).getTime() : 0;
-      const bTime = b.archivedAt ? new Date(b.archivedAt).getTime() : 0;
-      if (aTime && bTime && aTime !== bTime) {
-        return sortOrder === 'asc' ? aTime - bTime : bTime - aTime;
+  const sortedStudies = useMemo(() => {
+    return [...filteredStudies].sort((a, b) => {
+      if (workspaceSubTab === 'archive') {
+        const aTime = a.archivedAt ? new Date(a.archivedAt).getTime() : 0;
+        const bTime = b.archivedAt ? new Date(b.archivedAt).getTime() : 0;
+        if (aTime && bTime && aTime !== bTime) {
+          return sortOrder === 'asc' ? aTime - bTime : bTime - aTime;
+        }
       }
-    }
-    const aPinned = Boolean(a.isPinned);
-    const bPinned = Boolean(b.isPinned);
-    if (aPinned !== bPinned) {
-      return aPinned ? -1 : 1;
-    }
-    let comparison = 0;
-    if (sortField === 'name') {
-      comparison = a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
-    } else if (sortField === 'created') {
-      const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-      const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      comparison = aTime - bTime;
-      if (comparison === 0) {
-        comparison = a.name.localeCompare(b.name);
+      const aPinned = Boolean(a.isPinned);
+      const bPinned = Boolean(b.isPinned);
+      if (aPinned !== bPinned) {
+        return aPinned ? -1 : 1;
       }
-    } else {
-      // modified
-      const aDate = Date.parse(a.lastModified);
-      const bDate = Date.parse(b.lastModified);
-      if (!isNaN(aDate) && !isNaN(bDate)) {
-        comparison = aDate - bDate;
-      } else {
+      let comparison = 0;
+      if (sortField === 'name') {
+        comparison = a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+      } else if (sortField === 'created') {
         const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
         const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
         comparison = aTime - bTime;
+        if (comparison === 0) {
+          comparison = a.name.localeCompare(b.name);
+        }
+      } else {
+        // modified
+        const aDate = Date.parse(a.lastModified);
+        const bDate = Date.parse(b.lastModified);
+        if (!isNaN(aDate) && !isNaN(bDate)) {
+          comparison = aDate - bDate;
+        } else {
+          const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          comparison = aTime - bTime;
+        }
       }
-    }
-    return sortOrder === 'asc' ? comparison : -comparison;
-  });
+      return sortOrder === 'asc' ? comparison : -comparison;
+    });
+  }, [filteredStudies, workspaceSubTab, sortField, sortOrder]);
 
   // Inline rename state for study, dataset, and model
   const [editingStudyId, setEditingStudyId] = useState<string | null>(null);
@@ -448,6 +445,15 @@ const Dashboard = () => {
       newExpanded.delete(studyId);
     } else {
       newExpanded.add(studyId);
+      const study = studies.find(s => s.id === studyId);
+      if (study?.path && !loadedSnapshotsRef.current.has(study.path)) {
+        loadedSnapshotsRef.current.add(study.path);
+        api.listSnapshots(study.path).then(snaps => {
+          if (Array.isArray(snaps)) {
+            setStudySnapshots(study.path, snaps);
+          }
+        }).catch(() => {});
+      }
     }
     setExpandedStudies(newExpanded);
   };
