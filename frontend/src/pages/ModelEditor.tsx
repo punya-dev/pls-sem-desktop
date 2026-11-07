@@ -3070,16 +3070,11 @@ const ModelEditor = () => {
                 <div className="tb-divider" style={{width: '100%', height: '1px', margin: '6px 0 8px', opacity: 0.2, background: 'var(--color-border-subtle, #cbd5e1)'}} />
 
                 <div>
-                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px'}}>
-                    <span style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)'}}>
-                      Thickness
-                    </span>
-                    <span style={{fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--color-text-primary)'}}>
-                      {edgeStrokeWidth}px
-                    </span>
+                  <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '6px'}}>
+                    Thickness
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center' }}>
                     <div
                       style={{
                         flex: 1,
@@ -3180,33 +3175,6 @@ const ModelEditor = () => {
                         +
                       </button>
                     </div>
-                  </div>
-
-                  <div style={{display: 'flex', gap: '4px', alignItems: 'center'}}>
-                    {[1, 1.5, 2, 3, 4].map((w) => (
-                      <button
-                        key={w}
-                        type="button"
-                        style={{
-                          flex: 1,
-                          height: '22px',
-                          border: edgeStrokeWidth === w ? '1px solid var(--color-accent)' : '1px solid var(--color-border-subtle, #cbd5e1)',
-                          background: edgeStrokeWidth === w ? 'var(--color-accent-subtle)' : 'var(--color-bg-base)',
-                          color: edgeStrokeWidth === w ? 'var(--color-accent)' : 'var(--color-text-primary)',
-                          borderRadius: '4px',
-                          fontSize: '10px',
-                          fontWeight: edgeStrokeWidth === w ? 600 : 400,
-                          cursor: 'pointer',
-                          padding: 0
-                        }}
-                        onClick={() => {
-                          setEdgeStrokeWidth(w);
-                          document.dispatchEvent(new CustomEvent('edge-stroke-width-change', { detail: { width: w } }));
-                        }}
-                      >
-                        {w}
-                      </button>
-                    ))}
                   </div>
                 </div>
               </div>
@@ -3344,16 +3312,11 @@ const ModelEditor = () => {
                 }}
               >
                 <div style={{marginBottom: '10px'}}>
-                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px'}}>
-                    <span style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)'}}>
-                      Thickness
-                    </span>
-                    <span style={{fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600, color: 'var(--color-text-primary)'}}>
-                      {edgeStrokeWidth}px
-                    </span>
+                  <div style={{fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-hint)', marginBottom: '6px'}}>
+                    Thickness
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center' }}>
                     <div
                       style={{
                         flex: 1,
@@ -3454,33 +3417,6 @@ const ModelEditor = () => {
                         +
                       </button>
                     </div>
-                  </div>
-
-                  <div style={{display: 'flex', gap: '4px', alignItems: 'center'}}>
-                    {[1, 1.5, 2, 3, 4].map((w) => (
-                      <button
-                        key={w}
-                        type="button"
-                        style={{
-                          flex: 1,
-                          height: '22px',
-                          border: edgeStrokeWidth === w ? '1px solid var(--color-accent)' : '1px solid var(--color-border-subtle, #cbd5e1)',
-                          background: edgeStrokeWidth === w ? 'var(--color-accent-subtle)' : 'var(--color-bg-base)',
-                          color: edgeStrokeWidth === w ? 'var(--color-accent)' : 'var(--color-text-primary)',
-                          borderRadius: '4px',
-                          fontSize: '10px',
-                          fontWeight: edgeStrokeWidth === w ? 600 : 400,
-                          cursor: 'pointer',
-                          padding: 0
-                        }}
-                        onClick={() => {
-                          setEdgeStrokeWidth(w);
-                          document.dispatchEvent(new CustomEvent('edge-stroke-width-change', { detail: { width: w } }));
-                        }}
-                      >
-                        {w}
-                      </button>
-                    ))}
                   </div>
                 </div>
 
