@@ -137,6 +137,7 @@ export async function promptOpenWorkspaceFolder(targetType: 'folder' | 'zip' = '
       const wsName = detection.name || selectedPath.replace(/[/\\]+$/, '').split(/[/\\]/).filter(Boolean).pop() || 'Workspace';
       const state = useStore.getState();
       const existing = state.workspaces.find(w => w.path === selectedPath);
+      const wsId = existing ? existing.id : selectedPath;
       if (!existing) {
         state.addWorkspace({
           id: selectedPath,
@@ -160,13 +161,13 @@ export async function promptOpenWorkspaceFolder(targetType: 'folder' | 'zip' = '
             archivedAt: p.archived_at,
           })),
         ];
-        state.syncWorkspaceStudies(selectedPath, allProjects);
+        state.syncWorkspaceStudies(wsId, allProjects);
       }
-      state.setActiveWorkspace(selectedPath);
+      state.setActiveWorkspace(wsId);
       state.openTab({
         type: 'workspace',
         title: wsName,
-        workspaceId: selectedPath,
+        workspaceId: wsId,
       });
       return;
     }

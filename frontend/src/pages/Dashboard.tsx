@@ -22,7 +22,7 @@ const Dashboard = () => {
     deleteWorkspace, deleteStudy, deleteModel, deleteDataset, requestDelete,
     archiveStudy, restoreStudy,
     renameStudy, duplicateStudy, renameModel, duplicateModel, openTab,
-    togglePinStudy, syncWorkspaceStudies,
+    togglePinStudy,
     snapshotsByStudy, setStudySnapshots, removeStudySnapshot,
     lastUsedDatasetByStudy,
     setStudyLastDatasetId,
@@ -30,45 +30,12 @@ const Dashboard = () => {
   } = useStore();
 
   const loadedSnapshotsRef = useRef<Set<string>>(new Set());
-  const lastSyncedWorkspacePathRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!activeWorkspaceId && workspaces.length > 0) {
       setActiveWorkspace(workspaces[0].id);
     }
   }, [activeWorkspaceId, workspaces, setActiveWorkspace]);
-
-  // Sync workspace studies from disk asynchronously when active workspace changes
-  useEffect(() => {
-    if (!activeWorkspaceId) return;
-    const ws = workspaces.find(w => w.id === activeWorkspaceId);
-    if (ws?.path) {
-      if (lastSyncedWorkspacePathRef.current === ws.path) {
-        return;
-      }
-      lastSyncedWorkspacePathRef.current = ws.path;
-      api.openWorkspace(ws.path).then(res => {
-        if (res?.workspace && Array.isArray(res.workspace.projects)) {
-          const allProjects = [
-            ...(res.workspace.projects || []).map((p: any) => ({
-              name: p.name,
-              path: p.path,
-              fullPath: p.path.startsWith('/') ? p.path : `${ws.path}/${p.path}`,
-              isArchived: false,
-            })),
-            ...(res.workspace.archived_projects || []).map((p: any) => ({
-              name: p.name,
-              path: p.path,
-              fullPath: p.path.startsWith('/') ? p.path : `${ws.path}/${p.path}`,
-              isArchived: true,
-              archivedAt: p.archived_at,
-            })),
-          ];
-          syncWorkspaceStudies(ws.id, allProjects);
-        }
-      }).catch(() => {});
-    }
-  }, [activeWorkspaceId, workspaces, syncWorkspaceStudies]);
 
   const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = useState(false);
   const [isWorkspaceSearchOpen, setIsWorkspaceSearchOpen] = useState(false);

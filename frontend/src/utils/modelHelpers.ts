@@ -6,3 +6,4 @@ export const formatModelType = (type?: string): string => {
   if (clean === 'regression') return 'Regression';
   return type.toUpperCase();
 };
+

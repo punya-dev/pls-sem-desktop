@@ -33,8 +33,13 @@ pub fn start_backend_if_needed(app: &AppHandle) {
     let mut found_path = None;
     for path in candidate_paths {
         if path.exists() && path.is_file() {
-            found_path = Some(path);
-            break;
+            if let Ok(meta) = path.metadata() {
+                // Must be a real compiled binary (> 1 KB), not an empty placeholder stub
+                if meta.len() > 1024 {
+                    found_path = Some(path);
+                    break;
+                }
+            }
         }
     }
 

@@ -26,8 +26,13 @@ export const TitleBar: React.FC = () => {
       try {
         const fs = await appWindow.isFullscreen();
         if (!isCancelled) {
-          setIsFullscreen(fs);
-          document.body.dataset.windowFullscreen = fs ? 'true' : 'false';
+          setIsFullscreen(prev => {
+            if (prev !== fs) {
+              document.body.dataset.windowFullscreen = fs ? 'true' : 'false';
+              return fs;
+            }
+            return prev;
+          });
         }
       } catch (err) {
         console.warn('Fullscreen check error:', err);
@@ -36,15 +41,9 @@ export const TitleBar: React.FC = () => {
 
     const triggerCheck = () => {
       void checkFullscreen();
-      setTimeout(checkFullscreen, 50);
-      setTimeout(checkFullscreen, 150);
-      setTimeout(checkFullscreen, 300);
-      setTimeout(checkFullscreen, 600);
     };
 
     triggerCheck();
-
-    const interval = setInterval(checkFullscreen, 200);
 
     let unlistenResize: (() => void) | undefined;
     let unlistenFocus: (() => void) | undefined;
@@ -65,7 +64,6 @@ export const TitleBar: React.FC = () => {
 
     return () => {
       isCancelled = true;
-      clearInterval(interval);
       unlistenResize?.();
       unlistenFocus?.();
       window.removeEventListener('resize', triggerCheck);
