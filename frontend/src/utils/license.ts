@@ -35,6 +35,24 @@ export async function getLicenseStatus(): Promise<LicenseStatus> {
   try {
     return await invoke<LicenseStatus>('get_license_status');
   } catch (err) {
+    if (import.meta.env.DEV || typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) {
+      // In dev or web environment without Tauri, provide a mock active dev license
+      return {
+        is_valid: true,
+        tier: 'developer',
+        mode: 'node_locked',
+        licensee: 'Developer (Dev Mode)',
+        email: 'dev@statsem.org',
+        license_key: 'DEV-LOCAL-MODE',
+        expires_at: '2099-12-31T23:59:59Z',
+        days_remaining: 26000,
+        features: ['pls_sem_core', 'advanced_bootstrap', 'batch_export', 'headless_cli', 'unlimited_models', 'priority_support'],
+        machine_id: 'dev-machine-id',
+        max_machines: 99,
+        max_seats: 99,
+        error: null,
+      };
+    }
     console.error('[license] Failed to get status:', err);
     return {
       is_valid: false,
@@ -104,6 +122,7 @@ export async function devMintToken(
 // ─── License Token Cache (for API calls) ───────────────────────────────
 
 let _cachedTokenString: string | null = null;
+let _hasAttemptedTokenFetch = false;
 
 /**
  * Get the cached license token string for API header injection.
@@ -111,20 +130,24 @@ let _cachedTokenString: string | null = null;
  */
 export async function getCachedTokenString(): Promise<string | null> {
   if (_cachedTokenString) return _cachedTokenString;
+  if (_hasAttemptedTokenFetch) return null;
   
+  _hasAttemptedTokenFetch = true;
   try {
     _cachedTokenString = await invoke<string>('export_license_token');
     return _cachedTokenString;
   } catch {
+    _cachedTokenString = null;
     return null;
   }
 }
 
 /**
- * Clear the cached token (call after deactivation).
+ * Clear the cached token (call after activation/deactivation).
  */
 export function clearCachedToken(): void {
   _cachedTokenString = null;
+  _hasAttemptedTokenFetch = false;
 }
 
 /**

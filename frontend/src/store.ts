@@ -1060,7 +1060,7 @@ export const useStore = create<AppState>()(
           seenKeys.add(key);
 
           const existing = currentStudies.find(
-            s => s.id === dp.fullPath || s.path === dp.fullPath || s.name.toLowerCase() === dp.name.toLowerCase()
+            s => s.id === dp.fullPath || s.path === dp.fullPath || (s.name && dp.name && s.name.toLowerCase() === dp.name.toLowerCase())
           );
 
           if (existing) {

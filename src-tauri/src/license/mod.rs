@@ -162,42 +162,35 @@ pub fn get_license_status() -> Result<LicenseStatus, String> {
         }
     }
 
-    // In dev mode, auto-generate a license if none exists
-    if cfg!(debug_assertions) && !keystore::has_token() {
+    // Try to load from keystore
+    if let Ok(Some(signed_token)) = keystore::load_token(&machine_id) {
+        if let Ok(vk_b64) = get_verifying_key_b64() {
+            if let Ok(vk) = decode_verifying_key(&vk_b64) {
+                if let Ok(payload) = signed_token.verify(&vk) {
+                    if validate_payload(&payload, &machine_id).is_ok() {
+                        // Cache the valid payload
+                        if let Ok(mut cache) = LICENSE_CACHE.lock() {
+                            *cache = Some(payload.clone());
+                        }
+                        return Ok(LicenseStatus::from_payload(&payload, &machine_id));
+                    }
+                }
+            }
+        }
+    }
+
+    // In dev mode, auto-generate a license if none exists or verification failed
+    if cfg!(debug_assertions) {
         log::info!("Dev mode: auto-generating developer license");
         if let Ok(status) = auto_activate_dev(&machine_id) {
             return Ok(status);
         }
     }
 
-    // Try to load from keystore
-    match keystore::load_token(&machine_id) {
-        Ok(Some(signed_token)) => {
-            let vk_b64 = get_verifying_key_b64()?;
-            let vk = decode_verifying_key(&vk_b64)?;
-
-            match signed_token.verify(&vk) {
-                Ok(payload) => {
-                    match validate_payload(&payload, &machine_id) {
-                        Ok(()) => {
-                            // Cache the valid payload
-                            if let Ok(mut cache) = LICENSE_CACHE.lock() {
-                                *cache = Some(payload.clone());
-                            }
-                            Ok(LicenseStatus::from_payload(&payload, &machine_id))
-                        }
-                        Err(e) => Ok(LicenseStatus::invalid(&machine_id, &e)),
-                    }
-                }
-                Err(e) => Ok(LicenseStatus::invalid(&machine_id, &e)),
-            }
-        }
-        Ok(None) => Ok(LicenseStatus::invalid(
-            &machine_id,
-            "No license activated. Please enter your license key.",
-        )),
-        Err(e) => Ok(LicenseStatus::invalid(&machine_id, &e)),
-    }
+    Ok(LicenseStatus::invalid(
+        &machine_id,
+        "No license activated. Please enter your license key.",
+    ))
 }
 
 /// Activate a license using a token string.

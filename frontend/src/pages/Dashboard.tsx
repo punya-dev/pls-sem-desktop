@@ -106,13 +106,13 @@ const Dashboard = () => {
   const filteredWorkspaces = useMemo(() => {
     const q = workspaceQuery.trim().toLocaleLowerCase();
     if (!q) return workspaces;
-    return workspaces.filter(workspace => workspace.name.toLocaleLowerCase().includes(q));
+    return workspaces.filter(workspace => (workspace.name || '').toLocaleLowerCase().includes(q));
   }, [workspaces, workspaceQuery]);
 
   const filteredStudies = useMemo(() => {
     const q = studyQuery.trim().toLocaleLowerCase();
     if (!q) return displayedStudies;
-    return displayedStudies.filter(study => study.name.toLocaleLowerCase().includes(q));
+    return displayedStudies.filter(study => (study.name || '').toLocaleLowerCase().includes(q));
   }, [displayedStudies, studyQuery]);
 
   // Sorting state for studies
@@ -151,13 +151,13 @@ const Dashboard = () => {
       }
       let comparison = 0;
       if (sortField === 'name') {
-        comparison = a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+        comparison = (a.name || '').localeCompare(b.name || '', undefined, { numeric: true, sensitivity: 'base' });
       } else if (sortField === 'created') {
         const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
         const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
         comparison = aTime - bTime;
         if (comparison === 0) {
-          comparison = a.name.localeCompare(b.name);
+          comparison = (a.name || '').localeCompare(b.name || '');
         }
       } else {
         // modified

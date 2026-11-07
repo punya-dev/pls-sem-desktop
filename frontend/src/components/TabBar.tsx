@@ -137,13 +137,13 @@ export const TabBar: React.FC = () => {
 
   const filteredWorkspaces = workspaces
     .filter((ws) =>
-      ws.name.toLowerCase().includes(searchQuery.toLowerCase().trim())
+      (ws.name || '').toLowerCase().includes(searchQuery.toLowerCase().trim())
     )
     .sort((a, b) => {
       const aPinned = Boolean(a.isPinned);
       const bPinned = Boolean(b.isPinned);
       if (aPinned !== bPinned) return aPinned ? -1 : 1;
-      return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+      return (a.name || '').localeCompare(b.name || '', undefined, { numeric: true, sensitivity: 'base' });
     });
 
   // ─── Tab Context Menu State ───────────────────────────────────────────────
