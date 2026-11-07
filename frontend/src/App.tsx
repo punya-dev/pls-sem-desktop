@@ -59,9 +59,14 @@ function App() {
     syncWorkspaces();
     useStore.getState().loadLicenseStatus();
 
-    // Check when window regains focus (user deleted folder in Finder/Terminal and clicked back to app)
+    // Check when window regains focus (throttled to at most once every 30s)
+    let lastSyncTime = Date.now();
     const handleFocus = () => {
-      syncWorkspaces();
+      const now = Date.now();
+      if (now - lastSyncTime > 30000) {
+        lastSyncTime = now;
+        syncWorkspaces();
+      }
     };
     window.addEventListener('focus', handleFocus);
 

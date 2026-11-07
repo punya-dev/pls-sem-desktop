@@ -45,8 +45,19 @@ export const DatasetView: React.FC = () => {
   const [saveToast, setSaveToast] = useState<string | null>(null);
 
   useEffect(() => {
-    if (activeDataset) setDataset(activeDataset);
-  }, [activeDataset]);
+    if (activeDataset) {
+      setDataset(activeDataset);
+    } else if (studyDatasets.length === 0 && activeStudy?.path && currentStudyId) {
+      api.loadProjectData(activeStudy.path).then((dataRes) => {
+        if (dataRes && Array.isArray(dataRes.columns) && Array.isArray(dataRes.rows) && dataRes.rows.length > 0) {
+          const datasetName = dataRes.dataset_name || `${activeStudy.name} Data`;
+          const parsed = processData(datasetName, dataRes.columns, dataRes.rows);
+          parsed.id = (dataRes as any).dataset_id || dataRes.id || `ds_${Date.now()}`;
+          setStudyDataset(currentStudyId, parsed);
+        }
+      }).catch(err => console.warn('Could not load dataset:', err));
+    }
+  }, [activeDataset, studyDatasets.length, activeStudy?.path, activeStudy?.name, currentStudyId, setStudyDataset]);
 
   const detectedMarker = useMemo(() => {
     if (!dataset?.rows) return '';

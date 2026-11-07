@@ -1382,7 +1382,6 @@ export const useStore = create<AppState>()(
         archivedWorkspaces: state.archivedWorkspaces,
         studies: state.studies,
         models: state.models,
-        datasetsByStudy: state.datasetsByStudy,
         lastUsedDatasetByStudy: state.lastUsedDatasetByStudy,
         activeWorkspaceId: state.activeWorkspaceId,
         theme: state.theme,

@@ -30,24 +30,56 @@ const Dashboard = () => {
     deleteWorkspace, deleteStudy, deleteModel, deleteDataset, requestDelete,
     archiveStudy, restoreStudy,
     renameStudy, duplicateStudy, renameModel, duplicateModel, openTab,
-    togglePinStudy,
+    togglePinStudy, syncWorkspaceStudies,
     snapshotsByStudy, setStudySnapshots, removeStudySnapshot,
     lastUsedDatasetByStudy,
     setStudyLastDatasetId,
     isSidebarCollapsed, toggleSidebar
   } = useStore();
-  
+
+  const loadedSnapshotsRef = useRef<Set<string>>(new Set());
+
   useEffect(() => {
     if (!activeWorkspaceId && workspaces.length > 0) {
       setActiveWorkspace(workspaces[0].id);
     }
   }, [activeWorkspaceId, workspaces, setActiveWorkspace]);
 
+  // Sync workspace studies from disk asynchronously when active workspace changes
+  useEffect(() => {
+    if (!activeWorkspaceId) return;
+    const ws = workspaces.find(w => w.id === activeWorkspaceId);
+    if (ws?.path) {
+      api.openWorkspace(ws.path).then(res => {
+        if (res?.workspace && Array.isArray(res.workspace.projects)) {
+          const allProjects = [
+            ...(res.workspace.projects || []).map((p: any) => ({
+              name: p.name,
+              path: p.path,
+              fullPath: p.path.startsWith('/') ? p.path : `${ws.path}/${p.path}`,
+              isArchived: false,
+            })),
+            ...(res.workspace.archived_projects || []).map((p: any) => ({
+              name: p.name,
+              path: p.path,
+              fullPath: p.path.startsWith('/') ? p.path : `${ws.path}/${p.path}`,
+              isArchived: true,
+              archivedAt: p.archived_at,
+            })),
+          ];
+          syncWorkspaceStudies(ws.id, allProjects);
+        }
+      }).catch(() => {});
+    }
+  }, [activeWorkspaceId, workspaces, syncWorkspaceStudies]);
+
+  // Load snapshots once per study without re-triggering loops
   useEffect(() => {
     if (!activeWorkspaceId) return;
     const wsStudies = studies.filter(s => s.workspaceId === activeWorkspaceId);
     wsStudies.forEach(study => {
-      if (study.path && !snapshotsByStudy[study.path]) {
+      if (study.path && !loadedSnapshotsRef.current.has(study.path)) {
+        loadedSnapshotsRef.current.add(study.path);
         api.listSnapshots(study.path).then(snaps => {
           if (Array.isArray(snaps)) {
             setStudySnapshots(study.path, snaps);
@@ -55,7 +87,7 @@ const Dashboard = () => {
         }).catch(() => {});
       }
     });
-  }, [activeWorkspaceId, studies, snapshotsByStudy, setStudySnapshots]);
+  }, [activeWorkspaceId, studies, setStudySnapshots]);
 
   const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = useState(false);
   const [isWorkspaceSearchOpen, setIsWorkspaceSearchOpen] = useState(false);
